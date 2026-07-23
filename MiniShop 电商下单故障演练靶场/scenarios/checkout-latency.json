@@ -1,0 +1,115 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "checkout-latency",
+  "title": "Checkout self latency exceeds the alert threshold",
+  "description": "Inject deterministic latency inside checkout-service while downstream services continue to succeed.",
+  "service_name": "checkout-service",
+  "fault_type": "latency",
+  "injection": {
+    "method": "POST",
+    "path": "/faults/checkout-latency",
+    "json_body": {
+      "delay_ms": 1200,
+      "duration_seconds": 300,
+      "created_by": "scenario-runner"
+    },
+    "expected_status": 200,
+    "service_name": "checkout-service",
+    "fault_type": "latency"
+  },
+  "trigger": {
+    "method": "POST",
+    "path": "/checkout",
+    "json_body": {
+      "user_id": "scenario-checkout-user",
+      "items": [
+        {
+          "sku": "sku-checkout-001",
+          "quantity": 1
+        }
+      ],
+      "idempotency_key": "scenario-checkout-latency"
+    },
+    "expected_status": 200
+  },
+  "cleanup": {
+    "method": "POST",
+    "path": "/faults/reset",
+    "json_body": {},
+    "expected_status": 200
+  },
+  "alert_mapping": {
+    "source": "alertmanager",
+    "alert_name": "MiniShopCheckoutHighLatency",
+    "source_severity": "P1",
+    "platform_severity": "CRITICAL",
+    "service_name": "checkout-service",
+    "summary": "checkout-service p95 latency is higher than 1s",
+    "fingerprint": "minishop:checkout-service:high-latency",
+    "external_event_id_prefix": "minishop-checkout-latency"
+  },
+  "expected_signals": [
+    {
+      "evidence_id": "ev-checkout-fault-enabled",
+      "source": "prometheus",
+      "locator": "minishop_fault_enabled{service_name=\"checkout-service\",fault_type=\"latency\"}",
+      "assertion": "The gauge equals 1 during the injected fault window."
+    },
+    {
+      "evidence_id": "ev-checkout-latency-histogram",
+      "source": "prometheus",
+      "locator": "histogram_quantile(0.95, sum(rate(minishop_http_request_duration_seconds_bucket{service_name=\"checkout-service\",endpoint=\"/checkout\"}[5m])) by (le))",
+      "assertion": "The checkout p95 duration exceeds one second while the scenario is active."
+    },
+    {
+      "evidence_id": "ev-checkout-success-counter",
+      "source": "prometheus",
+      "locator": "increase(minishop_http_requests_total{service_name=\"checkout-service\",endpoint=\"/checkout\",status_code=\"200\"}[5m])",
+      "assertion": "Successful checkout requests still increase during the latency fault."
+    },
+    {
+      "evidence_id": "ev-checkout-latency-log",
+      "source": "loki",
+      "locator": "{service_name=\"checkout-service\"} | json | endpoint=\"/checkout\" | latency_ms >= 1000",
+      "assertion": "The checkout completion event is successful and has latency_ms of at least 1000 for the trigger trace_id."
+    },
+    {
+      "evidence_id": "ev-checkout-slow-trace",
+      "source": "tempo",
+      "locator": "{ resource.service.name = \"checkout-service\" && span:duration > 1000ms } with (most_recent=true)",
+      "assertion": "The trace contains a checkout.process span longer than one second while its downstream spans remain successful."
+    },
+    {
+      "evidence_id": "ev-checkout-http-success",
+      "source": "http",
+      "locator": "POST /checkout",
+      "assertion": "The trigger returns HTTP 200 and timings_ms.checkout_self_ms is at least 1000."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": {
+      "service_name": "checkout-service",
+      "fault_type": "latency",
+      "category": "injected_checkout_processing_latency",
+      "summary": "The latency fault adds 1200 ms inside checkout-service before downstream calls; inventory and payment still succeed.",
+      "causal_chain": [
+        "The scenario runner enables checkout-service latency with a 1200 ms delay.",
+        "checkout-service waits before invoking inventory-service.",
+        "Inventory reservation, payment, and notification complete successfully.",
+        "The caller receives a successful response whose checkout self time exceeds one second."
+      ],
+      "runbook_path": "runbooks/checkout-high-latency.md"
+    },
+    "required_evidence": [
+      "ev-checkout-fault-enabled",
+      "ev-checkout-latency-histogram",
+      "ev-checkout-latency-log",
+      "ev-checkout-slow-trace"
+    ],
+    "forbidden_claims": [
+      "inventory-service is the source of the latency.",
+      "payment-service is the source of the latency.",
+      "Checkout requests are failing during this scenario."
+    ]
+  }
+}

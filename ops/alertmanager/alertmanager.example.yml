@@ -1,0 +1,81 @@
+global:
+  resolve_timeout: 5m
+
+templates:
+  - /etc/alertmanager/templates/*.tmpl
+
+route:
+  receiver: platform-warning-slack
+  group_by:
+    - alertname
+    - service
+    - job
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - receiver: platform-critical-slack
+      matchers:
+        - team="platform"
+        - severity="critical"
+      group_wait: 10s
+      group_interval: 2m
+      repeat_interval: 30m
+
+    - receiver: platform-warning-slack
+      matchers:
+        - team="platform"
+        - severity="warning"
+      group_wait: 1m
+      group_interval: 10m
+      repeat_interval: 4h
+
+receivers:
+  - name: platform-critical-slack
+    slack_configs:
+      - api_url_file: /run/secrets/alertmanager-slack-critical-url
+        channel: "#devops-oncall"
+        send_resolved: true
+        timeout: 10s
+        title: '{{ template "devops.title" . }}'
+        text: '{{ template "devops.text" . }}'
+        color: '{{ template "devops.color" . }}'
+
+  - name: platform-warning-slack
+    slack_configs:
+      - api_url_file: /run/secrets/alertmanager-slack-warning-url
+        channel: "#devops-alerts"
+        send_resolved: true
+        timeout: 10s
+        title: '{{ template "devops.title" . }}'
+        text: '{{ template "devops.text" . }}'
+        color: '{{ template "devops.color" . }}'
+
+inhibit_rules:
+  # Runtime硬依赖故障时，抑制同一任务的派生Warning，保留Critical根因。
+  - source_matchers:
+      - alertname="DevOpsAgentRuntimeComponentDown"
+    target_matchers:
+      - service="devops-agent-platform"
+      - severity="warning"
+    equal:
+      - job
+      - service
+
+  # Worker停止会直接导致积压和连续失败，优先通知停止根因。
+  - source_matchers:
+      - alertname="DevOpsAgentOutboxWorkerStopped"
+    target_matchers:
+      - alertname=~"DevOpsAgentOutboxBacklogHigh|DevOpsAgentOutboxWorkerRepeatedFailures"
+    equal:
+      - job
+      - service
+
+  # 最老消息超时比普通数量积压更接近用户影响。
+  - source_matchers:
+      - alertname="DevOpsAgentOutboxOldestMessageTooOld"
+    target_matchers:
+      - alertname="DevOpsAgentOutboxBacklogHigh"
+    equal:
+      - job
+      - service

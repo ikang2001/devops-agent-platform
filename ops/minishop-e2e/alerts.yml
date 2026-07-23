@@ -1,0 +1,35 @@
+groups:
+  - name: minishop-e2e
+    rules:
+      - alert: MiniShopCheckoutHighLatency
+        expr: >-
+          histogram_quantile(0.95,
+          sum(rate(minishop_http_request_duration_seconds_bucket{
+          service_name="checkout-service",endpoint="/checkout"}[30s])) by (le)) > 1
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: checkout-service
+        annotations:
+          summary: checkout-service p95 latency is higher than 1s
+
+      - alert: MiniShopPayment5xxSpike
+        expr: increase(minishop_payment_error_total[30s]) > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: payment-service
+        annotations:
+          summary: payment-service 5xx errors are increasing
+
+      - alert: MiniShopInventoryDbTimeout
+        expr: increase(minishop_inventory_db_timeout_total[30s]) > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: inventory-service
+        annotations:
+          summary: inventory-service database timeout detected

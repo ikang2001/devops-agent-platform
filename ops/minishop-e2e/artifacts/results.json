@@ -1,0 +1,194 @@
+{
+  "schema_version": "1.0",
+  "run_id": "20260723T145826",
+  "generated_at": "2026-07-23T14:59:33.953123+00:00",
+  "passed": true,
+  "scenarios": [
+    {
+      "scenario_id": "checkout-latency",
+      "passed": true,
+      "incident_id": "inc_8d16efd0d8de4b71928debea0e070c73",
+      "workflow_run_id": "wfr_365d98656de74d4ca46b58c44e187d19",
+      "workflow_status": "SUCCEEDED",
+      "platform_evidence_types": [
+        "LOG",
+        "METRIC",
+        "RUNBOOK",
+        "TRACE"
+      ],
+      "platform_evidence_passed": true,
+      "invocations_passed": true,
+      "root_cause_passed": true,
+      "forbidden_claims_found": [],
+      "required_evidence_passed": true,
+      "signals": [
+        {
+          "evidence_id": "ev-checkout-fault-enabled",
+          "source": "prometheus",
+          "passed": true,
+          "assertion": "The gauge equals 1 during the injected fault window."
+        },
+        {
+          "evidence_id": "ev-checkout-latency-histogram",
+          "source": "prometheus",
+          "passed": true,
+          "assertion": "The checkout p95 duration exceeds one second while the scenario is active."
+        },
+        {
+          "evidence_id": "ev-checkout-success-counter",
+          "source": "prometheus",
+          "passed": true,
+          "assertion": "Successful checkout requests still increase during the latency fault."
+        },
+        {
+          "evidence_id": "ev-checkout-latency-log",
+          "source": "loki",
+          "passed": true,
+          "assertion": "The checkout completion event is successful and has latency_ms of at least 1000 for the trigger trace_id."
+        },
+        {
+          "evidence_id": "ev-checkout-slow-trace",
+          "source": "tempo",
+          "passed": true,
+          "assertion": "The trace contains a checkout.process span longer than one second while its downstream spans remain successful."
+        },
+        {
+          "evidence_id": "ev-checkout-http-success",
+          "source": "http",
+          "passed": true,
+          "assertion": "The trigger returns HTTP 200 and timings_ms.checkout_self_ms is at least 1000."
+        }
+      ],
+      "report": {
+        "conclusion_status": "CANDIDATE",
+        "title": "Candidate: checkout-service latency",
+        "summary": "Evidence supports checkout-service fault_type latency as the candidate root cause: injected processing latency before downstream calls.",
+        "confidence": 0.95
+      }
+    },
+    {
+      "scenario_id": "inventory-db-timeout",
+      "passed": true,
+      "incident_id": "inc_25557b492dc040959ec5ae9bb6573b7a",
+      "workflow_run_id": "wfr_e9172882daf549c8a7d1955bb703aebb",
+      "workflow_status": "SUCCEEDED",
+      "platform_evidence_types": [
+        "LOG",
+        "METRIC",
+        "RUNBOOK",
+        "TRACE"
+      ],
+      "platform_evidence_passed": true,
+      "invocations_passed": true,
+      "root_cause_passed": true,
+      "forbidden_claims_found": [],
+      "required_evidence_passed": true,
+      "signals": [
+        {
+          "evidence_id": "ev-inventory-fault-enabled",
+          "source": "prometheus",
+          "passed": true,
+          "assertion": "The gauge equals 1 during the injected fault window."
+        },
+        {
+          "evidence_id": "ev-inventory-timeout-counter",
+          "source": "prometheus",
+          "passed": true,
+          "assertion": "The timeout counter increase is greater than zero after the trigger request."
+        },
+        {
+          "evidence_id": "ev-inventory-downstream-counter",
+          "source": "prometheus",
+          "passed": true,
+          "assertion": "Checkout records at least one inventory downstream failure."
+        },
+        {
+          "evidence_id": "ev-inventory-timeout-log",
+          "source": "loki",
+          "passed": true,
+          "assertion": "An ERROR event identifies db_timeout and DB_TIMEOUT for the trigger trace_id."
+        },
+        {
+          "evidence_id": "ev-inventory-checkout-log",
+          "source": "loki",
+          "passed": true,
+          "assertion": "Checkout records inventory-service as the failed downstream on the same trace_id."
+        },
+        {
+          "evidence_id": "ev-inventory-timeout-trace",
+          "source": "tempo",
+          "passed": true,
+          "assertion": "The checkout trace contains an ERROR inventory.reserve span with error.type DB_TIMEOUT."
+        },
+        {
+          "evidence_id": "ev-inventory-http-503",
+          "source": "http",
+          "passed": true,
+          "assertion": "The trigger returns HTTP 503 with CHECKOUT_DOWNSTREAM_FAILURE and downstream inventory-service."
+        }
+      ],
+      "report": {
+        "conclusion_status": "CANDIDATE",
+        "title": "Candidate: inventory-service db_timeout",
+        "summary": "Evidence supports inventory-service fault_type db_timeout as the candidate root cause: DB_TIMEOUT while reserving inventory.",
+        "confidence": 0.95
+      }
+    },
+    {
+      "scenario_id": "payment-error",
+      "passed": true,
+      "incident_id": "inc_06b6002adb2e448fbe513152af53ae1c",
+      "workflow_run_id": "wfr_4387a88b99a84287a75b559851e387bc",
+      "workflow_status": "SUCCEEDED",
+      "platform_evidence_types": [
+        "LOG",
+        "METRIC",
+        "RUNBOOK",
+        "TRACE"
+      ],
+      "platform_evidence_passed": true,
+      "invocations_passed": true,
+      "root_cause_passed": true,
+      "forbidden_claims_found": [],
+      "required_evidence_passed": true,
+      "signals": [
+        {
+          "evidence_id": "ev-payment-fault-enabled",
+          "source": "prometheus",
+          "passed": true,
+          "assertion": "The gauge equals 1 during the injected fault window."
+        },
+        {
+          "evidence_id": "ev-payment-error-counter",
+          "source": "prometheus",
+          "passed": true,
+          "assertion": "The counter increase is greater than zero after the trigger request."
+        },
+        {
+          "evidence_id": "ev-payment-error-log",
+          "source": "loki",
+          "passed": true,
+          "assertion": "An ERROR event identifies payment_error and PAYMENT_GATEWAY_ERROR for the trigger trace_id."
+        },
+        {
+          "evidence_id": "ev-payment-error-trace",
+          "source": "tempo",
+          "passed": true,
+          "assertion": "The checkout trace contains an ERROR payment.pay span with error.type PAYMENT_GATEWAY_ERROR."
+        },
+        {
+          "evidence_id": "ev-payment-http-500",
+          "source": "http",
+          "passed": true,
+          "assertion": "The trigger returns HTTP 500 with error_code PAYMENT_GATEWAY_ERROR."
+        }
+      ],
+      "report": {
+        "conclusion_status": "CANDIDATE",
+        "title": "Candidate: payment-service payment_error",
+        "summary": "Evidence supports payment-service fault_type payment_error as the candidate root cause: PAYMENT_GATEWAY_ERROR during checkout.",
+        "confidence": 0.95
+      }
+    }
+  ]
+}

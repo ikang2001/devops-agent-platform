@@ -1,0 +1,11 @@
+route:
+  receiver: devops-agent
+  group_wait: 5s
+  group_interval: 30s
+  repeat_interval: 5m
+
+receivers:
+  - name: devops-agent
+    webhook_configs:
+      - url: http://host.docker.internal:8000/api/v1/alerts
+        send_resolved: false

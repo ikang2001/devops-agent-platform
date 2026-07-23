@@ -1,0 +1,19 @@
+{{ define "devops.title" -}}
+[{{ .Status | toUpper }}][{{ .CommonLabels.severity | toUpper }}] {{ .CommonLabels.alertname }}
+{{- end }}
+
+{{ define "devops.color" -}}
+{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}
+{{- end }}
+
+{{ define "devops.text" -}}
+*服务:* {{ .CommonLabels.service }}
+*任务:* {{ .CommonLabels.job }}
+*触发数量:* {{ len .Alerts.Firing }} | *恢复数量:* {{ len .Alerts.Resolved }}
+{{ range .Alerts -}}
+{{ if eq .Status "firing" }}:rotating_light:{{ else }}:white_check_mark:{{ end }} *{{ .Annotations.summary }}*
+{{ .Annotations.description }}
+*Runbook:* `{{ .Annotations.runbook }}`
+{{ if .GeneratorURL }}*来源:* {{ .GeneratorURL }}{{ end }}
+{{ end -}}
+{{- end }}

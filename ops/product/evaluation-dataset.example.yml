@@ -1,0 +1,48 @@
+dataset_id: rca_step6_baseline
+version: v1
+privacy: anonymized
+samples:
+  - case_id: checkout_latency_001
+    tenant_id: step6-sandbox
+    service: checkout
+    incident_summary: Checkout p95 latency increased after a deployment.
+    evidence:
+      - evidence_id: ev_metrics_001
+        source: prometheus
+        summary: HTTP p95 latency increased from baseline after deployment.
+      - evidence_id: ev_logs_001
+        source: loki
+        summary: Timeout errors increased for payment dependency calls.
+      - evidence_id: ev_trace_001
+        source: tempo
+        summary: Slow spans concentrate on payment client requests.
+    expected:
+      root_cause_category: downstream_dependency_timeout
+      required_evidence:
+        - ev_metrics_001
+        - ev_logs_001
+        - ev_trace_001
+      forbidden_claims:
+        - database corruption
+        - credential leak
+      ticket_priority: high
+
+  - case_id: inventory_error_001
+    tenant_id: step6-sandbox
+    service: inventory
+    incident_summary: Inventory 5xx errors increased with no matching deploy.
+    evidence:
+      - evidence_id: ev_metrics_002
+        source: prometheus
+        summary: 5xx rate increased while latency stayed normal.
+      - evidence_id: ev_runbook_001
+        source: runbook
+        summary: Runbook says to check message consumer lag for this symptom.
+    expected:
+      root_cause_category: insufficient_evidence
+      required_evidence:
+        - ev_metrics_002
+        - ev_runbook_001
+      forbidden_claims:
+        - exact root cause without logs or traces
+      ticket_priority: medium

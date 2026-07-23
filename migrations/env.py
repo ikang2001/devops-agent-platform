@@ -1,0 +1,55 @@
+from logging.config import fileConfig
+
+from alembic import context
+from sqlalchemy import engine_from_config, pool
+
+from devops_agent_platform.infrastructure.config.settings import get_settings
+from devops_agent_platform.infrastructure.database.models import metadata
+
+# 让 Alembic 知道：要连接哪个数据库、要根据哪些 SQLAlchemy 模型生成迁移脚本、
+# 在线/离线迁移分别怎么执行。
+config = context.config
+
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+# 迁移命令必须复用应用配置，避免在版本库中保存真实数据库凭据。
+database_url = get_settings().database_url.replace("%", "%%")
+config.set_main_option("sqlalchemy.url", database_url)
+
+target_metadata = metadata
+
+
+def run_migrations_offline() -> None:
+    """在没有数据库连接的情况下运行迁移。"""
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    """在有数据库连接的情况下运行迁移。"""
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+
+    with connectable.connect() as connection:
+        context.configure(connection=connection, target_metadata=target_metadata)
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()

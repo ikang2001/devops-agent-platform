@@ -1,0 +1,12 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: devops-agent-platform
+  namespace: devops-agent
+  labels:
+    app.kubernetes.io/name: devops-agent-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: devops-agent-platform

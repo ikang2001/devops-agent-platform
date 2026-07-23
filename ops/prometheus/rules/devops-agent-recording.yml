@@ -1,0 +1,107 @@
+groups:
+  - name: devops-agent-recording
+    interval: 30s
+    rules:
+      # 预计算请求速率，供告警和Dashboard复用。
+      - record: devops_agent:http_requests:rate5m
+        expr: |
+          sum by (job) (
+            rate(devops_agent_http_requests_total[5m])
+          )
+
+      # clamp_min只保护分母；告警还会额外检查最小请求速率。
+      - record: devops_agent:http_5xx_ratio:rate5m
+        expr: |
+          sum by (job) (
+            rate(devops_agent_http_requests_total{status_class="5xx"}[5m])
+          )
+          /
+          clamp_min(
+            sum by (job) (
+              rate(devops_agent_http_requests_total[5m])
+            ),
+            0.001
+          )
+
+      - record: devops_agent:http_request_duration_seconds:p95_5m
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (job, le) (
+              rate(devops_agent_http_request_duration_seconds_bucket[5m])
+            )
+          )
+
+      - record: devops_agent:llm_report_generation:rate10m
+        expr: |
+          sum by (job) (
+            rate(devops_agent_llm_report_generation_total[10m])
+          )
+
+      - record: devops_agent:llm_report_fallback_ratio:rate10m
+        expr: |
+          sum by (job) (
+            rate(
+              devops_agent_llm_report_generation_total{
+                outcome=~"FALLBACK_.*"
+              }[10m]
+            )
+          )
+          /
+          clamp_min(
+            sum by (job) (
+              rate(devops_agent_llm_report_generation_total[10m])
+            ),
+            0.001
+          )
+
+      - record: devops_agent:ticketing_gateway_submit:rate10m
+        expr: |
+          sum by (job) (
+            rate(devops_agent_ticketing_gateway_submit_total[10m])
+          )
+
+      - record: devops_agent:ticketing_gateway_error_ratio:rate10m
+        expr: |
+          sum by (job) (
+            rate(
+              devops_agent_ticketing_gateway_submit_total{
+                outcome="GATEWAY_ERROR"
+              }[10m]
+            )
+          )
+          /
+          clamp_min(
+            sum by (job) (
+              rate(devops_agent_ticketing_gateway_submit_total[10m])
+            ),
+            0.001
+          )
+
+      - record: devops_agent:ticketing_gateway_business_failure_ratio:rate10m
+        expr: |
+          sum by (job) (
+            rate(
+              devops_agent_ticketing_gateway_submit_total{
+                outcome="BUSINESS_FAILURE"
+              }[10m]
+            )
+          )
+          /
+          clamp_min(
+            sum by (job) (
+              rate(devops_agent_ticketing_gateway_submit_total[10m])
+            ),
+            0.001
+          )
+
+      - record: devops_agent:ticketing_gateway_duration_seconds:p95_10m
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (job, le) (
+              rate(
+                devops_agent_ticketing_gateway_submit_duration_seconds_bucket[10m]
+              )
+            )
+          )

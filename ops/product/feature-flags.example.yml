@@ -1,0 +1,41 @@
+flags:
+  - key: llm_rca_report_v1
+    owner: platform-rca
+    default: false
+    type: tenant_allowlist
+    description: Enable structured LLM RCA reports for selected tenants.
+    kill_switch: true
+    rollout_steps:
+      - tenant: step6-sandbox
+        percentage: 100
+      - tenant: staging
+        percentage: 10
+    rollback:
+      action: disable_flag
+      expected_effect: deterministic report fallback remains active
+
+  - key: historical_incident_rag_v1
+    owner: knowledge-platform
+    default: false
+    type: tenant_allowlist
+    description: Retrieve similar historical incidents during RCA.
+    kill_switch: true
+    rollout_steps:
+      - tenant: step6-sandbox
+        percentage: 100
+    rollback:
+      action: disable_flag
+      expected_effect: runbook-only retrieval remains active
+
+  - key: remediation_dry_run_v1
+    owner: platform-sre
+    default: false
+    type: tenant_allowlist
+    description: Generate high-risk remediation plans without execution.
+    kill_switch: true
+    rollout_steps:
+      - tenant: staging
+        percentage: 5
+    rollback:
+      action: disable_flag
+      expected_effect: recommendations remain read-only

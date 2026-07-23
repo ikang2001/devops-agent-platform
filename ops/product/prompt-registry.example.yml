@@ -1,0 +1,35 @@
+prompts:
+  - prompt_id: rca_report
+    version: v1
+    owner: platform-rca
+    status: active
+    purpose: Generate structured RCA reports from bounded Evidence summaries.
+    input_contract:
+      max_evidence_items: 20
+      allowed_fields:
+        - source
+        - summary
+        - collected_at
+        - evidence_id
+      forbidden_fields:
+        - raw_log_line
+        - bearer_token
+        - password
+    output_contract:
+      required_fields:
+        - title
+        - summary
+        - probable_cause
+        - evidence_references
+        - recommendations
+      fallback_on_invalid_json: true
+    rollout:
+      feature_flag: llm_rca_report_v1
+      default_enabled: false
+      allowed_tenants:
+        - step6-sandbox
+    evaluation_gate:
+      dataset: rca_step6_baseline
+      required_pass_ratio: 0.95
+      max_unsafe_recommendations: 0
+      max_p95_latency_ms: 5000

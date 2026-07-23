@@ -1,0 +1,275 @@
+x-agent-image: &agent-image
+  image: devops-agent-platform:minishop-e2e
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+
+x-agent-environment: &agent-environment
+  DEVOPS_AGENT_APP_ENV: local
+  DEVOPS_AGENT_SERVICE_NAME: devops-agent-platform-e2e
+  DEVOPS_AGENT_DATABASE_URL: postgresql+psycopg://devops_agent:devops_agent@postgres:5432/devops_agent
+  DEVOPS_AGENT_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  DEVOPS_AGENT_KAFKA_TOPIC: devops-agent.events.v1
+  DEVOPS_AGENT_OUTBOX_WORKER_ENABLED: "true"
+  DEVOPS_AGENT_RCA_CONSUMER_ENABLED: "true"
+  DEVOPS_AGENT_RCA_CONSUMER_GROUP_ID: minishop-e2e-rca-v1
+  DEVOPS_AGENT_RCA_CONSUMER_CLIENT_ID: minishop-e2e-rca-consumer
+  DEVOPS_AGENT_RCA_CONSUMER_LEASE_SECONDS: "30"
+  DEVOPS_AGENT_RCA_CONSUMER_HEARTBEAT_SECONDS: "5"
+  DEVOPS_AGENT_RCA_CONSUMER_EXECUTION_TIMEOUT_SECONDS: "180"
+  DEVOPS_AGENT_PROMETHEUS_BASE_URL: http://prometheus:9090
+  DEVOPS_AGENT_LOKI_BASE_URL: http://loki:3100
+  DEVOPS_AGENT_TEMPO_BASE_URL: http://tempo:3200
+  DEVOPS_AGENT_METRICS_QUERY_AVAILABILITY_METRIC: minishop_service_up
+  DEVOPS_AGENT_ALERT_WEBHOOK_AUTH_ENABLED: "true"
+  DEVOPS_AGENT_ALERT_WEBHOOK_SECRET: ${MINISHOP_E2E_WEBHOOK_SECRET:-minishop-e2e-webhook-secret-change-me-123456}
+  DEVOPS_AGENT_ADMIN_OIDC_ENABLED: "false"
+  DEVOPS_AGENT_ADMIN_DEMO_ENABLED: "true"
+  DEVOPS_AGENT_ADMIN_DEMO_TOKEN: ${MINISHOP_E2E_ADMIN_TOKEN:-minishop-e2e-admin-token-change-me-123456}
+  DEVOPS_AGENT_ADMIN_DEMO_TENANT_ID: demo
+  DEVOPS_AGENT_ADMIN_DEMO_ADMIN_ID: demo-admin
+  DEVOPS_AGENT_LLM_REPORT_ENABLED: "true"
+  DEVOPS_AGENT_LLM_PROVIDER_ORDER: openai_compatible
+  DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_API_STYLE: chat_completions
+  DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_BASE_URL: http://llm-stub:8081
+  DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_API_KEY: ${MINISHOP_E2E_LLM_API_KEY:-minishop-e2e-local-key}
+  DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_MODEL: minishop-ground-truth-stub
+  DEVOPS_AGENT_LLM_REQUEST_TIMEOUT_SECONDS: "10"
+  DEVOPS_AGENT_HTTP_RATE_LIMIT_ENABLED: "false"
+  DEVOPS_AGENT_METRICS_OUTBOX_CACHE_TTL_SECONDS: "1"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: devops_agent
+      POSTGRES_PASSWORD: devops_agent
+      POSTGRES_DB: devops_agent
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "15432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devops_agent -d devops_agent"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.18
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:9092
+    tmpfs:
+      - /var/lib/redpanda/data:rw,uid=101,gid=101,mode=0755
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  migrate:
+    <<: *agent-image
+    environment:
+      DEVOPS_AGENT_APP_ENV: local
+      DEVOPS_AGENT_DATABASE_URL: postgresql+psycopg://devops_agent:devops_agent@postgres:5432/devops_agent
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    restart: "no"
+
+  agent:
+    <<: *agent-image
+    environment: *agent-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "18000:8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=2).read()",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  llm-stub:
+    image: python:3.12-slim
+    working_dir: /app
+    command: ["python", "/app/llm_stub.py"]
+    environment:
+      MINISHOP_E2E_LLM_API_KEY: ${MINISHOP_E2E_LLM_API_KEY:-minishop-e2e-local-key}
+    volumes:
+      - ./llm_stub.py:/app/llm_stub.py:ro
+    ports:
+      - "18081:8081"
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/healthz', timeout=2).read()",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  minishop:
+    image: minishop-fault-lab:e2e
+    build:
+      context: "../../MiniShop 电商下单故障演练靶场"
+      dockerfile: Dockerfile
+    environment:
+      MINISHOP_TENANT_ID: demo
+      MINISHOP_AGENT_URL: http://agent:8000/api/v1/alerts
+      MINISHOP_AGENT_WEBHOOK_SECRET: ${MINISHOP_E2E_WEBHOOK_SECRET:-minishop-e2e-webhook-secret-change-me-123456}
+      MINISHOP_AGENT_REQUEST_TIMEOUT_SECONDS: "5"
+      MINISHOP_OTLP_TRACES_ENDPOINT: http://tempo:4318/v1/traces
+    command:
+      [
+        "sh",
+        "-c",
+        "uvicorn app.main:app --host 0.0.0.0 --port 8080 2>&1 | tee /var/log/minishop/app.log",
+      ]
+    depends_on:
+      agent:
+        condition: service_healthy
+    ports:
+      - "18080:8080"
+    volumes:
+      - minishop-logs:/var/log/minishop
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=1h
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports:
+      - "19090:9090"
+    tmpfs:
+      - /prometheus:rw,uid=65534,gid=65534,mode=0755
+    depends_on:
+      - minishop
+      - alertmanager
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "19093:9093"
+    tmpfs:
+      - /alertmanager:rw,uid=65534,gid=65534,mode=0755
+
+  loki:
+    image: grafana/loki:3.2.1
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./loki.yml:/etc/loki/loki.yml:ro
+    ports:
+      - "13100:3100"
+    tmpfs:
+      - /var/loki:rw,uid=10001,gid=10001,mode=0755
+
+  promtail:
+    image: grafana/promtail:3.2.1
+    command: ["-config.file=/etc/promtail/promtail.yml"]
+    volumes:
+      - ./promtail.yml:/etc/promtail/promtail.yml:ro
+      - minishop-logs:/var/log/minishop:ro
+    tmpfs:
+      - /tmp
+    depends_on:
+      - loki
+      - minishop
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    volumes:
+      - ./tempo.yml:/etc/tempo/tempo.yml:ro
+    ports:
+      - "13200:3200"
+      - "14318:4318"
+    tmpfs:
+      - /var/tempo:rw,uid=10001,gid=10001,mode=0755
+
+  e2e-runner:
+    image: minishop-fault-lab:e2e
+    profiles: ["e2e"]
+    working_dir: /app
+    command: ["python", "/e2e/run_e2e.py"]
+    user: "0:0"
+    environment:
+      E2E_TENANT_ID: demo
+      E2E_ADMIN_ID: demo-admin
+      E2E_ADMIN_TOKEN: ${MINISHOP_E2E_ADMIN_TOKEN:-minishop-e2e-admin-token-change-me-123456}
+      E2E_TIMEOUT_SECONDS: "240"
+      E2E_ARTIFACTS_PATH: /artifacts/results.json
+    volumes:
+      - ./run_e2e.py:/e2e/run_e2e.py:ro
+      - ./artifacts:/artifacts
+    depends_on:
+      agent:
+        condition: service_healthy
+      minishop:
+        condition: service_healthy
+      llm-stub:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
+      alertmanager:
+        condition: service_started
+    restart: "no"
+
+volumes:
+  minishop-logs:

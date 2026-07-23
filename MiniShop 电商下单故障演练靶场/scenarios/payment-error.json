@@ -1,0 +1,109 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "payment-error",
+  "title": "Payment service returns injected 500 errors",
+  "description": "Inject a deterministic payment gateway failure and trigger it through the checkout flow.",
+  "service_name": "payment-service",
+  "fault_type": "payment_error",
+  "injection": {
+    "method": "POST",
+    "path": "/faults/payment-error",
+    "json_body": {
+      "error_rate": 1.0,
+      "duration_seconds": 300,
+      "created_by": "scenario-runner"
+    },
+    "expected_status": 200,
+    "service_name": "payment-service",
+    "fault_type": "payment_error"
+  },
+  "trigger": {
+    "method": "POST",
+    "path": "/checkout",
+    "json_body": {
+      "user_id": "scenario-payment-user",
+      "items": [
+        {
+          "sku": "sku-payment-001",
+          "quantity": 1
+        }
+      ],
+      "idempotency_key": "scenario-payment-error"
+    },
+    "expected_status": 500
+  },
+  "cleanup": {
+    "method": "POST",
+    "path": "/faults/reset",
+    "json_body": {},
+    "expected_status": 200
+  },
+  "alert_mapping": {
+    "source": "alertmanager",
+    "alert_name": "MiniShopPayment5xxSpike",
+    "source_severity": "P1",
+    "platform_severity": "CRITICAL",
+    "service_name": "payment-service",
+    "summary": "payment-service 5xx errors are increasing",
+    "fingerprint": "minishop:payment-service:5xx-spike",
+    "external_event_id_prefix": "minishop-payment-error"
+  },
+  "expected_signals": [
+    {
+      "evidence_id": "ev-payment-fault-enabled",
+      "source": "prometheus",
+      "locator": "minishop_fault_enabled{service_name=\"payment-service\",fault_type=\"payment_error\"}",
+      "assertion": "The gauge equals 1 during the injected fault window."
+    },
+    {
+      "evidence_id": "ev-payment-error-counter",
+      "source": "prometheus",
+      "locator": "increase(minishop_payment_error_total[5m])",
+      "assertion": "The counter increase is greater than zero after the trigger request."
+    },
+    {
+      "evidence_id": "ev-payment-error-log",
+      "source": "loki",
+      "locator": "{service_name=\"payment-service\"} |= \"PAYMENT_GATEWAY_ERROR\"",
+      "assertion": "An ERROR event identifies payment_error and PAYMENT_GATEWAY_ERROR for the trigger trace_id."
+    },
+    {
+      "evidence_id": "ev-payment-error-trace",
+      "source": "tempo",
+      "locator": "{ resource.service.name = \"payment-service\" && span:status = error } with (most_recent=true)",
+      "assertion": "The checkout trace contains an ERROR payment.pay span with error.type PAYMENT_GATEWAY_ERROR."
+    },
+    {
+      "evidence_id": "ev-payment-http-500",
+      "source": "http",
+      "locator": "POST /checkout",
+      "assertion": "The trigger returns HTTP 500 with error_code PAYMENT_GATEWAY_ERROR."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": {
+      "service_name": "payment-service",
+      "fault_type": "payment_error",
+      "category": "injected_payment_gateway_error",
+      "summary": "The payment_error fault forces payment-service to return PAYMENT_GATEWAY_ERROR during checkout.",
+      "causal_chain": [
+        "The scenario runner enables payment_error with an error rate of 1.0.",
+        "Checkout reaches payment-service after inventory reservation succeeds.",
+        "payment-service emits PAYMENT_GATEWAY_ERROR and returns HTTP 500.",
+        "The checkout request propagates the payment failure to the caller."
+      ],
+      "runbook_path": "runbooks/payment-5xx-spike.md"
+    },
+    "required_evidence": [
+      "ev-payment-fault-enabled",
+      "ev-payment-error-counter",
+      "ev-payment-error-log",
+      "ev-payment-error-trace"
+    ],
+    "forbidden_claims": [
+      "A named third-party payment provider is confirmed globally unavailable.",
+      "Inventory or database failure caused the payment error.",
+      "The customer was charged despite the failed payment."
+    ]
+  }
+}

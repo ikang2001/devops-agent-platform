@@ -1,0 +1,658 @@
+groups:
+  - name: devops-agent-availability
+    interval: 30s
+    rules:
+      - alert: DevOpsAgentInstanceDown
+        expr: up{job="devops-agent-platform"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "DevOps Agent实例不可抓取"
+          description: "实例 {{ $labels.instance }} 已连续2分钟不可抓取。"
+          runbook: "ops/runbooks/devops-agent-availability.md#instance-down"
+
+      - alert: DevOpsAgentRuntimeComponentDown
+        expr: |
+          min by (job, component) (
+            devops_agent_runtime_component_ready{
+              component=~"runtime|database"
+            }
+          ) == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "DevOps Agent运行时组件不可用"
+          description: "组件 {{ $labels.component }} 已连续2分钟不可用。"
+          runbook: "ops/runbooks/devops-agent-availability.md#runtime-component-down"
+
+      - alert: DevOpsAgentHighErrorRatio
+        expr: |
+          (
+            devops_agent:http_5xx_ratio:rate5m > 0.05
+          )
+          and on (job)
+          (
+            devops_agent:http_requests:rate5m > 0.1
+          )
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "DevOps Agent 5xx比例持续升高"
+          description: "任务 {{ $labels.job }} 的5xx比例已连续10分钟超过5%。"
+          runbook: "ops/runbooks/devops-agent-availability.md#high-error-ratio"
+
+      - alert: DevOpsAgentHighP95Latency
+        expr: |
+          (
+            devops_agent:http_request_duration_seconds:p95_5m > 1
+          )
+          and on (job)
+          (
+            devops_agent:http_requests:rate5m > 0.1
+          )
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "DevOps Agent P95延迟持续升高"
+          description: "任务 {{ $labels.job }} 的P95延迟已连续10分钟超过1秒。"
+          runbook: "ops/runbooks/devops-agent-availability.md#high-p95-latency"
+
+  - name: devops-agent-outbox
+    interval: 30s
+    rules:
+      - alert: DevOpsAgentOutboxMetricsUnavailable
+        expr: min by (job) (devops_agent_outbox_backlog_source_up) == 0
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "Outbox积压指标不可用"
+          description: "Outbox数据库聚合查询已连续5分钟失败。"
+          runbook: "ops/runbooks/devops-agent-outbox.md#metrics-unavailable"
+
+      - alert: DevOpsAgentOutboxBacklogHigh
+        expr: |
+          max by (job) (
+            devops_agent_outbox_backlog_events{status="PENDING"}
+          ) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "Outbox待发布消息持续积压"
+          description: "待发布Outbox消息已连续10分钟超过1000条。"
+          runbook: "ops/runbooks/devops-agent-outbox.md#backlog-high"
+
+      - alert: DevOpsAgentOutboxOldestMessageTooOld
+        expr: |
+          max by (job) (
+            devops_agent_outbox_oldest_unpublished_age_seconds
+          ) > 300
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "Outbox最老未发布消息超时"
+          description: "最老未发布消息年龄已连续5分钟超过300秒。"
+          runbook: "ops/runbooks/devops-agent-outbox.md#oldest-message-too-old"
+
+      - alert: DevOpsAgentOutboxHasFailedMessages
+        expr: |
+          max by (job) (
+            devops_agent_outbox_backlog_events{status="FAILED"}
+          ) > 0
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "Outbox存在终态失败消息"
+          description: "Outbox终态失败消息已持续存在10分钟，需要人工处理。"
+          runbook: "ops/runbooks/devops-agent-outbox.md#failed-messages"
+
+      - alert: DevOpsAgentOutboxWorkerStopped
+        expr: |
+          (
+            max by (job) (devops_agent_outbox_worker_enabled) == 1
+          )
+          and on (job)
+          (
+            max by (job) (
+              devops_agent_outbox_worker_state{state="STOPPED"}
+            ) == 1
+          )
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "Outbox Worker已停止"
+          description: "已启用的Outbox Worker连续2分钟处于STOPPED状态。"
+          runbook: "ops/runbooks/devops-agent-outbox.md#worker-stopped"
+
+      - alert: DevOpsAgentOutboxWorkerRepeatedFailures
+        expr: |
+          max by (job) (
+            devops_agent_outbox_worker_consecutive_failures
+          ) >= 5
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "Outbox Worker连续执行失败"
+          description: "Outbox Worker连续失败次数已持续5分钟不低于5次。"
+          runbook: "ops/runbooks/devops-agent-outbox.md#worker-repeated-failures"
+
+  - name: devops-agent-audit-retention
+    interval: 30s
+    rules:
+      - alert: DevOpsAgentAuditRetentionWorkerStopped
+        expr: |
+          (
+            max by (job) (
+              devops_agent_audit_retention_worker_enabled
+            ) == 1
+          )
+          and on (job)
+          (
+            max by (job) (
+              devops_agent_audit_retention_worker_state{state="STOPPED"}
+            ) == 1
+          )
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "审计留存清理Worker已停止"
+          description: "已启用的审计留存清理Worker连续2分钟处于STOPPED状态。"
+          runbook: "ops/runbooks/devops-agent-audit-retention.md#worker-stopped"
+
+      - alert: DevOpsAgentAuditRetentionWorkerStalled
+        expr: |
+          (
+            max by (job) (
+              devops_agent_audit_retention_worker_enabled
+            ) == 1
+          )
+          and on (job)
+          (
+            max by (job) (
+              devops_agent_audit_retention_worker_state{state="RUNNING"}
+            ) == 1
+          )
+          and on (job)
+          (
+            time() - max by (job) (
+              devops_agent_audit_retention_worker_last_cycle_timestamp_seconds
+            ) > 7200
+          )
+        for: 15m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "审计留存清理循环停滞"
+          description: "审计留存清理Worker保持RUNNING但最近清理循环已超过2小时不推进。"
+          runbook: "ops/runbooks/devops-agent-audit-retention.md#worker-stalled"
+
+      - alert: DevOpsAgentAuditRetentionNoSuccessfulCycle
+        expr: |
+          (
+            max by (job) (
+              devops_agent_audit_retention_worker_enabled
+            ) == 1
+          )
+          and on (job)
+          (
+            time() - max by (job) (
+              devops_agent_audit_retention_worker_last_success_timestamp_seconds
+            ) > 7200
+          )
+        for: 15m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "审计留存清理持续没有成功循环"
+          description: "审计留存清理Worker最近成功循环时间已连续15分钟落后超过2小时。"
+          runbook: "ops/runbooks/devops-agent-audit-retention.md#no-successful-cycle"
+
+      - alert: DevOpsAgentAuditRetentionRepeatedFailures
+        expr: |
+          max by (job) (
+            devops_agent_audit_retention_worker_consecutive_failures
+          ) >= 5
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "审计留存清理连续失败"
+          description: "审计留存清理Worker连续失败次数已持续5分钟不低于5次。"
+          runbook: "ops/runbooks/devops-agent-audit-retention.md#repeated-failures"
+
+  - name: devops-agent-rca-consumer
+    interval: 30s
+    rules:
+      - alert: DevOpsAgentRCAConsumerStopped
+        expr: |
+          (
+            max by (job) (devops_agent_rca_consumer_enabled) == 1
+          )
+          and on (job)
+          (
+            max by (job) (
+              devops_agent_rca_consumer_state{state="STOPPED"}
+            ) == 1
+          )
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "RCA Consumer已停止"
+          description: "已启用的RCA Consumer连续2分钟处于STOPPED状态。"
+          runbook: "ops/runbooks/devops-agent-rca-consumer.md#consumer-stopped"
+
+      - alert: DevOpsAgentRCAConsumerStalled
+        expr: |
+          (
+            max by (job) (devops_agent_rca_consumer_enabled) == 1
+          )
+          and on (job)
+          (
+            max by (job) (
+              devops_agent_rca_consumer_state{state="RUNNING"}
+            ) == 1
+          )
+          and on (job)
+          (
+            time() - max by (job) (
+              devops_agent_rca_consumer_last_cycle_timestamp_seconds
+            ) > 120
+          )
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "RCA Consumer轮询停滞"
+          description: "RCA Consumer保持RUNNING但最近轮询时间已连续2分钟不推进。"
+          runbook: "ops/runbooks/devops-agent-rca-consumer.md#consumer-stalled"
+
+      - alert: DevOpsAgentRCAConsumerNoSuccessfulPoll
+        expr: |
+          (
+            max by (job) (devops_agent_rca_consumer_enabled) == 1
+          )
+          and on (job)
+          (
+            time() - max by (job) (
+              devops_agent_rca_consumer_last_success_timestamp_seconds
+            ) > 600
+          )
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "RCA Consumer持续没有成功轮询"
+          description: "RCA Consumer最近成功轮询时间已连续5分钟落后超过10分钟。"
+          runbook: "ops/runbooks/devops-agent-rca-consumer.md#no-successful-poll"
+
+      - alert: DevOpsAgentRCAConsumerRepeatedFailures
+        expr: |
+          max by (job) (
+            devops_agent_rca_consumer_consecutive_failures
+          ) >= 5
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "RCA Consumer连续处理失败"
+          description: "RCA Consumer连续失败次数已持续5分钟不低于5次。"
+          runbook: "ops/runbooks/devops-agent-rca-consumer.md#repeated-failures"
+
+      - alert: DevOpsAgentRCAConsumerDeadLettersIncreasing
+        expr: |
+          sum by (job) (
+            increase(
+              devops_agent_rca_consumer_records{
+                result="dead_lettered"
+              }[10m]
+            )
+          ) > 0
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "RCA消息进入死信"
+          description: "最近10分钟持续出现RCA消息死信，需要人工确认消息契约或本地工作流状态。"
+          runbook: "ops/runbooks/devops-agent-rca-consumer.md#dead-letters-increasing"
+
+      - alert: DevOpsAgentRCAConsumerLagUnavailable
+        expr: |
+          (
+            max by (job) (devops_agent_rca_consumer_enabled) == 1
+          )
+          and on (job)
+          (
+            min by (job) (
+              devops_agent_rca_consumer_lag_source_up
+              and on (job, instance)
+              (devops_agent_rca_consumer_enabled == 1)
+            ) == 0
+          )
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "RCA Consumer Lag指标不可用"
+          description: "已启用Consumer的分区Lag连续5分钟无法完整采集。"
+          runbook: "ops/runbooks/devops-agent-rca-consumer.md#lag-unavailable"
+
+      - alert: DevOpsAgentRCAConsumerLagHigh
+        expr: |
+          sum by (job) (
+            devops_agent_rca_consumer_lag_records{scope="total"}
+          ) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "RCA Consumer消息持续积压"
+          description: "RCA消费组总Lag已连续10分钟超过1000条。"
+          runbook: "ops/runbooks/devops-agent-rca-consumer.md#lag-high"
+
+  - name: devops-agent-ticket-submission-consumer
+    interval: 30s
+    rules:
+      - alert: DevOpsAgentTicketSubmissionConsumerStopped
+        expr: |
+          (
+            max by (job) (
+              devops_agent_ticket_submission_consumer_enabled
+            ) == 1
+          )
+          and on (job)
+          (
+            max by (job) (
+              devops_agent_ticket_submission_consumer_state{state="STOPPED"}
+            ) == 1
+          )
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "工单提交Consumer已停止"
+          description: "已启用的工单提交Consumer连续2分钟处于STOPPED状态。"
+          runbook: "ops/runbooks/devops-agent-ticket-submission-consumer.md#consumer-stopped"
+
+      - alert: DevOpsAgentTicketSubmissionConsumerStalled
+        expr: |
+          (
+            max by (job) (
+              devops_agent_ticket_submission_consumer_enabled
+            ) == 1
+          )
+          and on (job)
+          (
+            max by (job) (
+              devops_agent_ticket_submission_consumer_state{state="RUNNING"}
+            ) == 1
+          )
+          and on (job)
+          (
+            time() - max by (job) (
+              devops_agent_ticket_submission_consumer_last_cycle_timestamp_seconds
+            ) > 120
+          )
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "工单提交Consumer轮询停滞"
+          description: "工单提交Consumer保持RUNNING但最近轮询时间已连续2分钟不推进。"
+          runbook: "ops/runbooks/devops-agent-ticket-submission-consumer.md#consumer-stalled"
+
+      - alert: DevOpsAgentTicketSubmissionConsumerNoSuccessfulPoll
+        expr: |
+          (
+            max by (job) (
+              devops_agent_ticket_submission_consumer_enabled
+            ) == 1
+          )
+          and on (job)
+          (
+            time() - max by (job) (
+              devops_agent_ticket_submission_consumer_last_success_timestamp_seconds
+            ) > 600
+          )
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "工单提交Consumer持续没有成功轮询"
+          description: "工单提交Consumer最近成功轮询时间已连续5分钟落后超过10分钟。"
+          runbook: "ops/runbooks/devops-agent-ticket-submission-consumer.md#no-successful-poll"
+
+      - alert: DevOpsAgentTicketSubmissionConsumerRepeatedFailures
+        expr: |
+          max by (job) (
+            devops_agent_ticket_submission_consumer_consecutive_failures
+          ) >= 5
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "工单提交Consumer连续处理失败"
+          description: "工单提交Consumer连续失败次数已持续5分钟不低于5次。"
+          runbook: "ops/runbooks/devops-agent-ticket-submission-consumer.md#repeated-failures"
+
+      - alert: DevOpsAgentTicketSubmissionDeadLettersIncreasing
+        expr: |
+          sum by (job) (
+            increase(
+              devops_agent_ticket_submission_consumer_records{
+                result="dead_lettered"
+              }[10m]
+            )
+          ) > 0
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "工单提交消息进入死信"
+          description: "最近10分钟持续出现工单提交消息死信，需要人工确认消息契约或本地数据状态。"
+          runbook: "ops/runbooks/devops-agent-ticket-submission-consumer.md#dead-letters-increasing"
+
+      - alert: DevOpsAgentTicketSubmissionConsumerLagUnavailable
+        expr: |
+          (
+            max by (job) (
+              devops_agent_ticket_submission_consumer_enabled
+            ) == 1
+          )
+          and on (job)
+          (
+            min by (job) (
+              devops_agent_ticket_submission_consumer_lag_source_up
+              and on (job, instance)
+              (devops_agent_ticket_submission_consumer_enabled == 1)
+            ) == 0
+          )
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "工单提交Consumer Lag指标不可用"
+          description: "已启用工单提交Consumer的分区Lag连续5分钟无法完整采集。"
+          runbook: "ops/runbooks/devops-agent-ticket-submission-consumer.md#lag-unavailable"
+
+      - alert: DevOpsAgentTicketSubmissionConsumerLagHigh
+        expr: |
+          sum by (job) (
+            devops_agent_ticket_submission_consumer_lag_records{
+              scope="total"
+            }
+          ) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "工单提交Consumer消息持续积压"
+          description: "工单提交消费组总Lag已连续10分钟超过1000条。"
+          runbook: "ops/runbooks/devops-agent-ticket-submission-consumer.md#lag-high"
+
+  - name: devops-agent-ticketing-gateway
+    interval: 30s
+    rules:
+      - alert: DevOpsAgentTicketingGatewayErrorRatioHigh
+        expr: |
+          (
+            devops_agent:ticketing_gateway_error_ratio:rate10m > 0.2
+          )
+          and on (job)
+          (
+            devops_agent:ticketing_gateway_submit:rate10m > 0.001
+          )
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "外部工单网关错误比例持续升高"
+          description: "HTTP JSON工单网关错误比例已连续10分钟超过20%。"
+          runbook: "ops/runbooks/devops-agent-ticketing-gateway.md#error-ratio-high"
+
+      - alert: DevOpsAgentTicketingGatewayBusinessFailureRatioHigh
+        expr: |
+          (
+            devops_agent:ticketing_gateway_business_failure_ratio:rate10m > 0.5
+          )
+          and on (job)
+          (
+            devops_agent:ticketing_gateway_submit:rate10m > 0.001
+          )
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "外部工单业务失败比例持续升高"
+          description: "外部工单系统明确拒绝提交的比例已连续10分钟超过50%。"
+          runbook: "ops/runbooks/devops-agent-ticketing-gateway.md#business-failure-ratio-high"
+
+      - alert: DevOpsAgentTicketingGatewayP95LatencyHigh
+        expr: |
+          (
+            devops_agent:ticketing_gateway_duration_seconds:p95_10m > 10
+          )
+          and on (job)
+          (
+            devops_agent:ticketing_gateway_submit:rate10m > 0.001
+          )
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "外部工单网关P95耗时持续升高"
+          description: "HTTP JSON工单网关P95提交耗时已连续10分钟超过10秒。"
+          runbook: "ops/runbooks/devops-agent-ticketing-gateway.md#p95-latency-high"
+
+  - name: devops-agent-llm-report
+    interval: 30s
+    rules:
+      - alert: DevOpsAgentLLMReportFallbackRatioHigh
+        expr: |
+          (
+            devops_agent:llm_report_fallback_ratio:rate10m > 0.5
+          )
+          and on (job)
+          (
+            devops_agent:llm_report_generation:rate10m > 0.001
+          )
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "LLM RCA报告降级比例持续过高"
+          description: "LLM报告降级比例已连续10分钟超过50%。"
+          runbook: "ops/runbooks/devops-agent-llm-report.md#fallback-ratio-high"
+
+      - alert: DevOpsAgentLLMReportCircuitOpen
+        expr: |
+          sum by (job) (
+            increase(
+              devops_agent_llm_report_generation_total{
+                outcome="FALLBACK_CIRCUIT_OPEN"
+              }[5m]
+            )
+          ) > 0
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "LLM RCA报告熔断器已打开"
+          description: "最近5分钟出现因熔断器打开而跳过的模型调用。"
+          runbook: "ops/runbooks/devops-agent-llm-report.md#circuit-open"

@@ -1,0 +1,17 @@
+.git/
+.github/
+.hypothesis/
+.pytest_cache/
+.pytest-tmp-codex/
+.ruff_cache/
+.venv/
+.tmp/
+.tmp_pytest_full_step4/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+ops/alertmanager/secrets/
+ops/deploy/secrets/
+ops/deploy/*.local.env
+tests/

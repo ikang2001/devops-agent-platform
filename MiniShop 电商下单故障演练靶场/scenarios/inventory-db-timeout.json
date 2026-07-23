@@ -1,0 +1,122 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "inventory-db-timeout",
+  "title": "Inventory database timeout breaks checkout",
+  "description": "Inject inventory database latency that deterministically raises DB_TIMEOUT and propagates to checkout.",
+  "service_name": "inventory-service",
+  "fault_type": "db_timeout",
+  "injection": {
+    "method": "POST",
+    "path": "/faults/inventory-db-timeout",
+    "json_body": {
+      "delay_ms": 1200,
+      "duration_seconds": 300,
+      "created_by": "scenario-runner"
+    },
+    "expected_status": 200,
+    "service_name": "inventory-service",
+    "fault_type": "db_timeout"
+  },
+  "trigger": {
+    "method": "POST",
+    "path": "/checkout",
+    "json_body": {
+      "user_id": "scenario-inventory-user",
+      "items": [
+        {
+          "sku": "sku-inventory-001",
+          "quantity": 1
+        }
+      ],
+      "idempotency_key": "scenario-inventory-db-timeout"
+    },
+    "expected_status": 503
+  },
+  "cleanup": {
+    "method": "POST",
+    "path": "/faults/reset",
+    "json_body": {},
+    "expected_status": 200
+  },
+  "alert_mapping": {
+    "source": "alertmanager",
+    "alert_name": "MiniShopInventoryDbTimeout",
+    "source_severity": "P1",
+    "platform_severity": "CRITICAL",
+    "service_name": "inventory-service",
+    "summary": "inventory-service database timeout detected",
+    "fingerprint": "minishop:inventory-service:db-timeout",
+    "external_event_id_prefix": "minishop-inventory-db-timeout"
+  },
+  "expected_signals": [
+    {
+      "evidence_id": "ev-inventory-fault-enabled",
+      "source": "prometheus",
+      "locator": "minishop_fault_enabled{service_name=\"inventory-service\",fault_type=\"db_timeout\"}",
+      "assertion": "The gauge equals 1 during the injected fault window."
+    },
+    {
+      "evidence_id": "ev-inventory-timeout-counter",
+      "source": "prometheus",
+      "locator": "increase(minishop_inventory_db_timeout_total[5m])",
+      "assertion": "The timeout counter increase is greater than zero after the trigger request."
+    },
+    {
+      "evidence_id": "ev-inventory-downstream-counter",
+      "source": "prometheus",
+      "locator": "increase(minishop_downstream_timeout_total{downstream_service=\"inventory-service\"}[5m])",
+      "assertion": "Checkout records at least one inventory downstream failure."
+    },
+    {
+      "evidence_id": "ev-inventory-timeout-log",
+      "source": "loki",
+      "locator": "{service_name=\"inventory-service\"} |= \"DB_TIMEOUT\"",
+      "assertion": "An ERROR event identifies db_timeout and DB_TIMEOUT for the trigger trace_id."
+    },
+    {
+      "evidence_id": "ev-inventory-checkout-log",
+      "source": "loki",
+      "locator": "{service_name=\"checkout-service\"} |= \"CHECKOUT_DOWNSTREAM_FAILURE\"",
+      "assertion": "Checkout records inventory-service as the failed downstream on the same trace_id."
+    },
+    {
+      "evidence_id": "ev-inventory-timeout-trace",
+      "source": "tempo",
+      "locator": "{ resource.service.name = \"inventory-service\" && span:status = error } with (most_recent=true)",
+      "assertion": "The checkout trace contains an ERROR inventory.reserve span with error.type DB_TIMEOUT."
+    },
+    {
+      "evidence_id": "ev-inventory-http-503",
+      "source": "http",
+      "locator": "POST /checkout",
+      "assertion": "The trigger returns HTTP 503 with CHECKOUT_DOWNSTREAM_FAILURE and downstream inventory-service."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": {
+      "service_name": "inventory-service",
+      "fault_type": "db_timeout",
+      "category": "injected_inventory_database_timeout",
+      "summary": "The db_timeout fault delays inventory-service and raises DB_TIMEOUT, causing checkout to fail downstream.",
+      "causal_chain": [
+        "The scenario runner enables db_timeout with a 1200 ms delay.",
+        "Checkout asks inventory-service to reserve the requested item.",
+        "inventory-service waits for the injected delay and raises DB_TIMEOUT.",
+        "checkout-service reports CHECKOUT_DOWNSTREAM_FAILURE for inventory-service and returns HTTP 503."
+      ],
+      "runbook_path": "runbooks/inventory-db-timeout.md"
+    },
+    "required_evidence": [
+      "ev-inventory-fault-enabled",
+      "ev-inventory-timeout-counter",
+      "ev-inventory-timeout-log",
+      "ev-inventory-checkout-log",
+      "ev-inventory-timeout-trace"
+    ],
+    "forbidden_claims": [
+      "Database corruption is confirmed.",
+      "Database connection pool exhaustion is confirmed.",
+      "payment-service caused the checkout failure."
+    ]
+  }
+}
