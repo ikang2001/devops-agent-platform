@@ -108,6 +108,11 @@ def test_step5_ci_pipeline_keeps_quality_supply_chain_and_migration_gates() -> N
         str(step.get("run", "")) + str(step.get("uses", ""))
         for step in jobs["image"]["steps"]
     )
+    trivy_steps = [
+        step
+        for step in jobs["image"]["steps"]
+        if "aquasecurity/trivy-action" in str(step.get("uses", ""))
+    ]
     assert "uv sync --locked --extra dev" in test_steps
     assert "uv run ruff check" in test_steps
     assert 'uv run pytest -q -m "not live"' in test_steps
@@ -115,6 +120,15 @@ def test_step5_ci_pipeline_keeps_quality_supply_chain_and_migration_gates() -> N
     assert "docker build" in image_steps
     assert "anchore/sbom-action" in image_steps
     assert "aquasecurity/trivy-action" in image_steps
+    assert len(trivy_steps) == 2
+    assert trivy_steps[0]["with"]["exit-code"] == "0"
+    assert trivy_steps[1]["with"] == {
+        "image-ref": "devops-agent-platform:${{ github.sha }}",
+        "format": "table",
+        "severity": "CRITICAL,HIGH",
+        "ignore-unfixed": "true",
+        "exit-code": "1",
+    }
 
 
 def test_step5_documentation_keeps_target_environment_boundary() -> None:
