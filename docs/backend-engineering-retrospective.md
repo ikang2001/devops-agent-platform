@@ -17,7 +17,7 @@
 
 - 交付内容：三份机器可读 Manifest/Ground Truth、MiniShop 可观测与告警接入、
   真实 Compose RCA 验收、演练管理员认证、逐模块代码导读。
-- 已完成验证：平台全量 `1625 passed, 9 skipped`；MiniShop 全量
+- 已完成验证：平台全量 `1656 passed, 9 skipped`；MiniShop 全量
   `37 passed`（均使用 `-W error`）；E2E 静态资产 `3 passed`；Compose 配置展开通过；三场景真实
   Docker E2E 全部通过。
 - 端到端证据：`checkout-latency`、`inventory-db-timeout`、
@@ -36,8 +36,8 @@
 | Step 2 架构设计 | 选择原生 Alertmanager Relay、兼容 Telemetry、演练专用认证和 Compose 验收 | 现有端口/适配器边界 | 1 | 无 |
 | Step 3 代码骨架 | 新增 Alertmanager Mapper、Relay、Agent Alert Client 与路由 | Relay 定向测试 6 项通过 | 1 | 无 |
 | Step 4 增量实现 | Alertmanager Relay、兼容指标/日志、分服务 Trace、Tempo Ground Truth、演练认证、代码导读和固定调查策略接线 | C0/C1 定向测试 `190 passed`；MiniShop `37 passed` | 2 | 无 |
-| Step 5 测试排错 | 修复 FastAPI 生命周期、Buildx 路径、tmpfs 权限、Tempo Trace ID、锁定环境打包和策略解析测试假设 | 平台 `1625 passed, 9 skipped`；MiniShop `37 passed` | 7 | 无 |
-| Step 6 整合运维 | 真实 Compose 三场景验收、锁定镜像验证、独立 Git 基线、平台受审修复、C0/C1 文档收口和结果落盘 | `artifacts/results.json` 中 `passed: true`；全仓 Ruff 通过 | 6 | 无 |
+| Step 5 测试排错 | 修复 FastAPI 生命周期、Buildx 路径、tmpfs 权限、Tempo Trace ID、锁定环境打包和策略解析测试假设 | 平台当前 `1656 passed, 9 skipped`；MiniShop `37 passed` | 7 | 无 |
+| Step 6 整合运维 | 真实 Compose 三场景验收、锁定镜像验证、独立 Git 基线、平台受审修复、reclaim Worker、C0/C1 文档收口和结果落盘 | `artifacts/results.json` 中 `passed: true`；全仓 Ruff、锁文件和补丁检查通过 | 8 | 无 |
 
 ## 4. 事件索引
 
@@ -67,6 +67,8 @@
 | DEV-022 | Step 4 | 犯错 | 新增调查策略导出后导入顺序未通过 Ruff | 已解决 | 调整公共导入顺序并通过定向 Ruff |
 | DEV-023 | Step 5 | 犯错 | 调查策略测试误判解析 API 的空白规范化语义 | 已解决 | 统一复用解析器并拆分 API/Settings 边界测试 |
 | DEV-024 | Step 6 | 踩坑 | 全仓 Ruff 捕获 Remediation 接线中的超长中文注释 | 已解决 | 拆分注释并通过全仓 Ruff |
+| DEV-025 | Step 6 | 犯错 | 首轮 Runtime 增量把审计 Worker done callback 放进相邻条件块 | 已解决 | 复读完整启动段并补独立 Worker 崩溃隔离测试 |
+| DEV-026 | Step 6 | 难点 | 两类 stale 查询会让单轮真实回收量达到配置上限两倍 | 已解决 | 交错候选并按整轮总 batch size 截断 |
 
 ## 5. 事件详情
 
@@ -484,6 +486,36 @@
 | 残余风险 | 定向 lint 仍可能遗漏同一工作区内其它未提交文件 |
 | 预防措施 | 模块定向检查之后必须再跑一次 `uv run ruff check .` 作为最终仓库门禁 |
 
+### DEV-025：Runtime 增量接线的相邻条件块错位
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-26 / Step 6 |
+| 模块 | `bootstrap/runtime.py` |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | 首轮补丁把 Audit Retention 的 done callback 放进了 reclaim Worker 的条件块；代码复读时发现，尚未进入提交 |
+| 影响 | 只启用审计清理时异常任务不会被及时消费，且可能在只启用 reclaim 时访问空任务 |
+| 根因 | 在结构相似的相邻启动块间使用了过宽补丁上下文 |
+| 解决方案 | callback 回到审计 Worker 自己的条件块，并补 reclaim 独立启动、崩溃和 readiness 隔离测试 |
+| 验证证据 | Runtime/Worker 定向 `47 passed`；全量 `1656 passed, 9 skipped` |
+| 预防措施 | 生命周期接线后复读完整 start/readiness/stop 四段，不只看局部 diff |
+
+### DEV-026：双 stale 查询突破整轮批量上限
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-26 / Step 6 |
+| 模块 | `RemediationApplicationService.reclaim_stale` |
+| 分类 | 难点 |
+| 状态 | 已解决 |
+| 现象与证据 | execution 与 rollback 查询都使用 `limit=50`，旧实现串行处理后单轮最多写 100 条 |
+| 影响 | 部署配置不能真实约束单轮事务数量，积压时会放大数据库写压力 |
+| 根因 | 仓储查询上限被误当成应用用例的整轮上限 |
+| 解决方案 | 两类候选交错，按 `reclaim_stale(limit)` 的成功收口总数截断，并将 limit 固定为 1–1000 |
+| 验证证据 | service 参数边界、Worker batch 透传、全量回归均通过 |
+| 残余风险 | 不提供跨状态全局过期时间排序；当前优先保证两类状态公平和总量有界 |
+
 ## 6. 分类汇总
 
 ### 踩坑
@@ -507,6 +539,7 @@
 - DEV-022：公共导出变更后应立即检查导入排序。
 - DEV-023：解析 API 的规范化语义与部署配置的严格校验应分别测试。
 - DEV-024：定向 lint 之后仍需全仓门禁覆盖其它未提交增量。
+- DEV-025：向相邻 Worker 接线块插入代码后，要立刻复读完整启动顺序，避免 done callback 挂错任务。
 
 ### 主要难点
 
@@ -518,6 +551,7 @@
 - DEV-011：锁定环境必须同时验证依赖和项目本体的标准打包元数据。
 - DEV-012：并发前端增量必须先统一资源目录、路由和打包契约。
 - DEV-020：修复动作的风险、回滚和效果必须由部署控制目录提供。
+- DEV-026：两个各自有 limit 的 stale 查询不能直接串行处理，否则单轮真实写入量会变成配置的两倍。
 
 ## 7. 可复用解决经验
 
@@ -530,6 +564,7 @@
 | DEV-009 | 外部系统省略标识符前导零 | 有界校验后恢复协议规定宽度 | 仍可确定 64/128 位语义 | 无法确定原始位宽 | Mock 边界测试 + 真实 API 查询 |
 | DEV-010 | Git 输出含中文路径 | 关闭 quotePath 后再把输出交给文件系统工具 | 仓库允许本地 Git 配置 | 必须保持转义日志格式 | 候选数、文件数与磁盘统计交叉核对 |
 | DEV-011 | 依赖锁存在但项目本体未安装 | 补标准构建元数据并在空 venv 验证子进程导入 | Python 包采用 src layout | 纯脚本且不作为包安装 | `uv sync --locked` + Alembic/CLI 子进程测试 |
+| DEV-026 | 执行与回滚 stale 查询各自有上限，但业务要求整轮总量有界 | 两类候选交错后按总 batch size 截断，Worker 每轮只调用一次应用服务 | 两类状态可用同一 fence 收口 | 必须按全局时间严格排序 | 服务边界测试 + Worker batch 透传测试 |
 
 ## 8. 关键技术决策
 
@@ -539,6 +574,7 @@
 | 管理员认证 | 完整 IdP / 绕过认证 / 演练认证器 | 受控演练认证器 | 自包含且不破坏生产默认 | 必须严格防止生产启用 |
 | 场景数据 | Markdown / JSON Manifest | 版本化 JSON Manifest + Pydantic 校验 | 无新增 YAML 解析依赖，便于测试和工具消费 | 人工编辑略显冗长 |
 | 修复动作安全边界 | HTTP 正文传完整计划 / LLM 生成动作文本 / 部署目录派生 | 部署控制 JSON 动作目录派生风险、效果、回滚和目标白名单 | 审批者看到的风险和回滚路径必须可信，执行前可检测目录漂移 | 新增动作需要同步目录文件、测试和目标环境验收 |
+| 过期修复租约调度 | 外部 cron / HTTP 管理写接口 / Runtime 内 Worker | 默认关闭的 Runtime Worker | 复用应用服务、生命周期、readiness 和监控模式，不扩大 HTTP 写面 | 多副本会并发扫描，依赖版本 fence 消解竞争；仍需 staging 验收 |
 
 ## 9. 技术债清偿状态
 
@@ -569,7 +605,7 @@
 
 ### 验证与已知限制
 
-- 已完成验证：平台 `1625 passed, 9 skipped`，MiniShop `37 passed`，
+- 已完成验证：平台 `1656 passed, 9 skipped`，MiniShop `37 passed`，
   E2E 资产 `3 passed`，Ruff check 和 Compose config 通过。
 - 已完成真实链路：三份 Manifest 均在重建后的 Docker 环境得到
   `SUCCEEDED` Workflow 与四类 Evidence，结果文件 `passed: true`。

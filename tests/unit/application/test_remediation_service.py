@@ -140,8 +140,7 @@ class StaticRepository:
         return [
             item
             for item in self.value
-            if item.tenant_id == tenant_id
-            and item.workflow_run_id == workflow_run_id
+            if item.tenant_id == tenant_id and item.workflow_run_id == workflow_run_id
         ][:limit]
 
 
@@ -274,9 +273,7 @@ def build_evidence() -> list[Evidence]:
 
 
 def build_report(evidence: list[Evidence]) -> RCAReport:
-    type_counts = tuple(
-        sorted((item.evidence_type.value, 1) for item in evidence)
-    )
+    type_counts = tuple(sorted((item.evidence_type.value, 1) for item in evidence))
     return RCAReport(
         report_id="rpt_001",
         tenant_id="tenant_001",
@@ -408,9 +405,7 @@ async def test_approved_plan_executes_and_rolls_back_with_stable_keys() -> None:
 
 
 async def test_evidence_gate_idempotency_and_kill_switch_are_enforced() -> None:
-    service, evidence, plans, _, executor, _ = build_service(
-        execution_enabled=False
-    )
+    service, evidence, plans, _, executor, _ = build_service(execution_enabled=False)
     with pytest.raises(ConflictError, match="cited by the report"):
         await service.create(
             build_command(
@@ -600,6 +595,15 @@ async def test_expired_execution_lease_is_reclaimed_to_failed() -> None:
             requested_by="admin_executor",
         )
     assert approved.status == RemediationStatus.APPROVED.value
+
+
+@pytest.mark.parametrize("limit", [0, 1001, True, 1.5])
+async def test_reclaim_rejects_invalid_batch_limit(limit: object) -> None:
+    """显式调用也不能绕过 Worker 的批量上限。"""
+    service, _, _, _, _, _ = build_service()
+
+    with pytest.raises(AppValidationError, match="limit"):
+        await service.reclaim_stale(limit=limit)  # type: ignore[arg-type]
 
 
 async def test_stale_finish_is_rejected_after_owner_mismatch() -> None:

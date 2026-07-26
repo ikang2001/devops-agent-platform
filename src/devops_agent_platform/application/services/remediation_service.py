@@ -4,6 +4,7 @@ import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
+from itertools import zip_longest
 from typing import Any
 
 from devops_agent_platform.application.commands.remediation import (
@@ -18,6 +19,7 @@ from devops_agent_platform.application.queries.remediation import (
 )
 from devops_agent_platform.domain.enums import EvidenceType, WorkflowRunStatus
 from devops_agent_platform.domain.exceptions import (
+    AppValidationError,
     ConflictError,
     ResourceNotFound,
 )
@@ -323,15 +325,11 @@ class RemediationApplicationService:
                 or plan.decision_reason != _safe_summary(command.reason)
                 or plan.decided_by != command.requested_by
             ):
-                raise ConflictError(
-                    "Idempotency key was used for another decision"
-                )
+                raise ConflictError("Idempotency key was used for another decision")
             return RemediationPlanView.from_domain(plan, is_duplicate=True)
         self._require_version(plan, command.expected_version)
         if command.approved and plan.created_by == command.requested_by:
-            raise ConflictError(
-                "Remediation author cannot approve their own plan"
-            )
+            raise ConflictError("Remediation author cannot approve their own plan")
         now = self._now()
         updated = plan.decide(
             approved=command.approved,
@@ -441,8 +439,7 @@ class RemediationApplicationService:
         if not current.execution_lease_active(completed_at):
             failed = await self._fail_stale_execution(current, completed_at)
             raise ConflictError(
-                "Remediation execution lease expired; plan is "
-                f"{failed.status.value}"
+                f"Remediation execution lease expired; plan is {failed.status.value}"
             )
         completed = current.finish_execution(
             succeeded=outcome.succeeded,
@@ -506,8 +503,7 @@ class RemediationApplicationService:
             if not plan.rollback_lease_active(now):
                 failed = await self._fail_stale_rollback(plan, now)
                 raise ConflictError(
-                    "Remediation rollback lease expired; plan is "
-                    f"{failed.status.value}"
+                    f"Remediation rollback lease expired; plan is {failed.status.value}"
                 )
 
         claimed_attempt = plan.rollback_attempt
@@ -552,8 +548,7 @@ class RemediationApplicationService:
         if not current.rollback_lease_active(completed_at):
             failed = await self._fail_stale_rollback(current, completed_at)
             raise ConflictError(
-                "Remediation rollback lease expired; plan is "
-                f"{failed.status.value}"
+                f"Remediation rollback lease expired; plan is {failed.status.value}"
             )
         completed = current.finish_rollback(
             succeeded=outcome.succeeded,
@@ -577,6 +572,12 @@ class RemediationApplicationService:
         limit: int = 50,
     ) -> list[RemediationPlanView]:
         """扫描并收口过期执行/回滚租约。"""
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 1000
+        ):
+            raise AppValidationError("limit must be between 1 and 1000")
         now = self._now()
         reclaimed: list[RemediationPlanView] = []
         async with self._unit_of_work_factory() as unit_of_work:
@@ -586,21 +587,24 @@ class RemediationApplicationService:
                     limit=limit,
                 )
             )
-            stale_rollbacks = (
-                await unit_of_work.remediation_plans.list_stale_rollback(
-                    now=now,
-                    limit=limit,
-                )
+            stale_rollbacks = await unit_of_work.remediation_plans.list_stale_rollback(
+                now=now,
+                limit=limit,
             )
-        for plan in stale_executions:
+        candidates = (
+            candidate
+            for pair in zip_longest(stale_executions, stale_rollbacks)
+            for candidate in pair
+            if candidate is not None
+        )
+        for plan in candidates:
+            if len(reclaimed) >= limit:
+                break
             try:
-                failed = await self._fail_stale_execution(plan, now)
-            except ConflictError:
-                continue
-            reclaimed.append(RemediationPlanView.from_domain(failed))
-        for plan in stale_rollbacks:
-            try:
-                failed = await self._fail_stale_rollback(plan, now)
+                if plan.status is RemediationStatus.EXECUTING:
+                    failed = await self._fail_stale_execution(plan, now)
+                else:
+                    failed = await self._fail_stale_rollback(plan, now)
             except ConflictError:
                 continue
             reclaimed.append(RemediationPlanView.from_domain(failed))
@@ -737,8 +741,7 @@ class RemediationApplicationService:
     ) -> RemediationPlan | None:
         async with self._unit_of_work_factory() as unit_of_work:
             return (
-                await unit_of_work.remediation_plans
-                .get_by_create_idempotency_key_hash(
+                await unit_of_work.remediation_plans.get_by_create_idempotency_key_hash(
                     tenant_id,
                     idempotency_hash,
                 )
@@ -798,9 +801,7 @@ class RemediationApplicationService:
         request_hash: str,
     ) -> RemediationPlanView:
         if plan.create_request_hash != request_hash:
-            raise ConflictError(
-                "Idempotency key was used for another remediation plan"
-            )
+            raise ConflictError("Idempotency key was used for another remediation plan")
         return RemediationPlanView.from_domain(plan, is_duplicate=True)
 
     @staticmethod

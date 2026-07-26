@@ -13,6 +13,9 @@ from devops_agent_platform.application.services.outbox_backlog import (
 from devops_agent_platform.application.services.rca_consumer_runner import (
     RCAConsumerHealth,
 )
+from devops_agent_platform.application.services.remediation_reclaim_worker import (
+    RemediationReclaimWorkerHealth,
+)
 from devops_agent_platform.bootstrap.app import create_app
 from devops_agent_platform.bootstrap.dependencies import (
     build_skeleton_alert_service,
@@ -25,14 +28,13 @@ from devops_agent_platform.bootstrap.readiness import (
 from devops_agent_platform.domain.enums import (
     OutboxStatus,
     RCAConsumerWorkerState,
+    RemediationReclaimWorkerState,
     TicketSubmissionConsumerWorkerState,
 )
 from devops_agent_platform.infrastructure.config.settings import Settings
 from devops_agent_platform.ports.outbox_metrics import OutboxBacklogSnapshot
 
-TicketSubmissionConsumerHealth = (
-    ticket_consumer_runner.TicketSubmissionConsumerHealth
-)
+TicketSubmissionConsumerHealth = ticket_consumer_runner.TicketSubmissionConsumerHealth
 
 
 class FixedBacklogMonitor:
@@ -62,6 +64,7 @@ class MetricsRuntime:
         ticket_submission_consumer_health: (
             TicketSubmissionConsumerHealth | None
         ) = None,
+        remediation_reclaim_health: (RemediationReclaimWorkerHealth | None) = None,
         readiness_error: Exception | None = None,
     ) -> None:
         self.alert_service = build_skeleton_alert_service()
@@ -69,9 +72,8 @@ class MetricsRuntime:
         self.outbox_backlog_monitor = monitor
         self.worker_health = None
         self.rca_consumer_health = rca_consumer_health
-        self.ticket_submission_consumer_health = (
-            ticket_submission_consumer_health
-        )
+        self.ticket_submission_consumer_health = ticket_submission_consumer_health
+        self.remediation_reclaim_health = remediation_reclaim_health
         self._readiness_error = readiness_error
 
     async def start(self) -> None:
@@ -200,17 +202,13 @@ def test_metrics_endpoint_exposes_database_backlog_snapshot() -> None:
     with TestClient(app) as client:
         body = client.get("/metrics").text
 
-    assert (
-        'devops_agent_outbox_backlog_events{status="PENDING"} 8.0'
-    ) in body
+    assert ('devops_agent_outbox_backlog_events{status="PENDING"} 8.0') in body
     assert "devops_agent_outbox_backlog_source_up 1.0" in body
     assert "devops_agent_outbox_backlog_stale 0.0" in body
     age_line = next(
         line
         for line in body.splitlines()
-        if line.startswith(
-            "devops_agent_outbox_oldest_unpublished_age_seconds "
-        )
+        if line.startswith("devops_agent_outbox_oldest_unpublished_age_seconds ")
     )
     assert 29 <= float(age_line.rsplit(" ", 1)[1]) <= 35
 
@@ -241,9 +239,7 @@ def test_metrics_refresh_logs_exclude_dependency_exception_details(
     with TestClient(app) as client:
         with caplog.at_level(
             logging.ERROR,
-            logger=(
-                "devops_agent_platform.interfaces.http.routes.metrics"
-            ),
+            logger=("devops_agent_platform.interfaces.http.routes.metrics"),
         ):
             response = client.get("/metrics")
 
@@ -298,19 +294,10 @@ def test_metrics_endpoint_exposes_rca_consumer_snapshot() -> None:
         body = client.get("/metrics").text
 
     assert "devops_agent_rca_consumer_enabled 1.0" in body
-    assert (
-        'devops_agent_rca_consumer_state{state="RUNNING"} 1.0'
-        in body
-    )
-    assert (
-        'devops_agent_rca_consumer_records{result="acknowledged"} 4.0'
-        in body
-    )
+    assert 'devops_agent_rca_consumer_state{state="RUNNING"} 1.0' in body
+    assert 'devops_agent_rca_consumer_records{result="acknowledged"} 4.0' in body
     assert "devops_agent_rca_consumer_lag_source_up 1.0" in body
-    assert (
-        'devops_agent_rca_consumer_lag_records{scope="total"} 25.0'
-        in body
-    )
+    assert 'devops_agent_rca_consumer_lag_records{scope="total"} 25.0' in body
     assert "tenant_id" not in body
     assert "workflow_run_id" not in body
 
@@ -352,21 +339,54 @@ def test_metrics_endpoint_exposes_ticket_submission_consumer_snapshot() -> None:
         body = client.get("/metrics").text
 
     assert "devops_agent_ticket_submission_consumer_enabled 1.0" in body
+    assert 'devops_agent_ticket_submission_consumer_state{state="DEGRADED"} 1.0' in body
     assert (
-        'devops_agent_ticket_submission_consumer_state{state="DEGRADED"} 1.0'
-        in body
+        'devops_agent_ticket_submission_consumer_records{result="retried"} 2.0' in body
     )
     assert (
-        'devops_agent_ticket_submission_consumer_records{result="retried"} 2.0'
-        in body
+        'devops_agent_ticket_submission_consumer_records{result="ignored"} 1.0' in body
     )
-    assert (
-        'devops_agent_ticket_submission_consumer_records{result="ignored"} 1.0'
-        in body
-    )
-    assert (
-        "devops_agent_ticket_submission_consumer_consecutive_failures 2.0"
-        in body
-    )
+    assert "devops_agent_ticket_submission_consumer_consecutive_failures 2.0" in body
     assert "tenant_id" not in body
     assert "target_system" not in body
+
+
+def test_metrics_endpoint_exposes_remediation_reclaim_snapshot() -> None:
+    """指标端点应导出低基数租约回收 Worker 健康快照。"""
+    now = datetime.now(UTC)
+    report = OutboxBacklogReport(
+        snapshot=OutboxBacklogSnapshot(
+            counts=(),
+            oldest_unpublished_at=None,
+        ),
+        source_up=True,
+        stale=False,
+    )
+    health = RemediationReclaimWorkerHealth(
+        state=RemediationReclaimWorkerState.RUNNING,
+        started_at=now - timedelta(minutes=1),
+        stopped_at=None,
+        last_cycle_at=now,
+        last_success_at=now,
+        last_error=None,
+        consecutive_failures=0,
+        total_cycles=8,
+        total_reclaimed_plans=3,
+    )
+    runtime = MetricsRuntime(
+        FixedBacklogMonitor(report),
+        remediation_reclaim_health=health,
+    )
+    app = create_app(
+        runtime_factory=lambda settings: runtime,  # type: ignore[arg-type]
+    )
+
+    with TestClient(app) as client:
+        body = client.get("/metrics").text
+
+    assert "devops_agent_remediation_reclaim_worker_enabled 1.0" in body
+    assert 'devops_agent_remediation_reclaim_worker_state{state="RUNNING"} 1.0' in body
+    assert "devops_agent_remediation_reclaim_worker_cycles 8.0" in body
+    assert "devops_agent_remediation_reclaimed_plans 3.0" in body
+    assert "tenant_id" not in body
+    assert "remediation_plan_id" not in body

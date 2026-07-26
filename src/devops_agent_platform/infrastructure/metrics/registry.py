@@ -18,11 +18,15 @@ from devops_agent_platform.application.services.outbox_worker import (
 from devops_agent_platform.application.services.rca_consumer_runner import (
     RCAConsumerHealth,
 )
+from devops_agent_platform.application.services.remediation_reclaim_worker import (
+    RemediationReclaimWorkerHealth,
+)
 from devops_agent_platform.domain.enums import (
     AuditRetentionWorkerState,
     OutboxStatus,
     OutboxWorkerState,
     RCAConsumerWorkerState,
+    RemediationReclaimWorkerState,
     TicketSubmissionConsumerWorkerState,
 )
 from devops_agent_platform.ports.rca_report import (
@@ -32,9 +36,7 @@ from devops_agent_platform.ports.ticketing import (
     TicketingGatewaySubmitOutcome,
 )
 
-_HTTP_METHODS = frozenset(
-    {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"}
-)
+_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"})
 _HTTP_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10)
 _LLM_REPORT_BUCKETS = (0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120)
 _TICKETING_GATEWAY_BUCKETS = (0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60)
@@ -44,6 +46,7 @@ _COMPONENTS = (
     "outbox_worker",
     "rca_consumer",
     "audit_retention",
+    "remediation_reclaim",
     "ticket_submission_consumer",
 )
 _WORKER_RESULTS = ("claimed", "published", "retried", "failed")
@@ -60,9 +63,7 @@ _TICKET_SUBMISSION_CONSUMER_RESULTS = (
     "dead_lettered",
     "ignored",
 )
-TicketSubmissionConsumerHealth = (
-    ticket_consumer_runner.TicketSubmissionConsumerHealth
-)
+TicketSubmissionConsumerHealth = ticket_consumer_runner.TicketSubmissionConsumerHealth
 _BACKLOG_STATUSES = (
     OutboxStatus.PENDING,
     OutboxStatus.PROCESSING,
@@ -299,6 +300,49 @@ class ApplicationMetrics:
             namespace="devops_agent",
             registry=self.registry,
         )
+        self.remediation_reclaim_worker_enabled = Gauge(
+            "remediation_reclaim_worker_enabled",
+            "当前进程是否启用修复执行租约回收Worker。",
+            namespace="devops_agent",
+            registry=self.registry,
+        )
+        self.remediation_reclaim_worker_state = Gauge(
+            "remediation_reclaim_worker_state",
+            "修复执行租约回收Worker状态，当前状态标签值为1。",
+            labelnames=("state",),
+            namespace="devops_agent",
+            registry=self.registry,
+        )
+        self.remediation_reclaim_worker_consecutive_failures = Gauge(
+            "remediation_reclaim_worker_consecutive_failures",
+            "修复执行租约回收Worker连续失败次数。",
+            namespace="devops_agent",
+            registry=self.registry,
+        )
+        self.remediation_reclaim_worker_cycles = Gauge(
+            "remediation_reclaim_worker_cycles",
+            "当前进程内修复执行租约回收Worker累计批次数。",
+            namespace="devops_agent",
+            registry=self.registry,
+        )
+        self.remediation_reclaimed_plans = Gauge(
+            "remediation_reclaimed_plans",
+            "当前进程内因租约过期而收口为失败态的修复计划数。",
+            namespace="devops_agent",
+            registry=self.registry,
+        )
+        self.remediation_reclaim_worker_last_cycle_timestamp = Gauge(
+            "remediation_reclaim_worker_last_cycle_timestamp_seconds",
+            "修复执行租约回收Worker最近完成一轮扫描的Unix时间戳。",
+            namespace="devops_agent",
+            registry=self.registry,
+        )
+        self.remediation_reclaim_worker_last_success_timestamp = Gauge(
+            "remediation_reclaim_worker_last_success_timestamp_seconds",
+            "修复执行租约回收Worker最近成功扫描的Unix时间戳。",
+            namespace="devops_agent",
+            registry=self.registry,
+        )
         self.llm_report_generation = Counter(
             "llm_report_generation",
             "LLM报告生成及固定降级分类累计次数。",
@@ -405,9 +449,7 @@ class ApplicationMetrics:
         self.outbox_worker_enabled.set(1 if worker_health is not None else 0)
         for state in OutboxWorkerState:
             active = worker_health is not None and worker_health.state is state
-            self.outbox_worker_state.labels(state=state.value).set(
-                1 if active else 0
-            )
+            self.outbox_worker_state.labels(state=state.value).set(1 if active else 0)
         failures = worker_health.consecutive_failures if worker_health else 0
         self.outbox_worker_consecutive_failures.set(failures)
         totals = {
@@ -427,21 +469,15 @@ class ApplicationMetrics:
         self.rca_consumer_enabled.set(1 if health is not None else 0)
         for state in RCAConsumerWorkerState:
             active = health is not None and health.state is state
-            self.rca_consumer_state.labels(state=state.value).set(
-                1 if active else 0
-            )
+            self.rca_consumer_state.labels(state=state.value).set(1 if active else 0)
         self.rca_consumer_consecutive_failures.set(
             health.consecutive_failures if health is not None else 0
         )
         totals = {
             "polled": health.total_polled if health is not None else 0,
-            "acknowledged": (
-                health.total_acknowledged if health is not None else 0
-            ),
+            "acknowledged": (health.total_acknowledged if health is not None else 0),
             "retried": health.total_retried if health is not None else 0,
-            "dead_lettered": (
-                health.total_dead_lettered if health is not None else 0
-            ),
+            "dead_lettered": (health.total_dead_lettered if health is not None else 0),
         }
         for result, value in totals.items():
             self.rca_consumer_records.labels(result=result).set(value)
@@ -467,9 +503,7 @@ class ApplicationMetrics:
         self.rca_consumer_lag_records.labels(scope="total").set(
             health.total_lag if health is not None else 0
         )
-        self.rca_consumer_lag_records.labels(
-            scope="max_partition"
-        ).set(
+        self.rca_consumer_lag_records.labels(scope="max_partition").set(
             health.max_partition_lag if health is not None else 0
         )
 
@@ -478,32 +512,24 @@ class ApplicationMetrics:
         health: TicketSubmissionConsumerHealth | None,
     ) -> None:
         """从 Runner 健康快照刷新低基数工单提交 Consumer 指标。"""
-        self.ticket_submission_consumer_enabled.set(
-            1 if health is not None else 0
-        )
+        self.ticket_submission_consumer_enabled.set(1 if health is not None else 0)
         for state in TicketSubmissionConsumerWorkerState:
             active = health is not None and health.state is state
-            self.ticket_submission_consumer_state.labels(
-                state=state.value
-            ).set(1 if active else 0)
+            self.ticket_submission_consumer_state.labels(state=state.value).set(
+                1 if active else 0
+            )
         self.ticket_submission_consumer_consecutive_failures.set(
             health.consecutive_failures if health is not None else 0
         )
         totals = {
             "polled": health.total_polled if health is not None else 0,
-            "acknowledged": (
-                health.total_acknowledged if health is not None else 0
-            ),
+            "acknowledged": (health.total_acknowledged if health is not None else 0),
             "retried": health.total_retried if health is not None else 0,
-            "dead_lettered": (
-                health.total_dead_lettered if health is not None else 0
-            ),
+            "dead_lettered": (health.total_dead_lettered if health is not None else 0),
             "ignored": health.total_ignored if health is not None else 0,
         }
         for result, value in totals.items():
-            self.ticket_submission_consumer_records.labels(
-                result=result
-            ).set(value)
+            self.ticket_submission_consumer_records.labels(result=result).set(value)
         self.ticket_submission_consumer_last_cycle_timestamp.set(
             self._timestamp_or_zero(
                 health.last_cycle_at if health is not None else None
@@ -523,12 +549,12 @@ class ApplicationMetrics:
         self.ticket_submission_consumer_measured_partitions.set(
             health.measured_partitions if health is not None else 0
         )
-        self.ticket_submission_consumer_lag_records.labels(
-            scope="total"
-        ).set(health.total_lag if health is not None else 0)
-        self.ticket_submission_consumer_lag_records.labels(
-            scope="max_partition"
-        ).set(health.max_partition_lag if health is not None else 0)
+        self.ticket_submission_consumer_lag_records.labels(scope="total").set(
+            health.total_lag if health is not None else 0
+        )
+        self.ticket_submission_consumer_lag_records.labels(scope="max_partition").set(
+            health.max_partition_lag if health is not None else 0
+        )
 
     def update_audit_retention(
         self,
@@ -561,6 +587,37 @@ class ApplicationMetrics:
             )
         )
 
+    def update_remediation_reclaim(
+        self,
+        health: RemediationReclaimWorkerHealth | None,
+    ) -> None:
+        """从 Runner 健康快照刷新低基数修复租约回收指标。"""
+        self.remediation_reclaim_worker_enabled.set(1 if health is not None else 0)
+        for state in RemediationReclaimWorkerState:
+            active = health is not None and health.state is state
+            self.remediation_reclaim_worker_state.labels(state=state.value).set(
+                1 if active else 0
+            )
+        self.remediation_reclaim_worker_consecutive_failures.set(
+            health.consecutive_failures if health is not None else 0
+        )
+        self.remediation_reclaim_worker_cycles.set(
+            health.total_cycles if health is not None else 0
+        )
+        self.remediation_reclaimed_plans.set(
+            health.total_reclaimed_plans if health is not None else 0
+        )
+        self.remediation_reclaim_worker_last_cycle_timestamp.set(
+            self._timestamp_or_zero(
+                health.last_cycle_at if health is not None else None
+            )
+        )
+        self.remediation_reclaim_worker_last_success_timestamp.set(
+            self._timestamp_or_zero(
+                health.last_success_at if health is not None else None
+            )
+        )
+
     def observe_llm_report(
         self,
         outcome: LLMReportGenerationOutcome,
@@ -568,18 +625,14 @@ class ApplicationMetrics:
     ) -> None:
         """记录固定分类的 LLM 结果和有限非负耗时。"""
         if not isinstance(outcome, LLMReportGenerationOutcome):
-            raise ValueError(
-                "outcome must be an LLMReportGenerationOutcome"
-            )
+            raise ValueError("outcome must be an LLMReportGenerationOutcome")
         if (
             isinstance(duration_seconds, bool)
             or not isinstance(duration_seconds, int | float)
             or not math.isfinite(float(duration_seconds))
             or duration_seconds < 0
         ):
-            raise ValueError(
-                "duration_seconds must be a finite non-negative number"
-            )
+            raise ValueError("duration_seconds must be a finite non-negative number")
         labels = {"outcome": outcome.value}
         self.llm_report_generation.labels(**labels).inc()
         self.llm_report_generation_duration.labels(**labels).observe(
@@ -593,18 +646,14 @@ class ApplicationMetrics:
     ) -> None:
         """记录固定分类的外部工单提交结果和有限非负耗时。"""
         if not isinstance(outcome, TicketingGatewaySubmitOutcome):
-            raise ValueError(
-                "outcome must be a TicketingGatewaySubmitOutcome"
-            )
+            raise ValueError("outcome must be a TicketingGatewaySubmitOutcome")
         if (
             isinstance(duration_seconds, bool)
             or not isinstance(duration_seconds, int | float)
             or not math.isfinite(float(duration_seconds))
             or duration_seconds < 0
         ):
-            raise ValueError(
-                "duration_seconds must be a finite non-negative number"
-            )
+            raise ValueError("duration_seconds must be a finite non-negative number")
         labels = {"outcome": outcome.value}
         self.ticketing_gateway_submit.labels(**labels).inc()
         self.ticketing_gateway_submit_duration.labels(**labels).observe(
@@ -626,17 +675,13 @@ class ApplicationMetrics:
 
         oldest = snapshot.oldest_unpublished_at if snapshot is not None else None
         age_seconds = (
-            max(0.0, (now - oldest).total_seconds())
-            if oldest is not None
-            else 0.0
+            max(0.0, (now - oldest).total_seconds()) if oldest is not None else 0.0
         )
         self.outbox_oldest_unpublished_age.set(age_seconds)
         self.outbox_backlog_source_up.set(
             1 if report is not None and report.source_up else 0
         )
-        self.outbox_backlog_stale.set(
-            1 if report is not None and report.stale else 0
-        )
+        self.outbox_backlog_stale.set(1 if report is not None and report.stale else 0)
 
     @staticmethod
     def normalize_method(method: str) -> str:
@@ -673,30 +718,20 @@ class ApplicationMetrics:
         self.rca_consumer_assigned_partitions.set(0)
         self.rca_consumer_measured_partitions.set(0)
         self.rca_consumer_lag_records.labels(scope="total").set(0)
-        self.rca_consumer_lag_records.labels(
-            scope="max_partition"
-        ).set(0)
+        self.rca_consumer_lag_records.labels(scope="max_partition").set(0)
         self.ticket_submission_consumer_enabled.set(0)
         for state in TicketSubmissionConsumerWorkerState:
-            self.ticket_submission_consumer_state.labels(
-                state=state.value
-            ).set(0)
+            self.ticket_submission_consumer_state.labels(state=state.value).set(0)
         self.ticket_submission_consumer_consecutive_failures.set(0)
         for result in _TICKET_SUBMISSION_CONSUMER_RESULTS:
-            self.ticket_submission_consumer_records.labels(
-                result=result
-            ).set(0)
+            self.ticket_submission_consumer_records.labels(result=result).set(0)
         self.ticket_submission_consumer_last_cycle_timestamp.set(0)
         self.ticket_submission_consumer_last_success_timestamp.set(0)
         self.ticket_submission_consumer_lag_source_up.set(0)
         self.ticket_submission_consumer_assigned_partitions.set(0)
         self.ticket_submission_consumer_measured_partitions.set(0)
-        self.ticket_submission_consumer_lag_records.labels(
-            scope="total"
-        ).set(0)
-        self.ticket_submission_consumer_lag_records.labels(
-            scope="max_partition"
-        ).set(0)
+        self.ticket_submission_consumer_lag_records.labels(scope="total").set(0)
+        self.ticket_submission_consumer_lag_records.labels(scope="max_partition").set(0)
         self.audit_retention_worker_enabled.set(0)
         for state in AuditRetentionWorkerState:
             self.audit_retention_worker_state.labels(state=state.value).set(0)
@@ -705,6 +740,14 @@ class ApplicationMetrics:
         self.audit_retention_purged_workflow_runs.set(0)
         self.audit_retention_worker_last_cycle_timestamp.set(0)
         self.audit_retention_worker_last_success_timestamp.set(0)
+        self.remediation_reclaim_worker_enabled.set(0)
+        for state in RemediationReclaimWorkerState:
+            self.remediation_reclaim_worker_state.labels(state=state.value).set(0)
+        self.remediation_reclaim_worker_consecutive_failures.set(0)
+        self.remediation_reclaim_worker_cycles.set(0)
+        self.remediation_reclaimed_plans.set(0)
+        self.remediation_reclaim_worker_last_cycle_timestamp.set(0)
+        self.remediation_reclaim_worker_last_success_timestamp.set(0)
         for outcome in LLMReportGenerationOutcome:
             labels = {"outcome": outcome.value}
             self.llm_report_generation.labels(**labels)

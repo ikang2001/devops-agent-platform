@@ -96,6 +96,28 @@ def test_step5_kubernetes_manifests_keep_security_and_release_gates() -> None:
     assert set(network["spec"]["policyTypes"]) == {"Ingress", "Egress"}
 
 
+def test_remediation_reclaim_deployment_defaults_are_bounded_and_disabled() -> None:
+    config = load_yaml(K8S_ROOT / "configmap.yaml")["data"]
+    expected = {
+        "DEVOPS_AGENT_REMEDIATION_RECLAIM_WORKER_ENABLED": "false",
+        "DEVOPS_AGENT_REMEDIATION_RECLAIM_BATCH_SIZE": "50",
+        "DEVOPS_AGENT_REMEDIATION_RECLAIM_INTERVAL_SECONDS": "30",
+        "DEVOPS_AGENT_REMEDIATION_RECLAIM_ERROR_BACKOFF_INITIAL_SECONDS": "5",
+        "DEVOPS_AGENT_REMEDIATION_RECLAIM_ERROR_BACKOFF_MAX_SECONDS": "300",
+        "DEVOPS_AGENT_REMEDIATION_RECLAIM_SHUTDOWN_TIMEOUT_SECONDS": "30",
+    }
+    assert expected.items() <= config.items()
+
+    production_env = (
+        DEPLOY_ROOT / "env.production.example"
+    ).read_text(encoding="utf-8")
+    local_env = (ROOT / ".env.example").read_text(encoding="utf-8")
+    for name, value in expected.items():
+        assignment = f"{name}={value}"
+        assert assignment in production_env
+        assert assignment in local_env
+
+
 def test_step5_ci_pipeline_keeps_quality_supply_chain_and_migration_gates() -> None:
     workflow = load_yaml(ROOT / ".github" / "workflows" / "ci.yml")
     jobs = workflow["jobs"]

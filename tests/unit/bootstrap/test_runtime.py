@@ -27,6 +27,9 @@ from devops_agent_platform.application.services.rca_cancellation_service import 
 from devops_agent_platform.application.services.rca_consumer_runner import (
     RCAConsumerRunner,
 )
+from devops_agent_platform.application.services.remediation_reclaim_worker import (
+    RemediationReclaimWorkerRunner,
+)
 from devops_agent_platform.application.services.runbook_admin_service import (
     RunbookAdminService,
 )
@@ -59,9 +62,7 @@ from devops_agent_platform.ports.ticketing import (
     TicketingSubmitRequest,
 )
 
-TicketSubmissionConsumerRunner = (
-    ticket_consumer_runner.TicketSubmissionConsumerRunner
-)
+TicketSubmissionConsumerRunner = ticket_consumer_runner.TicketSubmissionConsumerRunner
 
 
 class FakeConnection:
@@ -353,12 +354,16 @@ def make_runtime(
     audit_retention_worker: (
         CooperativeWorker | BlockingWorker | CrashingWorker | None
     ) = None,
+    remediation_reclaim_worker: (
+        CooperativeWorker | BlockingWorker | CrashingWorker | None
+    ) = None,
     ticket_submission_consumer_worker: (
         CooperativeWorker | BlockingWorker | CrashingWorker | None
     ) = None,
     shutdown_timeout_seconds: float = 0.1,
     rca_consumer_shutdown_timeout_seconds: float = 0.1,
     ticket_submission_consumer_shutdown_timeout_seconds: float = 0.1,
+    remediation_reclaim_shutdown_timeout_seconds: float = 0.1,
     readiness_database_timeout_seconds: float = 0.1,
     readiness_cache_ttl_seconds: float = 2.0,
     readiness_clock: FakeClock | None = None,
@@ -371,9 +376,7 @@ def make_runtime(
         alert_service=build_skeleton_alert_service(),
         rca_service=build_skeleton_rca_service(),
         shutdown_timeout_seconds=shutdown_timeout_seconds,
-        rca_consumer_shutdown_timeout_seconds=(
-            rca_consumer_shutdown_timeout_seconds
-        ),
+        rca_consumer_shutdown_timeout_seconds=(rca_consumer_shutdown_timeout_seconds),
         readiness_database_timeout_seconds=readiness_database_timeout_seconds,
         readiness_cache_ttl_seconds=readiness_cache_ttl_seconds,
         publisher=publisher,
@@ -381,11 +384,13 @@ def make_runtime(
         worker=worker,
         rca_consumer_worker=rca_consumer_worker,
         audit_retention_worker=audit_retention_worker,
-        ticket_submission_consumer_worker=(
-            ticket_submission_consumer_worker
-        ),
+        remediation_reclaim_worker=remediation_reclaim_worker,
+        ticket_submission_consumer_worker=(ticket_submission_consumer_worker),
         ticket_submission_consumer_shutdown_timeout_seconds=(
             ticket_submission_consumer_shutdown_timeout_seconds
+        ),
+        remediation_reclaim_shutdown_timeout_seconds=(
+            remediation_reclaim_shutdown_timeout_seconds
         ),
         managed_resources=managed_resources,
         readiness_clock=readiness_clock or FakeClock(),
@@ -496,9 +501,7 @@ async def test_build_runtime_constructs_selected_admin_authenticator() -> None:
             admin_oidc_enabled=True,
             admin_oidc_issuer="https://identity.example.com/",
             admin_oidc_audience="devops-agent-api",
-            admin_oidc_jwks_url=(
-                "https://identity.example.com/.well-known/jwks.json"
-            ),
+            admin_oidc_jwks_url=("https://identity.example.com/.well-known/jwks.json"),
         )
     )
     demo = build_runtime(
@@ -568,6 +571,40 @@ async def test_build_runtime_keeps_retention_disabled_by_default() -> None:
             enabled.audit_retention_worker,
             AuditRetentionWorkerRunner,
         )
+    finally:
+        await disabled.close()
+        await enabled.close()
+
+
+async def test_build_runtime_keeps_remediation_reclaim_disabled_by_default() -> None:
+    """过期租约自动收口必须由部署环境显式开启。"""
+    disabled = build_runtime(
+        Settings(
+            _env_file=None,
+            database_url="sqlite+aiosqlite:///:memory:",
+        )
+    )
+    enabled = build_runtime(
+        Settings(
+            _env_file=None,
+            database_url="sqlite+aiosqlite:///:memory:",
+            remediation_controller_base_url="https://automation.example",
+            remediation_action_catalog_path=("ops/remediation/actions.example.json"),
+            remediation_reclaim_worker_enabled=True,
+            remediation_reclaim_worker_id="remediation-reclaim-001",
+            remediation_reclaim_batch_size=17,
+        )
+    )
+    try:
+        assert disabled.remediation_reclaim_worker is None
+        assert isinstance(
+            enabled.remediation_reclaim_worker,
+            RemediationReclaimWorkerRunner,
+        )
+        assert enabled.remediation_reclaim_worker._worker_id == (
+            "remediation-reclaim-001"
+        )
+        assert enabled.remediation_reclaim_worker._config.batch_size == 17
     finally:
         await disabled.close()
         await enabled.close()
@@ -720,9 +757,7 @@ async def test_build_runtime_constructs_vendor_ticketing_router() -> None:
             ticketing_jira_api_token=SecretStr("jira-secret"),
             ticketing_jira_project_key="OPS",
             ticketing_servicenow_enabled=True,
-            ticketing_servicenow_base_url=(
-                "https://example.service-now.com"
-            ),
+            ticketing_servicenow_base_url=("https://example.service-now.com"),
             ticketing_servicenow_username="devops.integration",
             ticketing_servicenow_password=SecretStr("snow-secret"),
         ),
@@ -944,10 +979,7 @@ async def test_readiness_reuses_database_probe_until_cache_expires() -> None:
 
     clock.advance(2)
     engine.block_probe = True
-    tasks = [
-        asyncio.create_task(runtime.check_readiness())
-        for _ in range(10)
-    ]
+    tasks = [asyncio.create_task(runtime.check_readiness()) for _ in range(10)]
     await engine.probe_started.wait()
     assert engine.probe_count == 2
     engine.probe_release.set()
@@ -977,6 +1009,7 @@ async def test_database_failure_after_cache_expiry_marks_runtime_not_ready() -> 
         "outbox_worker": {"status": "disabled"},
         "rca_consumer": {"status": "disabled"},
         "audit_retention": {"status": "disabled"},
+        "remediation_reclaim": {"status": "disabled"},
         "ticket_submission_consumer": {"status": "disabled"},
     }
     await runtime.close()
@@ -1001,9 +1034,7 @@ async def test_database_readiness_failure_log_excludes_exception_details(
         snapshot = await runtime.check_readiness()
 
     assert snapshot.ready is False
-    assert "数据库就绪检查失败" in [
-        record.getMessage() for record in caplog.records
-    ]
+    assert "数据库就绪检查失败" in [record.getMessage() for record in caplog.records]
     assert all(record.exc_info is None for record in caplog.records)
     assert "database-secret" not in caplog.text
     await runtime.close()
@@ -1069,9 +1100,7 @@ async def test_worker_crash_log_excludes_exception_details(
         await asyncio.sleep(0)
 
     assert runtime._worker_failure == "RuntimeError"
-    assert "Outbox Worker异常退出" in [
-        record.getMessage() for record in caplog.records
-    ]
+    assert "Outbox Worker异常退出" in [record.getMessage() for record in caplog.records]
     assert all(record.exc_info is None for record in caplog.records)
     assert "worker-secret" not in caplog.text
     with pytest.raises(RuntimeError, match="worker-secret"):
@@ -1085,6 +1114,7 @@ async def test_runtime_manages_all_workers_independently() -> None:
     outbox_worker = CooperativeWorker(events, label="outbox")
     rca_worker = CooperativeWorker(events, label="rca")
     retention_worker = CooperativeWorker(events, label="retention")
+    reclaim_worker = CooperativeWorker(events, label="reclaim")
     ticket_worker = CooperativeWorker(events, label="ticket")
     runtime = make_runtime(
         events,
@@ -1092,6 +1122,7 @@ async def test_runtime_manages_all_workers_independently() -> None:
         worker=outbox_worker,
         rca_consumer_worker=rca_worker,
         audit_retention_worker=retention_worker,
+        remediation_reclaim_worker=reclaim_worker,
         ticket_submission_consumer_worker=ticket_worker,
     )
 
@@ -1099,25 +1130,22 @@ async def test_runtime_manages_all_workers_independently() -> None:
     snapshot = await runtime.check_readiness()
     await runtime.close()
 
-    assert snapshot.to_dict()["components"]["outbox_worker"] == {
-        "status": "up"
-    }
-    assert snapshot.to_dict()["components"]["rca_consumer"] == {
-        "status": "up"
-    }
-    assert snapshot.to_dict()["components"]["audit_retention"] == {
-        "status": "up"
-    }
+    assert snapshot.to_dict()["components"]["outbox_worker"] == {"status": "up"}
+    assert snapshot.to_dict()["components"]["rca_consumer"] == {"status": "up"}
+    assert snapshot.to_dict()["components"]["audit_retention"] == {"status": "up"}
+    assert snapshot.to_dict()["components"]["remediation_reclaim"] == {"status": "up"}
     assert snapshot.to_dict()["components"]["ticket_submission_consumer"] == {
         "status": "up"
     }
     assert events.index("database-check") < events.index("outbox-start")
     assert events.index("database-check") < events.index("rca-start")
     assert events.index("database-check") < events.index("retention-start")
+    assert events.index("database-check") < events.index("reclaim-start")
     assert events.index("database-check") < events.index("ticket-start")
     assert events.index("outbox-finish") < events.index("publisher-close")
     assert events.index("rca-finish") < events.index("publisher-close")
     assert events.index("retention-finish") < events.index("publisher-close")
+    assert events.index("reclaim-finish") < events.index("publisher-close")
     assert events.index("ticket-finish") < events.index("publisher-close")
     assert events[-1] == "engine-dispose"
 
@@ -1135,9 +1163,7 @@ async def test_rca_consumer_crash_marks_only_its_readiness_down() -> None:
     snapshot = await runtime.check_readiness()
 
     assert snapshot.unavailable_components == ("rca_consumer",)
-    assert snapshot.to_dict()["components"]["outbox_worker"] == {
-        "status": "disabled"
-    }
+    assert snapshot.to_dict()["components"]["outbox_worker"] == {"status": "disabled"}
     with pytest.raises(RuntimeError, match="worker crashed"):
         await runtime.close()
 
@@ -1157,10 +1183,29 @@ async def test_ticket_submission_consumer_crash_marks_only_it_down() -> None:
     await asyncio.sleep(0)
     snapshot = await runtime.check_readiness()
 
-    assert snapshot.unavailable_components == (
-        "ticket_submission_consumer",
+    assert snapshot.unavailable_components == ("ticket_submission_consumer",)
+    assert snapshot.to_dict()["components"]["rca_consumer"] == {"status": "disabled"}
+    with pytest.raises(RuntimeError, match="worker crashed"):
+        await runtime.close()
+
+
+async def test_remediation_reclaim_crash_marks_only_it_down() -> None:
+    """租约回收任务崩溃应有独立组件状态和清理错误传播。"""
+    events: list[str] = []
+    reclaim_worker = CrashingWorker(events, label="reclaim")
+    runtime = make_runtime(
+        events,
+        remediation_reclaim_worker=reclaim_worker,
     )
-    assert snapshot.to_dict()["components"]["rca_consumer"] == {
+    await runtime.start()
+
+    reclaim_worker.release.set()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    snapshot = await runtime.check_readiness()
+
+    assert snapshot.unavailable_components == ("remediation_reclaim",)
+    assert snapshot.to_dict()["components"]["audit_retention"] == {
         "status": "disabled"
     }
     with pytest.raises(RuntimeError, match="worker crashed"):
@@ -1173,6 +1218,14 @@ def test_runtime_rejects_invalid_ticket_consumer_shutdown_timeout() -> None:
         make_runtime(
             [],
             ticket_submission_consumer_shutdown_timeout_seconds=0,
+        )
+
+
+def test_runtime_rejects_invalid_remediation_reclaim_shutdown_timeout() -> None:
+    with pytest.raises(ValueError, match="remediation_reclaim"):
+        make_runtime(
+            [],
+            remediation_reclaim_shutdown_timeout_seconds=0,
         )
 
 
@@ -1200,9 +1253,7 @@ async def test_build_runtime_wires_remediation_with_kill_switch_off() -> None:
             _env_file=None,
             database_url="sqlite+aiosqlite:///:memory:",
             remediation_controller_base_url="https://automation.example",
-            remediation_action_catalog_path=(
-                "ops/remediation/actions.example.json"
-            ),
+            remediation_action_catalog_path=("ops/remediation/actions.example.json"),
         )
     )
     try:

@@ -19,14 +19,16 @@
 | 端口 | `src/devops_agent_platform/ports/remediation.py` |
 | ORM/Mapper/Repo | `infrastructure/database/models|mappers/...`、`adapters/sqlalchemy/remediation_repository.py` |
 | 迁移 | `migrations/versions/20260723_0028_create_remediation_plans.py` |
-| 配置 | `settings.remediation_lease_seconds`；timeout 必须 < lease |
-| 接线 | `bootstrap/runtime.py` 注入 lease / timeout |
-| 测试 | `tests/unit/application/test_remediation_service.py` 等 |
+| 配置 | lease/timeout + 默认关闭的 reclaim Worker 有界轮询与停机配置 |
+| 接线 | `bootstrap/runtime.py` 注入 lease / timeout，并监督 reclaim Worker |
+| 监控 | readiness、低基数指标、Prometheus 告警、专用 Runbook |
+| 测试 | service / Worker / Runtime / Settings / metrics / ops 资产测试 |
 
-## MVP 边界（诚实）
+## 当前边界（诚实）
 
-- **有**：领域 fence、服务 timeout、stale 列表、`reclaim_stale()`
-- **无**：独立后台 reclaim worker、自动重试外部写、HTTP reclaim API
+- **有**：领域 fence、服务 timeout、stale 列表、`reclaim_stale()`、默认关闭的
+  独立后台 Worker、Runtime 监督、指标、告警和 Runbook
+- **无**：自动重试/接管外部写、HTTP reclaim API、真实 staging 控制器故障注入签字
 
 ## 验收要点
 
@@ -34,6 +36,8 @@
 2. finish 不匹配 owner/attempt → Conflict
 3. 租约过期 → reclaim 为 FAILED，且旧 finish 被拒
 4. settings：`request_timeout < lease`
+5. Worker 每轮总量不超过 batch size，默认关闭，停机可中断轮询等待
+6. Worker 异常降级健康状态并有界退避；崩溃会使 readiness 降级
 
 ## 与路线 A 的关系
 

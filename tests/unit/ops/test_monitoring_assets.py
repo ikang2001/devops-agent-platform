@@ -383,6 +383,19 @@ def test_rca_dead_letter_runbook_documents_reason_codes() -> None:
     assert "CANCELED" in text
 
 
+def test_remediation_reclaim_runbook_preserves_manual_retry_boundary() -> None:
+    """租约回收处置不能被误写成外部修复自动接管。"""
+    text = (
+        RUNBOOK_DIR / "devops-agent-remediation-reclaim.md"
+    ).read_text(encoding="utf-8")
+
+    assert "不重试外部写" in text
+    assert "不接管执行" in text
+    assert "owner/attempt fence" in text
+    assert "创建并审批新计划" in text
+    assert "不要直接更新状态列" in text
+
+
 def test_notification_template_does_not_dump_arbitrary_labels() -> None:
     template = (
         ALERTMANAGER_DIR / "templates" / "devops-agent.tmpl"
