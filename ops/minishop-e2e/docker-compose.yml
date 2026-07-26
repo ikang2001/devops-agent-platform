@@ -195,7 +195,7 @@ services:
       - alertmanager
 
   alertmanager:
-    image: prom/alertmanager:v0.28.0
+    image: prom/alertmanager:v0.32.0
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager

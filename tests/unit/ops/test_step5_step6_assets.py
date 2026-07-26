@@ -145,13 +145,27 @@ def test_step6_productization_assets_define_feedback_eval_and_governance() -> No
         encoding="utf-8"
     )
 
-    assert "full UI and provider" in step6
+    assert "partial local product surfaces implemented" in step6
+    assert "Example Or Blueprint Only" in step6
+    assert "Not Loaded By Runtime" in step6
+    assert "Platform-level remediation plan API" in step6
+    assert "MiniShop allowlisted remediation sandbox" in step6
     assert "Incident Workbench" in console
     assert "RCA Report Review" in console
     assert "Regression Gate" in loop
+    assert "Not implemented" in loop
     assert "Feature Flags" in loop
+    assert "governance draft only" in rag
     assert "tenant-scoped" in rag
     assert "No execution from raw LLM text" in remediation
+    assert "Risk, expected effect, rollback action" in remediation
+    assert "production automated-remediation engine" in remediation
+    assert (ROOT / "ops/remediation/actions.example.json").is_file()
+    assert (ROOT / "ops/remediation/minishop-remediation.py").is_file()
+
+    product_readme = (PRODUCT_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "Example / blueprint only" in product_readme
+    assert "Not loaded by runtime" in product_readme
 
 
 def test_step6_yaml_examples_are_versioned_and_rollout_gated() -> None:

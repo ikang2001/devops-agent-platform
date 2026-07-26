@@ -5,7 +5,7 @@ import math
 import re
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import Any, Protocol
@@ -22,6 +22,7 @@ from devops_agent_platform.application.exceptions import (
 )
 from devops_agent_platform.domain.enums import (
     EvidenceType,
+    RCAConclusionStatus,
     ToolInvocationStatus,
     ToolRiskLevel,
 )
@@ -33,6 +34,7 @@ from devops_agent_platform.domain.models.evidence import (
     Evidence,
     build_evidence_content,
 )
+from devops_agent_platform.domain.models.rca_report import RCAReport
 from devops_agent_platform.domain.models.tool_invocation import (
     ToolInvocation,
     build_tool_payload_sha256,
@@ -208,6 +210,11 @@ class ControlledAgentWorkflowConfig:
     evidence_sanitizer: EvidenceSanitizerConfig = field(
         default_factory=EvidenceSanitizerConfig
     )
+    # C0：单步工具失败时是否继续后续只读步骤；默认 False 保持历史 fail-fast。
+    continue_on_step_failure: bool = False
+    # 报告生成器只能在证据覆盖范围内给出候选置信度，不能绕过工作流护栏。
+    report_confidence_cap: float = 1.0
+    partial_report_confidence_cap: float = 0.4
 
     def __post_init__(self) -> None:
         """拒绝无界计划、无效容量和未经审批的高风险配置。"""
@@ -239,6 +246,21 @@ class ControlledAgentWorkflowConfig:
             raise AppValidationError(
                 "evidence_sanitizer must be an EvidenceSanitizerConfig"
             )
+        if not isinstance(self.continue_on_step_failure, bool):
+            raise AppValidationError("continue_on_step_failure must be a boolean")
+        self._validate_confidence_cap(
+            "report_confidence_cap",
+            self.report_confidence_cap,
+        )
+        self._validate_confidence_cap(
+            "partial_report_confidence_cap",
+            self.partial_report_confidence_cap,
+        )
+        if self.partial_report_confidence_cap > self.report_confidence_cap:
+            raise AppValidationError(
+                "partial_report_confidence_cap must not exceed "
+                "report_confidence_cap"
+            )
 
     @staticmethod
     def _validate_positive_int(
@@ -252,6 +274,16 @@ class ControlledAgentWorkflowConfig:
             or not 1 <= value <= maximum
         ):
             raise AppValidationError(f"{field_name} must be between 1 and {maximum}")
+
+    @staticmethod
+    def _validate_confidence_cap(field_name: str, value: float) -> None:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or not math.isfinite(float(value))
+            or not 0 <= float(value) <= 1
+        ):
+            raise AppValidationError(f"{field_name} must be between 0 and 1")
 
 
 @dataclass(frozen=True)
@@ -294,10 +326,18 @@ class ControlledAgentWorkflow:
         self,
         command: ExecuteRCAWorkflowCommand,
     ) -> AgentWorkflowResult:
-        """全量预检后，按固定顺序执行工具步骤并收集结构化证据。"""
+        """全量预检后，按固定顺序执行工具步骤并收集结构化证据。
+
+        默认 fail-fast：任一步失败立即抛出 ``AgentWorkflowExecutionFailure``。
+        开启 ``continue_on_step_failure`` 后：记录失败调用并继续后续只读步骤；
+        若最终至少有一条证据则降级生成报告，否则仍按失败收口。
+        """
         prepared_steps = await self._prepare_steps(command)
         evidence_items: list[Evidence] = []
         invocation_items: list[ToolInvocation] = []
+        # 记录最后一次步骤失败，供“零证据”场景作为 cause 抛出。
+        last_step_failure: Exception | None = None
+        failed_step_ids: list[str] = []
         for prepared in prepared_steps:
             started_at = self._now()
             started_tick = self._read_monotonic()
@@ -344,13 +384,18 @@ class ControlledAgentWorkflow:
                         started_tick=started_tick,
                     )
                 )
-                raise AgentWorkflowExecutionFailure(
-                    AgentWorkflowResult(
-                        evidence=tuple(evidence_items),
-                        invocations=tuple(invocation_items),
-                    ),
-                    failure,
-                ) from failure
+                last_step_failure = failure
+                failed_step_ids.append(prepared.step.step_id)
+                # 兼容旧行为：未开启降级时立即失败。
+                if not self._config.continue_on_step_failure:
+                    raise AgentWorkflowExecutionFailure(
+                        AgentWorkflowResult(
+                            evidence=tuple(evidence_items),
+                            invocations=tuple(invocation_items),
+                        ),
+                        failure,
+                    ) from failure
+                continue
 
             evidence_items.append(evidence)
             invocation_items.append(
@@ -366,14 +411,30 @@ class ControlledAgentWorkflow:
                     started_tick=started_tick,
                 )
             )
+
         workflow_result = AgentWorkflowResult(
             evidence=tuple(evidence_items),
             invocations=tuple(invocation_items),
         )
+        # 全部步骤失败或没有任何可引用证据：不能伪装成成功 RCA。
+        if not evidence_items:
+            failure = last_step_failure or AgentWorkflowError(
+                "RCA workflow produced no evidence"
+            )
+            raise AgentWorkflowExecutionFailure(
+                workflow_result,
+                failure,
+            ) from failure
+
         try:
             report = await self._report_generator.generate(
                 command,
                 workflow_result.evidence,
+            )
+            report = self._apply_report_guardrails(
+                report,
+                workflow_result.evidence,
+                failed_step_ids,
             )
         except asyncio.CancelledError:
             raise
@@ -387,6 +448,58 @@ class ControlledAgentWorkflow:
             invocations=workflow_result.invocations,
             report=report,
         )
+
+    def _apply_report_guardrails(
+        self,
+        report: RCAReport,
+        evidence: tuple[Evidence, ...],
+        failed_step_ids: list[str],
+    ) -> RCAReport:
+        """按计划证据类型覆盖率下调置信度，并标明部分采集。"""
+        expected_types = {
+            self._evidence_type_for_tool(step.tool_name) for step in self._plan.steps
+        }
+        collected_types = {item.evidence_type for item in evidence}
+        type_coverage = len(expected_types & collected_types) / len(expected_types)
+        confidence_cap = min(
+            type_coverage,
+            float(self._config.report_confidence_cap),
+        )
+        if failed_step_ids:
+            confidence_cap = min(
+                confidence_cap,
+                float(self._config.partial_report_confidence_cap),
+            )
+        conclusion_status = report.conclusion_status
+        if conclusion_status is RCAConclusionStatus.CONFIRMED:
+            conclusion_status = RCAConclusionStatus.UNDETERMINED
+        summary = self._append_partial_marker(report.summary, failed_step_ids)
+        return replace(
+            report,
+            conclusion_status=conclusion_status,
+            summary=summary,
+            confidence=min(float(report.confidence), confidence_cap),
+        )
+
+    @staticmethod
+    def _append_partial_marker(summary: str, failed_step_ids: list[str]) -> str:
+        """保留失败步骤标记；摘要过长时优先截断原始生成内容。"""
+        if not failed_step_ids or "Partial collection:" in summary:
+            return summary
+        marker = (
+            " Partial collection: failed steps="
+            + ",".join(failed_step_ids)
+            + "."
+        )
+        maximum_summary_length = 4096 - len(marker)
+        return summary[:maximum_summary_length].rstrip() + marker
+
+    @staticmethod
+    def _evidence_type_for_tool(tool_name: str) -> EvidenceType:
+        return _TOOL_EVIDENCE_DEFAULTS.get(
+            tool_name,
+            (EvidenceType.RUNBOOK, tool_name),
+        )[0]
 
     async def _prepare_steps(
         self,
@@ -476,10 +589,13 @@ class ControlledAgentWorkflow:
         result: dict[str, Any],
     ) -> Evidence:
         """把单步工具输出转换为可持久化 Evidence。"""
-        evidence_type, default_source = _TOOL_EVIDENCE_DEFAULTS.get(
-            prepared.definition.tool_name,
-            (EvidenceType.RUNBOOK, prepared.definition.tool_name),
+        evidence_type = self._evidence_type_for_tool(
+            prepared.definition.tool_name
         )
+        default_source = _TOOL_EVIDENCE_DEFAULTS.get(
+            prepared.definition.tool_name,
+            (evidence_type, prepared.definition.tool_name),
+        )[1]
         source = self._extract_source(result, default_source)
         content_json, content_sha256 = build_evidence_content(result)
         return Evidence(

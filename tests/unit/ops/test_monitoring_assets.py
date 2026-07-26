@@ -268,6 +268,55 @@ def test_alertmanager_routes_reference_hardened_receivers() -> None:
         assert slack_config["text"] == '{{ template "devops.text" . }}'
 
 
+def test_multichannel_alertmanager_fans_out_critical_with_file_secrets() -> None:
+    config = load_yaml(
+        ALERTMANAGER_DIR / "alertmanager.multichannel.example.yml"
+    )
+    routes = config["route"]["routes"]
+    critical_routes = [
+        route
+        for route in routes
+        if 'severity="critical"' in route["matchers"]
+    ]
+    receivers = {
+        receiver["name"]: receiver
+        for receiver in config["receivers"]
+    }
+
+    assert [route["receiver"] for route in critical_routes] == [
+        "platform-critical-slack",
+        "platform-critical-teams",
+        "platform-critical-pagerduty",
+    ]
+    assert [route.get("continue", False) for route in critical_routes] == [
+        True,
+        True,
+        False,
+    ]
+
+    teams = receivers["platform-critical-teams"]["msteamsv2_configs"][0]
+    assert teams["webhook_url_file"] == (
+        "/run/secrets/alertmanager-teams-critical-url"
+    )
+    assert "webhook_url" not in teams
+    assert teams["send_resolved"] is True
+
+    pagerduty = receivers["platform-critical-pagerduty"][
+        "pagerduty_configs"
+    ][0]
+    assert pagerduty["routing_key_file"] == (
+        "/run/secrets/alertmanager-pagerduty-routing-key"
+    )
+    assert "routing_key" not in pagerduty
+    assert pagerduty["send_resolved"] is True
+    assert set(pagerduty["details"]) == {
+        "service",
+        "job",
+        "firing",
+        "resolved",
+    }
+
+
 def test_inhibition_rules_are_explicit_and_scoped() -> None:
     config = load_yaml(ALERTMANAGER_DIR / "alertmanager.example.yml")
 

@@ -20,6 +20,7 @@ from devops_agent_platform.application.exceptions import (
 )
 from devops_agent_platform.domain.enums import (
     EvidenceType,
+    RCAConclusionStatus,
     ToolInvocationStatus,
     ToolRiskLevel,
 )
@@ -28,6 +29,7 @@ from devops_agent_platform.domain.exceptions import (
     PermissionDenied,
     ResourceNotFound,
 )
+from devops_agent_platform.domain.models.rca_report import RCAReport
 from devops_agent_platform.ports.workflow import (
     AgentWorkflowExecutionFailure,
 )
@@ -155,6 +157,49 @@ class RecordingToolExecutor:
             definition.tool_name,
             {"status": "ok"},
         )  # type: ignore[return-value]
+
+
+class StaticReportGenerator:
+    """返回高置信度固定报告，用于验证工作流侧护栏。"""
+
+    def __init__(
+        self,
+        *,
+        confidence: float = 0.95,
+        conclusion_status: RCAConclusionStatus = RCAConclusionStatus.CANDIDATE,
+    ) -> None:
+        self._confidence = confidence
+        self._conclusion_status = conclusion_status
+
+    async def generate(self, command, evidence) -> RCAReport:
+        type_names = sorted({item.evidence_type.value for item in evidence})
+        type_counts = tuple(
+            (
+                type_name,
+                sum(
+                    item.evidence_type.value == type_name
+                    for item in evidence
+                ),
+            )
+            for type_name in type_names
+        )
+        return RCAReport(
+            report_id="static-report",
+            tenant_id=command.tenant_id,
+            incident_id=command.incident_id,
+            workflow_run_id=command.workflow_run_id,
+            execution_attempt=command.execution_attempt,
+            conclusion_status=self._conclusion_status,
+            title="Generated candidate",
+            summary="Generated from collected evidence.",
+            confidence=self._confidence,
+            evidence_ids=tuple(item.evidence_id for item in evidence),
+            evidence_type_counts=type_counts,
+            recommendations=("Review the cited evidence.",),
+            generator_name="static-test-generator",
+            generator_version="v1",
+            generated_at=datetime(2026, 7, 26, 0, 0, tzinfo=UTC),
+        )
 
 
 def build_workflow(
@@ -455,6 +500,79 @@ async def test_tool_failure_stops_following_steps() -> None:
     assert "execute:logs.query" not in events
 
 
+async def test_continue_on_failure_returns_partial_guarded_report() -> None:
+    """部分采集只能生成带失败标记、低置信度且非 CONFIRMED 的报告。"""
+    events: list[str] = []
+    executor = RecordingToolExecutor(
+        events,
+        failed_tool="metrics.query",
+    )
+    workflow, _, _ = build_workflow(
+        executor=executor,
+        config=ControlledAgentWorkflowConfig(continue_on_step_failure=True),
+        report_generator=StaticReportGenerator(
+            conclusion_status=RCAConclusionStatus.CONFIRMED,
+        ),
+        events=events,
+    )
+
+    result = await workflow.execute(build_command())
+
+    assert [item.status for item in result.invocations] == [
+        ToolInvocationStatus.FAILED,
+        ToolInvocationStatus.SUCCEEDED,
+    ]
+    assert [item.evidence_type for item in result.evidence] == [EvidenceType.LOG]
+    assert result.report is not None
+    assert result.report.conclusion_status is RCAConclusionStatus.UNDETERMINED
+    assert result.report.confidence == 0.4
+    assert "Partial collection: failed steps=collect.metrics" in (
+        result.report.summary
+    )
+    assert events[-1] == "execute:logs.query"
+
+
+async def test_continue_on_failure_rejects_zero_evidence() -> None:
+    """即使开启降级，所有步骤均失败时也不能伪造空 RCA 报告。"""
+    events: list[str] = []
+    executor = RecordingToolExecutor(
+        events,
+        results={
+            "metrics.query": ["invalid"],
+            "logs.query": ["invalid"],
+        },
+    )
+    workflow, _, _ = build_workflow(
+        executor=executor,
+        config=ControlledAgentWorkflowConfig(continue_on_step_failure=True),
+        events=events,
+    )
+
+    with pytest.raises(AgentWorkflowExecutionFailure) as captured:
+        await workflow.execute(build_command())
+
+    assert captured.value.result.evidence == ()
+    assert [item.status for item in captured.value.result.invocations] == [
+        ToolInvocationStatus.FAILED,
+        ToolInvocationStatus.FAILED,
+    ]
+    assert events[-2:] == ["execute:metrics.query", "execute:logs.query"]
+
+
+async def test_report_confidence_respects_configured_cap() -> None:
+    """完整采集也只能下调生成器分数，不能超过工作流配置上限。"""
+    workflow, _, _ = build_workflow(
+        config=ControlledAgentWorkflowConfig(report_confidence_cap=0.6),
+        report_generator=StaticReportGenerator(confidence=0.95),
+    )
+
+    result = await workflow.execute(build_command())
+
+    assert result.report is not None
+    assert result.report.conclusion_status is RCAConclusionStatus.CANDIDATE
+    assert result.report.confidence == 0.6
+
+
 async def test_outer_cancellation_propagates_to_tool() -> None:
     """租约失权或Runtime停机取消时，正在执行的工具必须收到取消。"""
     events: list[str] = []
@@ -534,6 +652,15 @@ def test_plan_and_configuration_reject_unsafe_structure() -> None:
         ControlledAgentWorkflowConfig(
             allowed_risk_levels=frozenset({ToolRiskLevel.HIGH})
         )
+
+    with pytest.raises(AppValidationError, match="partial_report_confidence_cap"):
+        ControlledAgentWorkflowConfig(
+            report_confidence_cap=0.3,
+            partial_report_confidence_cap=0.4,
+        )
+
+    with pytest.raises(AppValidationError, match="between 0 and 1"):
+        ControlledAgentWorkflowConfig(report_confidence_cap=float("nan"))
 
     with pytest.raises(AppValidationError, match="must not exceed"):
         build_workflow(

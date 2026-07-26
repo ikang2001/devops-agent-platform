@@ -1,5 +1,9 @@
 # RAG And Knowledge Governance
 
+Status: **governance draft only**. There is no embedding, vector index, or
+historical-incident retrieval implementation under `src/`. Current RCA knowledge
+retrieval is relational Runbook search by tenant and service name.
+
 ## Knowledge Sources
 
 - Published Runbooks from the relational catalog.

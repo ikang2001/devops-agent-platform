@@ -93,7 +93,9 @@ def test_text_dataclasses_keep_c0_and_del_validation() -> None:
                     for item in text_dataclasses
                 )
 
-    assert audited_classes == 28
+    # New bounded DTO/command/domain records may legitimately increase this
+    # count; the dynamic scan above is the guard, not a frozen class total.
+    assert audited_classes >= 28
     assert violations == []
 
 

@@ -7,18 +7,16 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-EXPECTED_HEAD = "20260703_0026"
+EXPECTED_HEAD = "20260723_0028"
 
 
 def test_migration_history_is_a_single_linear_chain() -> None:
     """迁移历史必须只有一个 Head，且每个版本只指向前一个版本。"""
-    script = ScriptDirectory.from_config(
-        Config(str(PROJECT_ROOT / "alembic.ini"))
-    )
+    script = ScriptDirectory.from_config(Config(str(PROJECT_ROOT / "alembic.ini")))
     revisions = list(script.walk_revisions())
 
     assert script.get_heads() == [EXPECTED_HEAD]
-    assert len(revisions) == 26
+    assert len(revisions) == 28
     assert revisions[-1].down_revision is None
     for revision, parent in zip(
         revisions[:-1],
@@ -55,18 +53,18 @@ def test_postgresql_migration_chain_compiles_offline() -> None:
     assert "20260701_0023 -> 20260702_0024" in result.stderr
     assert "20260702_0024 -> 20260702_0025" in result.stderr
     assert "20260702_0025 -> 20260703_0026" in result.stderr
+    assert "20260703_0026 -> 20260723_0027" in result.stderr
     assert "ALTER TABLE incidents ADD COLUMN resolved_by" in result.stdout
     assert "ALTER TABLE incidents ADD COLUMN closed_by" in result.stdout
     assert (
-        "CREATE UNIQUE INDEX "
-        "uq_incidents_tenant_resolution_idempotency"
+        "CREATE UNIQUE INDEX uq_incidents_tenant_resolution_idempotency"
     ) in result.stdout
     assert (
-        "CREATE UNIQUE INDEX "
-        "uq_incidents_tenant_closure_idempotency"
+        "CREATE UNIQUE INDEX uq_incidents_tenant_closure_idempotency"
     ) in result.stdout
     assert "ALTER TABLE workflow_runs ADD COLUMN canceled_by" in result.stdout
     assert (
-        "CREATE UNIQUE INDEX "
-        "uq_workflow_runs_tenant_cancellation_idempotency"
+        "CREATE UNIQUE INDEX uq_workflow_runs_tenant_cancellation_idempotency"
     ) in result.stdout
+    assert "CREATE TABLE rca_feedback" in result.stdout
+    assert "CREATE UNIQUE INDEX uq_rca_feedback_tenant_idempotency" in result.stdout

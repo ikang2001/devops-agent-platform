@@ -230,8 +230,8 @@ async def test_concurrent_authentication_uses_singleflight_refresh() -> None:
     [
         {"iss": "https://attacker.example.com/"},
         {"aud": "another-api"},
-        {"exp": datetime.now(UTC) - timedelta(minutes=1)},
-        {"nbf": datetime.now(UTC) + timedelta(minutes=1)},
+        {"exp": lambda: datetime.now(UTC) - timedelta(minutes=1)},
+        {"nbf": lambda: datetime.now(UTC) + timedelta(minutes=10)},
         {"scope": ["tool_permissions:write"]},
         {"scope": "tool_permissions:write\x7f"},
         {"sub": "admin_001\x7f"},
@@ -256,8 +256,22 @@ async def test_invalid_standard_or_authorization_claims_are_rejected(
 
         with pytest.raises(AuthenticationRequired):
             await authenticator.authenticate(
-                build_token(key, claims_overrides=claims_overrides)
+                build_token(
+                    key,
+                    claims_overrides=_resolve_claims_overrides(
+                        claims_overrides
+                    ),
+                )
             )
+
+
+def _resolve_claims_overrides(
+    claims_overrides: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        name: value() if callable(value) else value
+        for name, value in claims_overrides.items()
+    }
 
 
 async def test_wrong_signature_and_disallowed_algorithm_are_rejected() -> None:

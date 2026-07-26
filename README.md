@@ -1,7 +1,27 @@
-# DevOps Intelligent Troubleshooting Agent Platform
+# DevOps Controlled RCA Pipeline Platform
 
-This repository is a production-oriented DevOps troubleshooting Agent platform
-being implemented incrementally.
+This repository is a **production-oriented incident and RCA job orchestration
+backend**, not a free-form autonomous troubleshooting agent and not a general
+automated remediation engine.
+
+Honest product name for interviews and design reviews:
+
+> Controlled observability collection pipeline + reliable workflow backend
+> (Outbox, leases, idempotency, approval gates), with optional LLM report
+> packaging and human-reviewed remediation plans.
+
+The default RCA path is a **fixed server-published read-only plan**:
+metrics → logs → traces → runbooks. LLM output is a structured candidate for
+human review and cannot confirm a root cause. Alert ingestion does not
+auto-start RCA unless an explicit operator action (or a future policy switch)
+does so.
+
+Deployments may select one of three server-published static plans. The two
+trace-free variants omit Tempo but remain fixed metrics → logs → runbooks
+workflows; they are not adaptive tool selection. Read-only step-failure
+continuation is separately opt-in and defaults to fail-fast. A partial report
+must cite at least one collected Evidence item, carries the failed step IDs,
+is confidence-capped at `0.4`, and cannot be `CONFIRMED`.
 
 ## Step 4 Status
 
@@ -17,23 +37,37 @@ executed in the target environment; see
 
 ## Step 5 And Step 6 Status
 
-Step 5 productionization assets are now present: a multi-stage non-root
-`Dockerfile`, production rehearsal Compose stack, Kubernetes examples,
+Step 5 productionization **examples** are present: a multi-stage non-root
+`Dockerfile`, production rehearsal Compose stack, Kubernetes skeleton manifests,
 CI quality and supply-chain gates, and release, rollback, capacity, backup, and
-restore runbooks. See [`STEP5_PRODUCTION.md`](STEP5_PRODUCTION.md) and
+restore runbooks. These are deployable starting points, not a signed production
+topology. See [`STEP5_PRODUCTION.md`](STEP5_PRODUCTION.md) and
 [`ops/deploy/README.md`](ops/deploy/README.md).
 
-Step 6 productization assets are now present: Ops Console workflow boundaries,
-RCA feedback and evaluation loop, Prompt Registry example, Feature Flag
-governance, RAG knowledge governance, evaluation dataset, and high-risk
-remediation approval boundary. See
-[`STEP6_PRODUCTIZATION.md`](STEP6_PRODUCTIZATION.md) and
-[`ops/product/README.md`](ops/product/README.md).
+Step 6 mixes **implemented product surfaces** with **governance blueprints**:
 
-These assets do not claim a completed web frontend, vendor-specific Jira or
-ServiceNow connector, Slack/Teams/PagerDuty integration, or automatic
-remediation executor. They define the production and product boundaries needed
-for the next implementation increments.
+| Status | Capability |
+|---|---|
+| Implemented locally | Same-origin Ops Console shell, immutable RCA feedback API, opt-in Jira/ServiceNow adapters, Alertmanager multi-channel examples, MiniShop three-scenario E2E gate, approval-first remediation plan API, MiniShop allowlisted remediation sandbox |
+| Example / not wired into runtime | Prompt Registry YAML, Feature Flag YAML, offline evaluation dataset/runner, RAG governance markdown |
+
+Do not describe Prompt Registry, Feature Flags, RAG, or the feedback→evaluation
+loop as a running product system. Feedback is persisted; automatic sample
+export, scheduled multi-variant evaluation, and flag-gated prompt rollout are
+not implemented in `src/`. See
+[`STEP6_PRODUCTIZATION.md`](STEP6_PRODUCTIZATION.md),
+[`ops/product/README.md`](ops/product/README.md), and
+[`缺少内容.md`](缺少内容.md).
+
+The remaining boundary is external acceptance plus the incomplete product loop
+above. Real vendor credentials, notification endpoints, OIDC, and staging
+infrastructure are intentionally absent from the repository. The platform
+remediation path has PostgreSQL plan state, tenant policy, ETags, idempotency,
+evidence gates, human approval, a fixed HTTP controller adapter, an action
+catalog, maintenance windows, and a default-off kill switch. The repository
+still has no Kubernetes, cloud, SSH, shell, or arbitrary-command production
+write adapter, so it must not be described as a general automated remediation
+engine.
 
 The current Step 4 implementation includes:
 
@@ -47,6 +81,7 @@ The current Step 4 implementation includes:
 - tenant-scoped Incident read and cursor-paginated list APIs
 - authenticated, version-fenced, idempotent Incident resolution and closure with audit
 - authenticated, idempotent RCA scheduling with transactional transitions
+- immutable, tenant-scoped RCA reviewer feedback with redaction and audit
 - authenticated, version-fenced, idempotent RCA workflow cancellation
 - atomic RCA execution claims with expiring worker leases and takeover support
 - owner-checked workflow heartbeats that stop stale or expired executors
@@ -60,7 +95,8 @@ The current Step 4 implementation includes:
 - low-cardinality RCA consumer metrics, alerts, and failure runbooks
 - bounded Kafka consumer Lag aggregation without partition labels
 - Agent execution coordination with heartbeat cancellation and fenced completion
-- fixed read-only Agent plans with tool version, permission, risk, and timeout gates
+- configurable fixed read-only Agent plans with tool version, permission, risk, and timeout gates
+- opt-in partial read-only collection with zero-evidence failure and confidence guardrails
 - optional structured LLM RCA reports with timeout, circuit breaker, and fallback
 - low-cardinality LLM success, fallback, circuit, and latency metrics
 - transactional Outbox persistence, leasing, Kafka publication, and retries
@@ -80,12 +116,19 @@ The current Step 4 implementation includes:
 - opt-in Ticket submission consumer assembly requiring a ticketing gateway
 - cooperative Ticket submission consumer runner with backoff and Runtime health
 - bounded HTTP JSON TicketingGateway adapter with idempotency and trace headers
+- opt-in bounded Jira Cloud and ServiceNow direct TicketingGateway adapters
 - low-cardinality HTTP JSON TicketingGateway metrics, alerts, and dashboard panels
 - low-cardinality Ticket submission consumer metrics, Lag aggregation, alerts, runbook, and dashboard panels
 - idempotent Runbook draft and atomic publication management services
+- tenant-scoped Remediation Plan API with evidence gates, action catalog,
+  ETags, idempotency, approval separation, maintenance window, and kill switch
+- bounded HTTP RemediationExecutor adapter that only sends structured
+  pre-registered action keys to a fixed controller origin
 - Prometheus recording rules, alerts, and a provisioned Grafana dashboard
 - opt-in live PostgreSQL, Kafka, and external HTTP adapter acceptance tests
 - k6 latency/capacity thresholds and deployment-neutral fault recovery probes
+- same-origin Ops Console for Incident, RCA, feedback, ticket, and remediation workflows
+- allowlisted MiniShop SQLite remediation planning, approval, execution, rollback, and audit
 
 ## Architecture Boundary
 
@@ -93,9 +136,10 @@ The current Step 4 implementation includes:
 - `application`: use-case commands and orchestration services.
 - `domain`: pure domain models, enums, and application exceptions.
 - `ports`: outbound contracts consumed by application services.
-- `infrastructure`: config, database placeholders, logging context, adapters.
-- `agent`: Agent workflow execution skeleton.
-- `tools`: tool definition, registry, permission, and execution skeleton.
+- `infrastructure`: config, database models/repositories, logging context,
+  observability, notification, ticketing, and remediation adapters.
+- `agent`: deterministic Agent workflow planning and execution coordination.
+- `tools`: tool definition, registry, permission, read-only execution, and risk gates.
 
 ## Current Business Boundary
 
@@ -167,11 +211,12 @@ content-free `incident.closed` Outbox audit event. This keeps technical
 recovery (`RESOLVED`) separate from administrative completion (`CLOSED`).
 
 Skeleton-mode tests still return HTTP 501 without external dependencies. The
-production RCA Consumer remains disabled by default. When explicitly enabled
-with complete Kafka, Prometheus, Loki, and Tempo configuration,
-`build_runtime()` assembles the Kafka consumer, dead-letter producer,
-lease-aware coordinator, fixed three-step Agent workflow, SQL-backed permission
-checker, bounded tool executor, and all resource shutdown hooks. The application
+production RCA Consumer remains disabled by default. When explicitly enabled,
+the default policy requires Kafka, Prometheus, Loki, and Tempo; trace-free fixed
+policies require Kafka, Prometheus, and Loki only. `build_runtime()` assembles
+the Kafka consumer, dead-letter producer, lease-aware coordinator, selected
+fixed Agent workflow, SQL-backed permission checker, bounded tool executor, and
+only the observability resource shutdown hooks required by that plan. The application
 and SQLAlchemy layers provide atomic `PENDING` to `RUNNING`
 claims, reject duplicate execution while a lease is active, and allow takeover
 after lease expiry. Active owners can renew leases through an atomic heartbeat;
@@ -419,6 +464,17 @@ histograms. These metrics separate external provider instability from Kafka
 consumer health without adding tenant, trace, ticket, or target-system labels.
 Recording rules, alerts, a Runbook, and Grafana panels expose gateway error
 ratio, business failure ratio, call rate, and P95 latency.
+Jira Cloud and ServiceNow now also have opt-in direct adapters. The runtime
+routes the normalized `jira` and `servicenow` targets to their vendor APIs and
+may retain the HTTP JSON gateway as a fallback for other target names. Both
+adapters use bounded non-redirecting HTTP requests, secret-backed Basic
+authentication, stable correlation fields, sanitized provider failures, and
+the same low-cardinality gateway metrics. Production startup rejects non-HTTPS
+vendor base URLs. Jira sends an issue property and ServiceNow sends
+`correlation_id` for downstream duplicate detection; because neither vendor
+guarantees atomic create idempotency, production instances should enforce
+uniqueness with a Jira automation rule or ServiceNow business rule keyed by
+the supplied idempotency value.
 LLM report generation is separately disabled by default. When enabled, operators
 can configure an ordered provider chain instead of one hard-coded model vendor.
 The recommended default is OpenAI first, DashScope second, and the deterministic

@@ -1,39 +1,74 @@
-# Step 6 Productization And Intelligent Loop
+# Step 6 Productization And Governance Assets
 
-Status: **productization and governance blueprint added; full UI and provider
-connectors remain target implementation work.**
+Status: **partial local product surfaces implemented; intelligent-loop governance
+remains a blueprint; real target-environment acceptance is still deployment
+work.**
 
-Step 6 is about turning the reliable backend into a team-facing product that
-can learn from feedback, compare model/prompt versions, and keep risky actions
-under human control.
+Step 6 turns the reliable backend into team-facing operations surfaces and
+defines how a future learning loop *should* work. It must not be described as a
+fully wired intelligent product loop.
 
-## Completed In Repository
+## Implemented In Repository Runtime
 
-- Productization package under `ops/product`.
-- Ops Console workflow map for incident triage, Evidence audit, RCA report
-  review, ticket approval, and operational health views.
-- Human feedback and evaluation-loop specification.
-- Prompt Registry example with version, owner, rollout, and evaluation gates.
-- Feature Flag example for staged enablement and kill switches.
-- Evaluation dataset example with expected root-cause and evidence anchors.
-- RAG governance specification covering knowledge versioning, indexing,
-  permissions, evaluation, and rollback.
-- High-risk remediation approval boundary.
+These paths exist as code, migrations, routes, or packaged UI:
+
+- Productization package under `ops/product` (docs + offline tools).
+- Same-origin zero-build Ops Console for incident triage, Evidence audit, RCA
+  review, immutable feedback, ticket approval/submission, and runtime health.
+- Persistent tenant-scoped RCA feedback API, PostgreSQL migration, redaction,
+  idempotency, permissions, audit event, and console workflow.
+- Direct opt-in Jira Cloud and ServiceNow adapters with bounded HTTP contracts.
+- Slack, Teams v2, and PagerDuty Alertmanager fan-out **example** using
+  file-backed secrets, validated with the pinned Alertmanager binary.
+- Platform-level remediation plan API with PostgreSQL state, action catalog,
+  evidence gate, ETags, idempotency, author/reviewer separation, maintenance
+  window, default-off kill switch, fixed HTTP controller adapter, and Ops
+  Console workflow.
+- MiniShop allowlisted remediation sandbox with durable SQLite approval state,
+  expiry, Manifest digests, rollback, and append-only audit records.
+- Deterministic MiniShop three-scenario Ground Truth regression gate for the
+  fixed RCA pipeline (not a multi-prompt/model evaluation product).
+
+## Example Or Blueprint Only (Not Loaded By Runtime)
+
+These files are governance examples. Nothing under `src/` loads them as a
+registry, flag service, vector index, or scheduled evaluation job:
+
+- `ops/product/prompt-registry.example.yml`
+- `ops/product/feature-flags.example.yml`
+- `ops/product/evaluation-dataset.example.yml`
+- `ops/product/evaluation-responses.example.yml`
+- `ops/product/run_evaluation.py` (offline YAML comparator)
+- `ops/product/rag-governance.md`
+
+`prompt_version` in the LLM report generator is a config string, not a Prompt
+Registry lookup. Feature flags in the example YAML do not gate runtime paths.
+RAG is documented; historical-incident vector retrieval is not implemented.
+Accepted feedback is stored for humans; it is not automatically converted into
+evaluation samples or rollout decisions.
 
 ## Product Boundaries
 
-- The current repository still ships a backend-first platform. The Step 6 UI
-  documents define the expected console behavior and API boundaries, but do
-  not claim a completed web frontend.
-- Jira, ServiceNow, Slack, Teams, and PagerDuty are represented as integration
-  boundaries. Real vendor-specific connectors require sandbox credentials and
-  target-environment acceptance.
-- Automated remediation remains approval-first. The platform should recommend,
-  explain, and prepare rollback steps before any write action is enabled.
+- The Ops Console is intentionally framework-free and packaged with the
+  backend. It is an operational interface, not a full tenant/RBAC
+  administration product.
+- Jira, ServiceNow, Slack, Teams, and PagerDuty code/configuration is locally
+  contract-tested. Real provider acceptance still requires organization-owned
+  sandbox credentials, duplicate-prevention rules, and notification endpoints.
+- Platform remediation accepts only catalog-registered `action_key`, precise
+  target, and RCA evidence IDs from HTTP callers; risk, expected effect, and
+  rollback action are deployment-controlled catalog fields.
+- The repository includes a fixed-origin HTTP remediation controller adapter
+  and the MiniShop SQLite sandbox. It accepts no shell, arbitrary URL,
+  Kubernetes, cloud, SSH, or raw LLM command input. Real production writes still
+  require organization-owned controller credentials, workload identity, staging
+  acceptance, and concrete target adapters outside this repository.
+- Default RCA investigation is a fixed read-only tool plan, not an adaptive
+  multi-step agent planner.
 
-## Intelligent Loop
+## Intended Intelligent Loop (Target Design)
 
-The loop is:
+The intended loop is:
 
 1. Incident and alert data create a workflow run.
 2. Tools collect bounded Evidence from metrics, logs, traces, and Runbooks.
@@ -46,12 +81,19 @@ The loop is:
 6. Feature Flags control staged rollout of new prompts, RAG indexes,
    connectors, and remediation capabilities.
 
-## Required Future Implementation Gates
+Today, steps 1–4 are largely implemented for the fixed pipeline. Steps 5–6 are
+documented and partially offline-scripted, not runtime product features.
 
-1. Build the Ops Console against the existing admin APIs.
-2. Add persistent RCA feedback records and report revision history.
-3. Add evaluation runner jobs that compare prompt/model/retrieval versions.
-4. Add vendor connectors after sandbox contract tests exist.
-5. Add tenant management and RBAC/ABAC administration screens.
-6. Add remediation execution only after approval, dry-run, audit, rollback, and
-   kill-switch controls are implemented.
+## Remaining External Or Broader-Product Gates
+
+1. Run PostgreSQL, Kafka, OIDC, observability, LLM, Jira/ServiceNow, and
+   notification acceptance in the organization staging environment.
+2. Add scheduled evaluation jobs that compare real prompt/model/retrieval
+   variants beyond the deterministic three-scenario E2E gate.
+3. Wire Prompt Registry / Feature Flags into runtime only after evaluation
+   gates exist; until then keep them as examples.
+4. Add tenant management and RBAC/ABAC administration screens if the platform
+   becomes multi-team self-service.
+5. Validate the platform remediation controller, action catalog, workload
+   identity, execution lease recovery, and concrete target adapters in staging
+   before production writes.

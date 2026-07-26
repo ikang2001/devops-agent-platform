@@ -1,3 +1,7 @@
+# NOT LOADED BY RUNTIME.
+# Governance example only. The LLM report generator uses a config string
+# `prompt_version`, not this registry. Do not claim this file is a product
+# Prompt Registry service.
 prompts:
   - prompt_id: rca_report
     version: v1

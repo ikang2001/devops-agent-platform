@@ -33,6 +33,9 @@ from devops_agent_platform.application.services.incident_query_service import (
 from devops_agent_platform.application.services.incident_resolution_service import (
     IncidentResolutionService,
 )
+from devops_agent_platform.application.services.notification_service import (
+    NotificationApplicationService,
+)
 from devops_agent_platform.application.services.outbox_backlog import (
     OutboxBacklogMonitor,
     OutboxBacklogMonitorConfig,
@@ -52,11 +55,17 @@ from devops_agent_platform.application.services.rca_consumer_runner import (
     RCAConsumerHealth,
     RCAConsumerRunner,
 )
+from devops_agent_platform.application.services.rca_feedback_service import (
+    RCAFeedbackApplicationService,
+)
 from devops_agent_platform.application.services.rca_query_service import (
     RCAExecutionQueryService,
 )
 from devops_agent_platform.application.services.rca_service import (
     RCAApplicationService,
+)
+from devops_agent_platform.application.services.remediation_service import (
+    RemediationApplicationService,
 )
 from devops_agent_platform.application.services.runbook_admin_service import (
     RunbookAdminService,
@@ -85,6 +94,9 @@ from devops_agent_platform.bootstrap.worker_identity import derive_suffixed_id
 from devops_agent_platform.domain.policies.incident_creation import (
     IncidentCreationPolicy,
 )
+from devops_agent_platform.domain.policies.remediation import (
+    RemediationExecutionPolicy,
+)
 from devops_agent_platform.infrastructure.adapters.kafka import (
     KafkaEventPublisher,
     KafkaPublisherConfig,
@@ -109,15 +121,37 @@ from devops_agent_platform.infrastructure.database.session import (
     create_session_factory,
 )
 from devops_agent_platform.infrastructure.identifiers import UUIDIdentifierGenerator
+from devops_agent_platform.infrastructure.notifications import (
+    NotificationWebhookConfig,
+    RoutingNotificationGateway,
+    WebhookNotificationGateway,
+)
+from devops_agent_platform.infrastructure.remediation import (
+    HttpRemediationExecutor,
+    HttpRemediationExecutorConfig,
+    JsonRemediationActionCatalog,
+)
 from devops_agent_platform.infrastructure.ticketing import (
     HttpJsonTicketingGateway,
     HttpJsonTicketingGatewayConfig,
+    JiraTicketingGateway,
+    JiraTicketingGatewayConfig,
+    RoutingTicketingGateway,
+    ServiceNowTicketingGateway,
+    ServiceNowTicketingGatewayConfig,
 )
 from devops_agent_platform.ports.authentication import (
     AdministratorAuthenticatorPort,
 )
+from devops_agent_platform.ports.notifications import (
+    NotificationGatewayPort,
+)
 from devops_agent_platform.ports.rca_report import (
     LLMReportGenerationObserverPort,
+)
+from devops_agent_platform.ports.remediation import (
+    RemediationActionCatalogPort,
+    RemediationExecutorPort,
 )
 from devops_agent_platform.ports.ticketing import (
     TicketingGatewayObserverPort,
@@ -127,12 +161,8 @@ from devops_agent_platform.ports.ticketing import (
 logger = logging.getLogger(__name__)
 MonotonicClock = Callable[[], float]
 CleanupFailure = tuple[str, BaseException]
-TicketSubmissionConsumerHealth = (
-    ticket_consumer_runner.TicketSubmissionConsumerHealth
-)
-TicketSubmissionConsumerRunner = (
-    ticket_consumer_runner.TicketSubmissionConsumerRunner
-)
+TicketSubmissionConsumerHealth = ticket_consumer_runner.TicketSubmissionConsumerHealth
+TicketSubmissionConsumerRunner = ticket_consumer_runner.TicketSubmissionConsumerRunner
 
 
 class PublisherLifecycle(Protocol):
@@ -177,6 +207,8 @@ class ApplicationRuntime:
     rca_service: RCAApplicationService
     shutdown_timeout_seconds: float
     rca_query_service: RCAExecutionQueryService | None = None
+    rca_feedback_service: RCAFeedbackApplicationService | None = None
+    remediation_service: RemediationApplicationService | None = None
     rca_cancellation_service: RCACancellationService | None = None
     incident_query_service: IncidentQueryService | None = None
     incident_resolution_service: IncidentResolutionService | None = None
@@ -184,6 +216,7 @@ class ApplicationRuntime:
     runbook_admin_service: RunbookAdminService | None = None
     ticket_draft_service: TicketDraftApplicationService | None = None
     ticket_submission_service: TicketSubmissionApplicationService | None = None
+    notification_service: NotificationApplicationService | None = None
     admin_authenticator: OIDCAdministratorAuthenticator | None = None
     readiness_database_timeout_seconds: float = 1.0
     readiness_cache_ttl_seconds: float = 2.0
@@ -205,25 +238,20 @@ class ApplicationRuntime:
         if self.readiness_cache_ttl_seconds < 0:
             raise ValueError("readiness_cache_ttl_seconds must not be negative")
         if self.rca_consumer_shutdown_timeout_seconds <= 0:
-            raise ValueError(
-                "rca_consumer_shutdown_timeout_seconds must be positive"
-            )
+            raise ValueError("rca_consumer_shutdown_timeout_seconds must be positive")
         if self.audit_retention_shutdown_timeout_seconds <= 0:
             raise ValueError(
                 "audit_retention_shutdown_timeout_seconds must be positive"
             )
         if self.ticket_submission_consumer_shutdown_timeout_seconds <= 0:
             raise ValueError(
-                "ticket_submission_consumer_shutdown_timeout_seconds "
-                "must be positive"
+                "ticket_submission_consumer_shutdown_timeout_seconds must be positive"
             )
         if not isinstance(self.managed_resources, tuple) or not all(
             callable(getattr(resource, "close", None))
             for resource in self.managed_resources
         ):
-            raise ValueError(
-                "managed_resources must contain async closeable resources"
-            )
+            raise ValueError("managed_resources must contain async closeable resources")
         self._start_attempted = False
         self._started = False
         self._closing = False
@@ -261,11 +289,7 @@ class ApplicationRuntime:
     def audit_retention_health(self) -> AuditRetentionWorkerHealth | None:
         """返回审计清理 Worker 健康快照。"""
         health = getattr(self.audit_retention_worker, "health", None)
-        return (
-            health
-            if isinstance(health, AuditRetentionWorkerHealth)
-            else None
-        )
+        return health if isinstance(health, AuditRetentionWorkerHealth) else None
 
     @property
     def ticket_submission_consumer_health(
@@ -277,11 +301,7 @@ class ApplicationRuntime:
             "health",
             None,
         )
-        return (
-            health
-            if isinstance(health, TicketSubmissionConsumerHealth)
-            else None
-        )
+        return health if isinstance(health, TicketSubmissionConsumerHealth) else None
 
     async def start(self) -> None:
         """按数据库、Kafka、Worker顺序启动全部资源。"""
@@ -348,10 +368,7 @@ class ApplicationRuntime:
                 await asyncio.sleep(0)
             if self._worker_task is not None and self._worker_task.done():
                 await self._worker_task
-            if (
-                self._rca_consumer_task is not None
-                and self._rca_consumer_task.done()
-            ):
+            if self._rca_consumer_task is not None and self._rca_consumer_task.done():
                 await self._rca_consumer_task
             if (
                 self._audit_retention_task is not None
@@ -466,8 +483,7 @@ class ApplicationRuntime:
         """判断数据库探活缓存是否仍在允许复用的短窗口内。"""
         return (
             self._database_ready_cache is not None
-            and now - self._database_checked_at
-            < self.readiness_cache_ttl_seconds
+            and now - self._database_checked_at < self.readiness_cache_ttl_seconds
         )
 
     @staticmethod
@@ -514,9 +530,7 @@ class ApplicationRuntime:
         try:
             failure_attribute, display_name = worker_metadata[worker_name]
         except KeyError as exc:
-            raise RuntimeError(
-                f"Unknown background worker: {worker_name}"
-            ) from exc
+            raise RuntimeError(f"Unknown background worker: {worker_name}") from exc
         if task.cancelled():
             setattr(self, failure_attribute, "cancelled")
             logger.critical("%s在非停机阶段被取消", display_name)
@@ -568,9 +582,7 @@ class ApplicationRuntime:
         self._audit_retention_task = None
         await self._await_worker_shutdown(
             task=self._ticket_submission_consumer_task,
-            timeout_seconds=(
-                self.ticket_submission_consumer_shutdown_timeout_seconds
-            ),
+            timeout_seconds=(self.ticket_submission_consumer_shutdown_timeout_seconds),
             stage_name="ticket_submission_consumer",
             display_name="Ticket Submission Consumer",
             errors=errors,
@@ -644,6 +656,9 @@ def build_runtime(
     report_observer: LLMReportGenerationObserverPort | None = None,
     ticketing_gateway: TicketingGatewayPort | None = None,
     ticketing_gateway_observer: TicketingGatewayObserverPort | None = None,
+    notification_gateway: NotificationGatewayPort | None = None,
+    remediation_executor: RemediationExecutorPort | None = None,
+    remediation_action_catalog: RemediationActionCatalogPort | None = None,
 ) -> ApplicationRuntime:
     """装配数据库、业务服务及可选Outbox和RCA后台Worker。"""
     engine = create_engine(settings)
@@ -689,6 +704,69 @@ def build_runtime(
         unit_of_work_factory=unit_of_work_factory,
         identifier_generator=identifier_generator,
     )
+    rca_feedback_service = RCAFeedbackApplicationService(
+        unit_of_work_factory=unit_of_work_factory,
+        identifier_generator=identifier_generator,
+    )
+    owned_remediation_executor: AsyncCloseable | None = None
+    resolved_remediation_executor = remediation_executor
+    resolved_remediation_action_catalog = remediation_action_catalog
+    if (
+        resolved_remediation_executor is None
+        and settings.remediation_controller_base_url is not None
+    ):
+        owned_remediation_executor = HttpRemediationExecutor(
+            HttpRemediationExecutorConfig(
+                base_url=settings.remediation_controller_base_url,
+                bearer_token=settings.remediation_controller_bearer_token,
+                request_timeout_seconds=(
+                    settings.remediation_request_timeout_seconds
+                ),
+                max_response_bytes=settings.remediation_max_response_bytes,
+            )
+        )
+        resolved_remediation_executor = owned_remediation_executor
+    if (
+        resolved_remediation_action_catalog is None
+        and settings.remediation_action_catalog_path is not None
+    ):
+        resolved_remediation_action_catalog = JsonRemediationActionCatalog(
+            settings.remediation_action_catalog_path
+        )
+    if (resolved_remediation_executor is None) != (
+        resolved_remediation_action_catalog is None
+    ):
+        raise ValueError(
+            "Remediation executor and action catalog must be provided together"
+        )
+    remediation_policy = RemediationExecutionPolicy(
+        execution_enabled=settings.remediation_execution_enabled,
+        allowed_tenants=frozenset(settings.remediation_allowed_tenants),
+        maintenance_start_hour_utc=(
+            settings.remediation_maintenance_start_hour_utc
+        ),
+        maintenance_end_hour_utc=(
+            settings.remediation_maintenance_end_hour_utc
+        ),
+    )
+    remediation_service = (
+        RemediationApplicationService(
+            unit_of_work_factory=unit_of_work_factory,
+            identifier_generator=identifier_generator,
+            action_catalog=resolved_remediation_action_catalog,
+            executor=resolved_remediation_executor,
+            policy=remediation_policy,
+            # claim 租约与外部调用超时分离：超时后靠 lease 过期收口，
+            # 禁止永久卡在 EXECUTING。
+            lease_seconds=settings.remediation_lease_seconds,
+            request_timeout_seconds=settings.remediation_request_timeout_seconds,
+        )
+        if (
+            resolved_remediation_executor is not None
+            and resolved_remediation_action_catalog is not None
+        )
+        else None
+    )
     ticket_submission_service = TicketSubmissionApplicationService(
         unit_of_work_factory=unit_of_work_factory,
         identifier_generator=identifier_generator,
@@ -701,22 +779,16 @@ def build_runtime(
                 audience=settings.admin_oidc_audience or "",
                 jwks_url=settings.admin_oidc_jwks_url or "",
                 algorithms=settings.admin_oidc_allowed_algorithms,
-                jwks_cache_ttl_seconds=(
-                    settings.admin_oidc_jwks_cache_ttl_seconds
-                ),
+                jwks_cache_ttl_seconds=(settings.admin_oidc_jwks_cache_ttl_seconds),
                 unknown_kid_cache_seconds=(
                     settings.admin_oidc_unknown_kid_cache_seconds
                 ),
-                request_timeout_seconds=(
-                    settings.admin_oidc_request_timeout_seconds
-                ),
+                request_timeout_seconds=(settings.admin_oidc_request_timeout_seconds),
                 leeway_seconds=settings.admin_oidc_leeway_seconds,
                 subject_claim=settings.admin_oidc_subject_claim,
                 scopes_claim=settings.admin_oidc_scopes_claim,
                 tenants_claim=settings.admin_oidc_tenants_claim,
-                all_tenants_claim=(
-                    settings.admin_oidc_all_tenants_claim
-                ),
+                all_tenants_claim=(settings.admin_oidc_all_tenants_claim),
             )
         )
     elif settings.admin_demo_enabled:
@@ -740,6 +812,7 @@ def build_runtime(
     ticket_submission_consumer_worker = None
     managed_resources: tuple[AsyncCloseable, ...] = ()
     owned_ticketing_gateway: AsyncCloseable | None = None
+    owned_notification_gateway: AsyncCloseable | None = None
     outbox_backlog_monitor: OutboxBacklogMonitor | None = None
     kafka_password = (
         settings.kafka_sasl_password.get_secret_value()
@@ -753,9 +826,7 @@ def build_runtime(
                 query_timeout=timedelta(
                     seconds=settings.metrics_outbox_query_timeout_seconds
                 ),
-                cache_ttl=timedelta(
-                    seconds=settings.metrics_outbox_cache_ttl_seconds
-                ),
+                cache_ttl=timedelta(seconds=settings.metrics_outbox_cache_ttl_seconds),
             ),
         )
     if settings.outbox_worker_enabled:
@@ -778,9 +849,7 @@ def build_runtime(
             config=OutboxDispatcherConfig(
                 batch_size=settings.outbox_batch_size,
                 max_attempts=settings.outbox_max_attempts,
-                lease_duration=timedelta(
-                    seconds=settings.outbox_lease_seconds
-                ),
+                lease_duration=timedelta(seconds=settings.outbox_lease_seconds),
                 publish_timeout=timedelta(
                     seconds=settings.outbox_publish_timeout_seconds
                 ),
@@ -795,9 +864,7 @@ def build_runtime(
         retention_service = AuditRetentionService(
             store=SQLAlchemyAuditRetentionStore(session_factory),
             config=AuditRetentionConfig(
-                retention_period=timedelta(
-                    days=settings.audit_retention_days
-                ),
+                retention_period=timedelta(days=settings.audit_retention_days),
                 batch_size=retention_batch_size,
             ),
         )
@@ -812,25 +879,16 @@ def build_runtime(
             ),
             config=AuditRetentionWorkerConfig(
                 active_interval=timedelta(
-                    seconds=(
-                        settings.audit_retention_active_interval_seconds
-                    )
+                    seconds=(settings.audit_retention_active_interval_seconds)
                 ),
                 idle_interval=timedelta(
-                    seconds=(
-                        settings.audit_retention_idle_interval_seconds
-                    )
+                    seconds=(settings.audit_retention_idle_interval_seconds)
                 ),
                 error_backoff_initial=timedelta(
-                    seconds=(
-                        settings
-                        .audit_retention_error_backoff_initial_seconds
-                    )
+                    seconds=(settings.audit_retention_error_backoff_initial_seconds)
                 ),
                 error_backoff_max=timedelta(
-                    seconds=(
-                        settings.audit_retention_error_backoff_max_seconds
-                    )
+                    seconds=(settings.audit_retention_error_backoff_max_seconds)
                 ),
                 batch_size=retention_batch_size,
             ),
@@ -844,18 +902,9 @@ def build_runtime(
         rca_consumer_worker = rca_bundle.worker
         managed_resources = rca_bundle.resources
     resolved_ticketing_gateway = ticketing_gateway
-    if resolved_ticketing_gateway is None and settings.ticketing_http_json_enabled:
-        owned_ticketing_gateway = HttpJsonTicketingGateway(
-            HttpJsonTicketingGatewayConfig(
-                endpoint_url=settings.ticketing_http_json_endpoint_url or "",
-                bearer_token=settings.ticketing_http_json_bearer_token,
-                request_timeout_seconds=(
-                    settings.ticketing_http_json_request_timeout_seconds
-                ),
-                max_response_bytes=(
-                    settings.ticketing_http_json_max_response_bytes
-                ),
-            ),
+    if resolved_ticketing_gateway is None:
+        owned_ticketing_gateway = _build_configured_ticketing_gateway(
+            settings,
             observer=ticketing_gateway_observer,
         )
         resolved_ticketing_gateway = owned_ticketing_gateway
@@ -868,6 +917,29 @@ def build_runtime(
         ticket_submission_consumer_worker = ticket_submission_bundle.worker
     if owned_ticketing_gateway is not None:
         managed_resources = (*managed_resources, owned_ticketing_gateway)
+    resolved_notification_gateway = notification_gateway
+    if resolved_notification_gateway is None:
+        owned_notification_gateway = _build_configured_notification_gateway(settings)
+        resolved_notification_gateway = owned_notification_gateway
+    notification_service = (
+        NotificationApplicationService(
+            unit_of_work_factory=unit_of_work_factory,
+            gateway=resolved_notification_gateway,
+            identifier_generator=identifier_generator,
+        )
+        if resolved_notification_gateway is not None
+        else None
+    )
+    if owned_notification_gateway is not None:
+        managed_resources = (
+            *managed_resources,
+            owned_notification_gateway,
+        )
+    if owned_remediation_executor is not None:
+        managed_resources = (
+            *managed_resources,
+            owned_remediation_executor,
+        )
 
     return ApplicationRuntime(
         engine=engine,
@@ -880,9 +952,7 @@ def build_runtime(
         incident_resolution_service=incident_resolution_service,
         audit_retention_worker=audit_retention_worker,
         rca_consumer_worker=rca_consumer_worker,
-        ticket_submission_consumer_worker=(
-            ticket_submission_consumer_worker
-        ),
+        ticket_submission_consumer_worker=(ticket_submission_consumer_worker),
         rca_consumer_shutdown_timeout_seconds=(
             settings.rca_consumer_shutdown_timeout_seconds
         ),
@@ -894,8 +964,11 @@ def build_runtime(
         ),
         permission_admin_service=permission_admin_service,
         runbook_admin_service=runbook_admin_service,
+        rca_feedback_service=rca_feedback_service,
+        remediation_service=remediation_service,
         ticket_draft_service=ticket_draft_service,
         ticket_submission_service=ticket_submission_service,
+        notification_service=notification_service,
         admin_authenticator=admin_authenticator,
         shutdown_timeout_seconds=settings.outbox_shutdown_timeout_seconds,
         readiness_database_timeout_seconds=(
@@ -907,6 +980,92 @@ def build_runtime(
         outbox_backlog_monitor=outbox_backlog_monitor,
         managed_resources=managed_resources,
     )
+
+
+def _build_configured_ticketing_gateway(
+    settings: Settings,
+    *,
+    observer: TicketingGatewayObserverPort | None,
+) -> AsyncCloseable | None:
+    """按启用开关装配供应商路由，并保留通用网关的回退语义。"""
+    routes: dict[str, TicketingGatewayPort] = {}
+    fallback: TicketingGatewayPort | None = None
+    if settings.ticketing_jira_enabled:
+        assert settings.ticketing_jira_api_token is not None
+        routes["jira"] = JiraTicketingGateway(
+            JiraTicketingGatewayConfig(
+                base_url=settings.ticketing_jira_base_url or "",
+                user_email=settings.ticketing_jira_user_email or "",
+                api_token=settings.ticketing_jira_api_token,
+                project_key=settings.ticketing_jira_project_key or "",
+                issue_type=settings.ticketing_jira_issue_type,
+                request_timeout_seconds=(
+                    settings.ticketing_jira_request_timeout_seconds
+                ),
+                max_response_bytes=(settings.ticketing_jira_max_response_bytes),
+            ),
+            observer=observer,
+        )
+    if settings.ticketing_servicenow_enabled:
+        assert settings.ticketing_servicenow_password is not None
+        routes["servicenow"] = ServiceNowTicketingGateway(
+            ServiceNowTicketingGatewayConfig(
+                base_url=settings.ticketing_servicenow_base_url or "",
+                username=settings.ticketing_servicenow_username or "",
+                password=settings.ticketing_servicenow_password,
+                table=settings.ticketing_servicenow_table,
+                request_timeout_seconds=(
+                    settings.ticketing_servicenow_request_timeout_seconds
+                ),
+                max_response_bytes=(settings.ticketing_servicenow_max_response_bytes),
+            ),
+            observer=observer,
+        )
+    if settings.ticketing_http_json_enabled:
+        fallback = HttpJsonTicketingGateway(
+            HttpJsonTicketingGatewayConfig(
+                endpoint_url=settings.ticketing_http_json_endpoint_url or "",
+                bearer_token=settings.ticketing_http_json_bearer_token,
+                request_timeout_seconds=(
+                    settings.ticketing_http_json_request_timeout_seconds
+                ),
+                max_response_bytes=(settings.ticketing_http_json_max_response_bytes),
+            ),
+            observer=observer,
+        )
+    if routes:
+        return RoutingTicketingGateway(routes, fallback=fallback)
+    return fallback
+
+
+def _build_configured_notification_gateway(
+    settings: Settings,
+) -> AsyncCloseable | None:
+    """装配显式配置的 Slack、Teams 和 PagerDuty 通知路由。"""
+    routes: dict[str, NotificationGatewayPort] = {}
+    for provider, credential in (
+        ("slack", settings.notification_slack_webhook_url),
+        ("teams", settings.notification_teams_webhook_url),
+        (
+            "pagerduty",
+            settings.notification_pagerduty_routing_key,
+        ),
+    ):
+        if credential is None:
+            continue
+        endpoint = (
+            credential.get_secret_value() if provider in {"slack", "teams"} else None
+        )
+        routes[provider] = WebhookNotificationGateway(
+            NotificationWebhookConfig(
+                provider=provider,
+                credential=credential,
+                endpoint_url=endpoint,
+                request_timeout_seconds=(settings.notification_request_timeout_seconds),
+                max_response_bytes=(settings.notification_max_response_bytes),
+            )
+        )
+    return RoutingNotificationGateway(routes) if routes else None
 
 
 def _default_worker_id() -> str:

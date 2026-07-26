@@ -1,3 +1,6 @@
+# NOT LOADED BY RUNTIME.
+# Governance example only. No code under src/ evaluates these flags.
+# Do not claim Feature Flags are productized until a runtime loader exists.
 flags:
   - key: llm_rca_report_v1
     owner: platform-rca

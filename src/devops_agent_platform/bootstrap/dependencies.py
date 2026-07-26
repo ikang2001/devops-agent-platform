@@ -17,13 +17,22 @@ from devops_agent_platform.application.services.incident_query_service import (
 from devops_agent_platform.application.services.incident_resolution_service import (
     IncidentResolutionService,
 )
+from devops_agent_platform.application.services.notification_service import (
+    NotificationApplicationService,
+)
 from devops_agent_platform.application.services.rca_cancellation_service import (
     RCACancellationService,
+)
+from devops_agent_platform.application.services.rca_feedback_service import (
+    RCAFeedbackApplicationService,
 )
 from devops_agent_platform.application.services.rca_query_service import (
     RCAExecutionQueryService,
 )
 from devops_agent_platform.application.services.rca_service import RCAApplicationService
+from devops_agent_platform.application.services.remediation_service import (
+    RemediationApplicationService,
+)
 from devops_agent_platform.application.services.runbook_admin_service import (
     RunbookAdminService,
 )
@@ -138,6 +147,38 @@ def get_rca_query_service(request: Request) -> RCAExecutionQueryService:
     return service
 
 
+def get_rca_feedback_service(
+    request: Request,
+) -> RCAFeedbackApplicationService:
+    """从应用生命周期容器获取 RCA 人工反馈服务。"""
+    service = getattr(request.app.state, "rca_feedback_service", None)
+    if service is None:
+        raise RuntimeUnavailableError("RCA feedback service is not initialized")
+    return service
+
+
+def get_remediation_service(
+    request: Request,
+) -> RemediationApplicationService:
+    """从应用生命周期容器获取受控自动修复服务。"""
+    service = getattr(request.app.state, "remediation_service", None)
+    if service is None:
+        raise RuntimeUnavailableError(
+            "Remediation controller is not configured"
+        )
+    return service
+
+
+def get_notification_service(
+    request: Request,
+) -> NotificationApplicationService:
+    """返回已装配的供应商通知服务。"""
+    service = getattr(request.app.state, "notification_service", None)
+    if service is None:
+        raise RuntimeUnavailableError("Notification service is not configured")
+    return service
+
+
 def get_rca_cancellation_service(request: Request) -> RCACancellationService:
     """从应用生命周期容器获取 RCA 工作流取消服务。"""
     service = getattr(request.app.state, "rca_cancellation_service", None)
@@ -156,9 +197,7 @@ def get_incident_resolution_service(
         None,
     )
     if service is None:
-        raise RuntimeUnavailableError(
-            "Incident resolution service is unavailable"
-        )
+        raise RuntimeUnavailableError("Incident resolution service is unavailable")
     return service
 
 
@@ -166,9 +205,7 @@ def get_incident_query_service(request: Request) -> IncidentQueryService:
     """从应用生命周期容器获取事故管理端查询服务。"""
     service = getattr(request.app.state, "incident_query_service", None)
     if service is None:
-        raise RuntimeUnavailableError(
-            "Incident query service is unavailable"
-        )
+        raise RuntimeUnavailableError("Incident query service is unavailable")
     return service
 
 
@@ -182,9 +219,7 @@ def get_tool_permission_admin_service(
         None,
     )
     if service is None:
-        raise RuntimeUnavailableError(
-            "Tool permission administration is unavailable"
-        )
+        raise RuntimeUnavailableError("Tool permission administration is unavailable")
     return service
 
 
@@ -194,9 +229,7 @@ def get_runbook_admin_service(
     """从应用生命周期容器获取 Runbook 管理写服务。"""
     service = getattr(request.app.state, "runbook_admin_service", None)
     if service is None:
-        raise RuntimeUnavailableError(
-            "Runbook administration is unavailable"
-        )
+        raise RuntimeUnavailableError("Runbook administration is unavailable")
     return service
 
 
@@ -206,9 +239,7 @@ def get_ticket_draft_service(
     """从应用生命周期容器获取本地工单草稿服务。"""
     service = getattr(request.app.state, "ticket_draft_service", None)
     if service is None:
-        raise RuntimeUnavailableError(
-            "Ticket draft service is unavailable"
-        )
+        raise RuntimeUnavailableError("Ticket draft service is unavailable")
     return service
 
 
@@ -218,9 +249,7 @@ def get_ticket_submission_service(
     """从应用生命周期容器获取外部工单提交请求服务。"""
     service = getattr(request.app.state, "ticket_submission_service", None)
     if service is None:
-        raise RuntimeUnavailableError(
-            "Ticket submission service is unavailable"
-        )
+        raise RuntimeUnavailableError("Ticket submission service is unavailable")
     return service
 
 
@@ -236,9 +265,7 @@ async def get_administrator_principal(
         None,
     )
     if authenticator is None:
-        raise RuntimeUnavailableError(
-            "Administrator authentication is not configured"
-        )
+        raise RuntimeUnavailableError("Administrator authentication is not configured")
     try:
         principal = await authenticator.authenticate(bearer_token)
     except asyncio.CancelledError:
