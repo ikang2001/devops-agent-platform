@@ -43,3 +43,11 @@ class UUIDIdentifierGenerator:
     def new_ticket_submission_id(self) -> str:
         """生成带类型前缀的外部工单提交请求标识。"""
         return f"tsb_{uuid4().hex}"
+
+    def new_rca_feedback_id(self) -> str:
+        """生成带类型前缀的 RCA 人工反馈标识。"""
+        return f"rcf_{uuid4().hex}"
+
+    def new_remediation_plan_id(self) -> str:
+        """生成带类型前缀的受控修复计划标识。"""
+        return f"rmp_{uuid4().hex}"

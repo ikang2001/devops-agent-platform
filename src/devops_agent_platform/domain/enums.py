@@ -157,6 +157,14 @@ class RCAConclusionStatus(StrEnum):
     CONFIRMED = "CONFIRMED"
 
 
+class RCAFeedbackVerdict(StrEnum):
+    """人工复核对 RCA 结论的稳定判定。"""
+
+    ACCEPTED = "ACCEPTED"
+    PARTIAL = "PARTIAL"
+    REJECTED = "REJECTED"
+
+
 class TicketDraftStatus(StrEnum):
     """本地工单草稿及人工确认状态。"""
 

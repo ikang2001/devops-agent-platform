@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "actions": [
+    {
+      "action_key": "restart_inventory",
+      "rollback_action_key": "restore_inventory_revision",
+      "risk_level": "MEDIUM",
+      "expected_effect": "Restore inventory availability without changing order data.",
+      "allowed_targets": [
+        "inventory"
+      ]
+    }
+  ]
+}

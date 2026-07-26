@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="DevOps 智能排障 Agent 平台事故指挥台"
+    >
+    <title>事故指挥台 · DevOps Agent</title>
+    <link rel="stylesheet" href="/console/assets/styles.css">
+    <script src="/console/assets/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#workbench">跳到事故工作台</a>
+    <header class="command-bar">
+      <div class="brand-lockup" aria-label="DevOps Agent 事故指挥台">
+        <span class="brand-mark" aria-hidden="true">DA</span>
+        <div>
+          <p class="eyebrow">DevOps Agent Platform</p>
+          <h1>事故指挥台</h1>
+        </div>
+      </div>
+
+      <div class="pulse-line" aria-hidden="true">
+        <span></span>
+      </div>
+
+      <div class="connection-state">
+        <span class="status-dot" id="connection-dot"></span>
+        <span id="connection-label">尚未连接</span>
+      </div>
+    </header>
+
+    <main id="workbench">
+      <section class="access-panel" aria-labelledby="access-title">
+        <div>
+          <p class="eyebrow">Session access</p>
+          <h2 id="access-title">连接运维租户</h2>
+          <p class="section-copy">
+            访问令牌只保存在当前浏览器会话；关闭标签页后自动清除。
+          </p>
+        </div>
+        <form id="access-form" class="access-form">
+          <label>
+            <span>租户 ID</span>
+            <input
+              id="tenant-id"
+              name="tenant_id"
+              autocomplete="organization"
+              maxlength="128"
+              pattern="[A-Za-z0-9_-]+"
+              placeholder="tenant_minishop"
+              required
+            >
+          </label>
+          <label>
+            <span>管理员 Bearer Token</span>
+            <input
+              id="admin-token"
+              name="admin_token"
+              type="password"
+              autocomplete="current-password"
+              maxlength="8192"
+              placeholder="仅保存在当前页面内存"
+              required
+            >
+          </label>
+          <button class="primary-action" type="submit">连接并读取事故</button>
+        </form>
+      </section>
+
+      <section class="workspace" aria-label="事故处理工作区">
+        <aside class="incident-rail" aria-labelledby="incident-list-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Incident queue</p>
+              <h2 id="incident-list-title">事故队列</h2>
+            </div>
+            <button
+              class="icon-action"
+              id="refresh-incidents"
+              type="button"
+              title="刷新事故"
+              aria-label="刷新事故"
+            >↻</button>
+          </div>
+          <div class="filter-row" role="group" aria-label="事故状态筛选">
+            <button class="filter-chip is-active" data-status="" type="button">
+              全部
+            </button>
+            <button class="filter-chip" data-status="OPEN" type="button">
+              待处理
+            </button>
+            <button class="filter-chip" data-status="ANALYZING" type="button">
+              分析中
+            </button>
+            <button class="filter-chip" data-status="RESOLVED" type="button">
+              已解决
+            </button>
+          </div>
+          <div id="incident-list" class="incident-list" aria-live="polite">
+            <div class="empty-state">
+              <span aria-hidden="true">⌁</span>
+              <p>连接租户后，这里会显示最近事故。</p>
+            </div>
+          </div>
+        </aside>
+
+        <section class="case-file" aria-labelledby="case-title">
+          <div class="case-empty" id="case-empty">
+            <p class="eyebrow">Case file</p>
+            <h2 id="case-title">选择一条事故开始排查</h2>
+            <p>
+              指挥台会把事故事实、RCA 证据和工单审批放在同一条审计链上。
+            </p>
+          </div>
+
+          <div id="case-content" class="case-content" hidden>
+            <div class="case-header">
+              <div>
+                <div class="case-meta">
+                  <span id="case-severity" class="severity-badge"></span>
+                  <span id="case-status" class="status-badge"></span>
+                  <span id="case-service" class="service-label"></span>
+                </div>
+                <h2 id="case-name"></h2>
+                <p id="case-id" class="mono-label"></p>
+              </div>
+              <div class="case-actions">
+                <button id="start-rca" class="primary-action" type="button">
+                  启动 RCA
+                </button>
+                <button id="resolve-incident" class="secondary-action" type="button">
+                  标记已解决
+                </button>
+                <button id="close-incident" class="quiet-action" type="button">
+                  关闭事故
+                </button>
+              </div>
+            </div>
+
+            <dl class="fact-grid" id="incident-facts"></dl>
+
+            <section class="evidence-section" aria-labelledby="evidence-title">
+              <div class="section-heading-row">
+                <div>
+                  <p class="eyebrow">Evidence chain</p>
+                  <h3 id="evidence-title">RCA 证据链</h3>
+                </div>
+                <div class="workflow-control">
+                  <label for="workflow-id">Workflow Run</label>
+                  <input
+                    id="workflow-id"
+                    class="mono-input"
+                    maxlength="128"
+                    placeholder="启动 RCA 后自动填入"
+                  >
+                  <button id="load-workflow" class="secondary-action" type="button">
+                    读取结果
+                  </button>
+                </div>
+              </div>
+
+              <div id="workflow-summary" class="workflow-summary" hidden></div>
+              <div id="evidence-grid" class="evidence-grid">
+                <div class="empty-state compact">
+                  <span aria-hidden="true">∿</span>
+                  <p>输入 Workflow Run ID 或启动新的 RCA。</p>
+                </div>
+              </div>
+            </section>
+
+            <section class="feedback-section" aria-labelledby="feedback-title">
+              <div class="section-heading-row">
+                <div>
+                  <p class="eyebrow">Learning loop</p>
+                  <h3 id="feedback-title">RCA 人工复核</h3>
+                </div>
+                <div class="feedback-toolbar">
+                  <button id="load-feedback" class="quiet-action" type="button">
+                    读取历史
+                  </button>
+                  <select id="notification-target" aria-label="通知目标">
+                    <option value="slack">Slack</option>
+                    <option value="teams">Teams</option>
+                    <option value="pagerduty">PagerDuty</option>
+                  </select>
+                  <button
+                    id="send-notification"
+                    class="secondary-action"
+                    type="button"
+                  >发送摘要</button>
+                </div>
+              </div>
+              <form id="feedback-form" class="feedback-form">
+                <label>
+                  <span>结论判定</span>
+                  <select id="feedback-verdict" required>
+                    <option value="ACCEPTED">结论正确</option>
+                    <option value="PARTIAL" selected>部分正确</option>
+                    <option value="REJECTED">结论错误</option>
+                  </select>
+                </label>
+                <label>
+                  <span>修正后的根因</span>
+                  <textarea
+                    id="feedback-root-cause"
+                    maxlength="4096"
+                    rows="3"
+                    placeholder="仅在部分正确或错误时填写"
+                  ></textarea>
+                </label>
+                <fieldset>
+                  <legend>缺失证据</legend>
+                  <label><input type="checkbox" value="METRIC">指标</label>
+                  <label><input type="checkbox" value="LOG">日志</label>
+                  <label><input type="checkbox" value="TRACE">链路</label>
+                  <label><input type="checkbox" value="DEPLOYMENT">发布</label>
+                  <label><input type="checkbox" value="RUNBOOK">预案</label>
+                </fieldset>
+                <label>
+                  <span>不安全建议序号</span>
+                  <input
+                    id="feedback-unsafe-indexes"
+                    maxlength="128"
+                    placeholder="从 0 开始，多个用逗号分隔"
+                  >
+                </label>
+                <label>
+                  <span>跟进标签</span>
+                  <input
+                    id="feedback-label"
+                    maxlength="128"
+                    placeholder="例如 needs-runbook"
+                  >
+                </label>
+                <label>
+                  <span>复核备注</span>
+                  <textarea
+                    id="feedback-notes"
+                    maxlength="4096"
+                    rows="3"
+                    placeholder="记录判断依据，不要粘贴密钥或原始请求体"
+                  ></textarea>
+                </label>
+                <div class="feedback-submit">
+                  <p>反馈会追加为不可变记录，不会覆盖原始 RCA 报告。</p>
+                  <button class="primary-action" type="submit">记录反馈</button>
+                </div>
+              </form>
+              <div id="feedback-list" class="feedback-list"></div>
+            </section>
+
+            <section class="remediation-section" aria-labelledby="remediation-title">
+              <div class="section-heading-row">
+                <div>
+                  <p class="eyebrow">Guarded remediation</p>
+                  <h3 id="remediation-title">受审修复计划</h3>
+                </div>
+                <div class="remediation-toolbar">
+                  <input
+                    id="remediation-plan-id"
+                    class="mono-input"
+                    maxlength="64"
+                    placeholder="Remediation Plan ID"
+                    aria-label="Remediation Plan ID"
+                  >
+                  <button id="load-remediation" class="quiet-action" type="button">
+                    读取计划
+                  </button>
+                </div>
+              </div>
+              <form id="remediation-form" class="remediation-form">
+                <label>
+                  <span>动作键</span>
+                  <input
+                    id="remediation-action-key"
+                    maxlength="128"
+                    placeholder="restart_inventory"
+                    required
+                  >
+                </label>
+                <label>
+                  <span>精确目标</span>
+                  <input
+                    id="remediation-target"
+                    maxlength="256"
+                    placeholder="inventory"
+                    required
+                  >
+                </label>
+                <label class="wide-field">
+                  <span>证据 ID</span>
+                  <textarea
+                    id="remediation-evidence-ids"
+                    maxlength="4096"
+                    rows="3"
+                    placeholder="evd_001, evd_002, evd_003, evd_004"
+                    required
+                  ></textarea>
+                </label>
+                <div class="remediation-submit">
+                  <p>页面只提交动作键、目标和证据引用；风险、效果和回滚动作由部署侧目录派生。</p>
+                  <button class="primary-action" type="submit">创建 dry-run 计划</button>
+                </div>
+              </form>
+              <div id="remediation-card" class="remediation-card" hidden></div>
+              <div id="remediation-empty" class="empty-state compact">
+                <span aria-hidden="true">△</span>
+                <p>RCA 成功后可创建受 ETag 和人工审批保护的修复计划。</p>
+              </div>
+            </section>
+
+            <section class="ticket-section" aria-labelledby="ticket-title">
+              <div class="section-heading-row">
+                <div>
+                  <p class="eyebrow">Human approval</p>
+                  <h3 id="ticket-title">工单草稿与外部提交</h3>
+                </div>
+                <div class="ticket-actions">
+                  <button id="load-ticket" class="quiet-action" type="button">
+                    读取草稿
+                  </button>
+                  <button id="create-ticket" class="secondary-action" type="button">
+                    生成草稿
+                  </button>
+                </div>
+              </div>
+              <div id="ticket-card" class="ticket-card" hidden></div>
+              <div id="ticket-empty" class="empty-state compact">
+                <span aria-hidden="true">◇</span>
+                <p>RCA 成功后可生成受版本保护的工单草稿。</p>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <aside class="operations-rail" aria-labelledby="operations-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Runtime</p>
+              <h2 id="operations-title">运行状态</h2>
+            </div>
+            <button
+              id="refresh-health"
+              class="icon-action"
+              type="button"
+              title="刷新运行状态"
+              aria-label="刷新运行状态"
+            >↻</button>
+          </div>
+          <div id="health-summary" class="health-summary" aria-live="polite">
+            <div class="empty-state compact">
+              <span aria-hidden="true">◎</span>
+              <p>等待健康检查。</p>
+            </div>
+          </div>
+
+          <div class="audit-panel">
+            <p class="eyebrow">Activity log</p>
+            <h3>本次会话</h3>
+            <ol id="activity-log" class="activity-log" aria-live="polite">
+              <li>
+                <time>—</time>
+                <span>指挥台已就绪</span>
+              </li>
+            </ol>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <div id="toast-region" class="toast-region" aria-live="assertive"></div>
+
+    <dialog id="action-dialog">
+      <form method="dialog" id="action-form">
+        <div class="dialog-heading">
+          <p class="eyebrow">Confirm action</p>
+          <h2 id="dialog-title">确认操作</h2>
+        </div>
+        <p id="dialog-copy"></p>
+        <label id="dialog-reason-field">
+          <span>原因</span>
+          <textarea
+            id="dialog-reason"
+            minlength="3"
+            maxlength="1000"
+            rows="4"
+          ></textarea>
+        </label>
+        <label id="dialog-target-field" hidden>
+          <span>目标系统</span>
+          <select id="dialog-target">
+            <option value="jira">Jira</option>
+            <option value="servicenow">ServiceNow</option>
+          </select>
+        </label>
+        <div class="dialog-actions">
+          <button value="cancel" class="quiet-action">取消</button>
+          <button
+            id="dialog-confirm"
+            value="confirm"
+            class="primary-action"
+          >确认</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

@@ -9,21 +9,21 @@
 | 项目/需求 | MiniShop 到 DevOps Agent 的端到端 RCA、场景 Manifest 与代码导读 |
 | 技术栈与环境 | Python 3.12、FastAPI、PostgreSQL、Kafka/Redpanda、Prometheus、Loki、Tempo、Docker Compose |
 | 开始时间 | 2026-07-18 |
-| 完成时间 | 2026-07-23 |
-| 当前结论 | 三场景真实 Docker RCA 闭环已通过，代码、数据、导读和验收证据齐全 |
+| 完成时间 | 2026-07-26 |
+| 当前结论 | 三场景 Docker RCA 闭环与 A/B/C0/C1 最小改造路线均已完成本地验证 |
 | 相关版本/提交 | 独立 Git 仓库 `main` 基线，提交信息见本仓库 `git log` |
 
 ## 2. 结果摘要
 
 - 交付内容：三份机器可读 Manifest/Ground Truth、MiniShop 可观测与告警接入、
   真实 Compose RCA 验收、演练管理员认证、逐模块代码导读。
-- 已完成验证：平台全量 `1531 passed, 9 skipped`；MiniShop 全量
-  `37 passed`；E2E 静态资产 `3 passed`；Compose 配置展开通过；三场景真实
+- 已完成验证：平台全量 `1625 passed, 9 skipped`；MiniShop 全量
+  `37 passed`（均使用 `-W error`）；E2E 静态资产 `3 passed`；Compose 配置展开通过；三场景真实
   Docker E2E 全部通过。
 - 端到端证据：`checkout-latency`、`inventory-db-timeout`、
   `payment-error` 均为 `SUCCEEDED`，且具备 METRIC、LOG、TRACE、RUNBOOK
   四类 Evidence。
-- 遗留风险：当前仅保留 Starlette TestClient 的上游弃用告警，尚不影响测试结果。
+- 遗留风险：真实生产控制器、外部凭据和目标环境验收不在仓库中；本地测试已在 `-W error` 下通过。
 - 工程基线：根平台与 MiniShop 分别提交 `uv.lock`，CI 和镜像均使用
   `uv 0.11.31` 的 locked 模式，Ruff 固定为 `0.15.22`；项目已建立独立
   Git `main` 基线。
@@ -35,9 +35,9 @@
 | Step 1 需求分析 | 定义闭环、Manifest、教程三项交付及成功标准 | 现有源码、配置和两套测试基线 | 1 | 无 |
 | Step 2 架构设计 | 选择原生 Alertmanager Relay、兼容 Telemetry、演练专用认证和 Compose 验收 | 现有端口/适配器边界 | 1 | 无 |
 | Step 3 代码骨架 | 新增 Alertmanager Mapper、Relay、Agent Alert Client 与路由 | Relay 定向测试 6 项通过 | 1 | 无 |
-| Step 4 增量实现 | Alertmanager Relay、兼容指标/日志、分服务 Trace、Tempo Ground Truth、演练认证和代码导读 | 定向认证测试 `173 passed`；MiniShop `37 passed` | 1 | 无 |
-| Step 5 测试排错 | 修复 FastAPI 生命周期、Buildx 路径、tmpfs 权限、Tempo Trace ID 和锁定环境打包问题 | 平台 `1531 passed, 9 skipped`；MiniShop `37 passed` | 6 | 无 |
-| Step 6 整合运维 | 真实 Compose 三场景验收、锁定镜像验证、独立 Git 基线和结果落盘 | `artifacts/results.json` 中 `passed: true` | 1 | 无 |
+| Step 4 增量实现 | Alertmanager Relay、兼容指标/日志、分服务 Trace、Tempo Ground Truth、演练认证、代码导读和固定调查策略接线 | C0/C1 定向测试 `190 passed`；MiniShop `37 passed` | 2 | 无 |
+| Step 5 测试排错 | 修复 FastAPI 生命周期、Buildx 路径、tmpfs 权限、Tempo Trace ID、锁定环境打包和策略解析测试假设 | 平台 `1625 passed, 9 skipped`；MiniShop `37 passed` | 7 | 无 |
+| Step 6 整合运维 | 真实 Compose 三场景验收、锁定镜像验证、独立 Git 基线、平台受审修复、C0/C1 文档收口和结果落盘 | `artifacts/results.json` 中 `passed: true`；全仓 Ruff 通过 | 6 | 无 |
 
 ## 4. 事件索引
 
@@ -54,6 +54,19 @@
 | DEV-009 | Step 5 | 难点 | Tempo 搜索返回省略前导零的 Trace ID | 已解决 | 有界接受并规范化 16/128 位 Trace ID，补回归测试 |
 | DEV-010 | Step 6 | 踩坑 | Git 中文路径默认转义破坏 PowerShell 审计 | 已解决 | 独立仓库关闭 `core.quotepath` 后重新执行候选文件审计 |
 | DEV-011 | Step 5 | 难点 | 锁定环境暴露根项目缺少显式打包元数据 | 已解决 | 补 `build-system` 与 `src` 包发现，升级资产测试为 locked 门禁 |
+| DEV-012 | Step 6 | 难点 | 并发控制台实现产生重复静态资源边界 | 已解决 | 保留 `static/ops-console` 作为唯一资源目录并用控制台 API 测试兜底 |
+| DEV-013 | Step 5 | 犯错 | 供应商适配器首轮静态检查命中行宽 | 已解决 | 按 Ruff 精确位置重排表达式，不改变业务语义 |
+| DEV-014 | Step 5 | 犯错 | 根项目虚拟环境不能代替 MiniShop 锁定环境 | 已解决 | 改用 MiniShop 独立 `uv run --locked` 测试 |
+| DEV-015 | Step 5 | 难点 | httpx2 的 Python 下限与 MiniShop 声明范围冲突 | 已解决 | 使用 Python marker 保留 3.9 锁解析兼容 |
+| DEV-016 | Step 5 | 犯错 | RCA 反馈测试夹具漏传报告执行代次 | 已解决 | 补齐共享测试夹具的 `execution_attempt` |
+| DEV-017 | Step 6 | 犯错 | 并发增量产生两套 remediation 模型和重复标识符 | 已解决 | Ruff F811 捕获后统一保留单套领域模型与仓储映射 |
+| DEV-018 | Step 6 | 犯错 | 迁移数量精确断言在新增计划表后失效 | 已解决 | 将迁移数量从 27 更新为 28，并避免脆弱的精确数量契约扩散 |
+| DEV-019 | Step 6 | 犯错 | 新增文本 dataclass 后旧测试硬编码 28 导致全量失败 | 已解决 | 改为动态扫描并保留下限断言 |
+| DEV-020 | Step 6 | 难点 | 修复风险、回滚和效果不能来自 HTTP 正文 | 已解决 | 改为部署控制的 JSON 动作目录，创建请求只收动作键、目标和证据 |
+| DEV-021 | Step 6 | 犯错 | OIDC `nbf` 负向测试使用收集期时间导致全量运行后失效 | 已解决 | 改为测试执行时动态生成未来时间 |
+| DEV-022 | Step 4 | 犯错 | 新增调查策略导出后导入顺序未通过 Ruff | 已解决 | 调整公共导入顺序并通过定向 Ruff |
+| DEV-023 | Step 5 | 犯错 | 调查策略测试误判解析 API 的空白规范化语义 | 已解决 | 统一复用解析器并拆分 API/Settings 边界测试 |
+| DEV-024 | Step 6 | 踩坑 | 全仓 Ruff 捕获 Remediation 接线中的超长中文注释 | 已解决 | 拆分注释并通过全仓 Ruff |
 
 ## 5. 事件详情
 
@@ -246,9 +259,230 @@
 | 排查过程 | 对比 MiniShop 与根 `pyproject.toml`，确认根项目缺少 `build-system` 和 `src` 包发现；检查失败断言后确认其验证的是命令文本而非门禁语义 |
 | 根因 | 旧环境依赖 pytest `pythonpath` 与 editable pip 的隐式行为，打包边界未被独立验证；资产测试过度耦合实现字符串 |
 | 解决方案 | 增加 setuptools 构建元数据与 `where = ["src"]`，CI 改用 `uv sync --locked`，测试改为验证锁定、Ruff、pytest、Alembic 和镜像安装语义 |
-| 验证证据 | 定向资产测试 `10 passed`，锁定环境平台全量 `1531 passed, 9 skipped`，MiniShop `37 passed`，锁定版三场景 Docker E2E 通过 |
-| 残余风险 | TestClient 仍有一条上游弃用告警，与依赖锁定无关 |
+| 验证证据 | 定向资产测试通过，锁定环境平台全量 `1606 passed, 9 skipped`，MiniShop `37 passed`，锁定版三场景 Docker E2E 通过 |
+| 残余风险 | 真实生产控制器、外部凭据和目标环境验收仍需组织环境完成 |
 | 预防措施 | 新 Python 项目从第一天同时验证 `uv sync --locked`、子进程导入、wheel 构建和容器安装 |
+
+### DEV-012：并发控制台实现产生重复静态资源边界
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-23 / Step 6 |
+| 模块 | 运维控制台与 FastAPI 静态资源路由 |
+| 分类 | 难点 |
+| 状态 | 已解决 |
+| 现象与证据 | 控制台实现期间工作区同时出现 `interfaces/http/console` 与 `interfaces/http/static/ops-console` 两套资源，后者已有包资源配置和 API 测试 |
+| 影响 | 若继续分别接线，`/console` 首页、资源 URL 与打包清单会互相不一致 |
+| 排查过程 | 对照 `git status`、资源时间戳、页面引用、JavaScript API 链路和并发新增测试，确认后者已覆盖事故、RCA、工单与安全头 |
+| 根因 | 同一产品增量存在并发写入，路由与静态资源落在不同目录约定 |
+| 解决方案 | 保留已有完整控制台资源，删除本次未接线的重复资源；显式白名单路由统一服务 `index.html`、`app.js`、`styles.css`，并补 CSP、`X-Frame-Options` 和禁止缓存 |
+| 验证证据 | `tests/api/test_ops_console.py` 2 passed；Ruff 通过；`node --check app.js` 通过 |
+| 残余风险 | 浏览器中的真实 API 交互仍需随完整本地栈做一次视觉回归 |
+| 预防措施 | 多执行单元并发编辑前先声明文件所有权；发现陌生改动时先合并契约，不覆盖未提交内容 |
+
+### DEV-013：供应商适配器首轮静态检查命中行宽
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-23 / Step 5 |
+| 模块 | ServiceNow 工单适配器 |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | 首轮 Ruff 报 `servicenow.py:63 E501 Line too long (90 > 88)`，同轮 9 个行为测试均通过 |
+| 影响 | 逻辑正确但不满足仓库静态门禁，不能进入下一集成步骤 |
+| 排查过程 | 根据 Ruff 精确行号确认是密码控制字符校验的单行生成过长，不涉及业务语义 |
+| 根因 | 编写复合生成表达式时未按项目 88 字符限制提前换行 |
+| 解决方案 | 只重排该生成表达式，不改变校验条件 |
+| 验证证据 | 修复后重新运行同一 Ruff 与定向测试 |
+| 残余风险 | 无 |
+| 预防措施 | 新增 Python 文件后先运行局部 Ruff，再继续跨模块装配 |
+
+### DEV-014：根项目虚拟环境不能代替 MiniShop 锁定环境
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-23 / Step 5 |
+| 模块 | MiniShop TestClient 兼容性检查 |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | 使用根项目 `.venv` 运行 MiniShop 全量测试时，4 个测试模块在收集阶段报告缺少 `opentelemetry` |
+| 影响 | 测试未进入兼容性告警定位，输出不能用于判断 MiniShop 回归 |
+| 排查过程 | 对照根项目与 MiniShop 的独立 `pyproject.toml`、`uv.lock`，确认两者运行依赖集合不同 |
+| 根因 | 错把 monorepo 根虚拟环境当成所有子项目的共享测试环境 |
+| 解决方案 | 改用 MiniShop 目录下的 `uv run --locked` 执行测试，不向根环境临时补装子项目依赖 |
+| 验证证据 | 使用子项目锁定环境重新运行测试并单独检查警告摘要 |
+| 残余风险 | 手工执行者仍可能选错解释器 |
+| 预防措施 | 根项目和 MiniShop 文档、CI 命令始终显式带 `uv run --project` 或在各自目录执行 |
+
+### DEV-015：httpx2 的 Python 下限与 MiniShop 声明范围冲突
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-23 / Step 5 |
+| 模块 | MiniShop 测试客户端依赖迁移 |
+| 分类 | 难点 |
+| 状态 | 已解决 |
+| 现象与证据 | 首次 `uv lock` 无解：MiniShop 声明 `Python >=3.9`，而 `httpx2>=2.7` 要求 `Python >=3.10` |
+| 影响 | 直接加入无条件开发依赖会破坏项目已经声明的 Python 3.9 解析范围 |
+| 排查过程 | 读取 uv 求解器给出的 marker 分支，确认当前 3.12 可安装，失败仅来自必须同时覆盖的 3.9 分支 |
+| 根因 | 新一代测试客户端抬高了 Python 最低版本，子项目兼容声明尚未同步 |
+| 解决方案 | 保留 `requires-python >=3.9`，仅在 `python_version >= '3.10'` 时安装 `httpx2`；3.9 继续解析兼容的旧依赖组合 |
+| 验证证据 | 重新生成锁文件，并在 Python 3.12 锁定环境运行 37 个测试及警告检查 |
+| 残余风险 | Python 3.9 分支不会使用 httpx2，但也不会解析到要求 httpx2 的最新 Starlette 组合 |
+| 预防措施 | 新开发依赖加入多 Python 项目前，先核对 `Requires-Python` 并让锁工具覆盖所有 marker 分支 |
+
+### DEV-016：RCA 反馈测试夹具漏传报告执行代次
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-23 / Step 5 |
+| 模块 | RCA 反馈持久化增量 |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | 共享回归中 4 个反馈服务测试均在 `build_report()` 报 `RCAReport.__init__()` 缺少 `execution_attempt` |
+| 影响 | 测试未进入反馈清洗、幂等、状态和历史断言 |
+| 排查过程 | 对照现有 `RCAReport` 领域构造契约和其它报告测试，确认生产模型要求记录生成报告所属执行代次 |
+| 根因 | 新测试夹具复制报告字段时遗漏了已有必填字段 |
+| 解决方案 | 在唯一共享夹具中补 `execution_attempt=1`，不修改反馈服务逻辑 |
+| 验证证据 | 重新运行反馈、Runtime、Settings、迁移、连接器和控制台共享回归 |
+| 残余风险 | 无 |
+| 预防措施 | 新领域夹具优先复用项目 builder；手写构造时从当前模型签名核对必填字段 |
+
+### DEV-017：并发增量产生两套 remediation 模型和重复标识符
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-23 / Step 6 |
+| 模块 | 平台级 Remediation 领域模型、数据库模型与仓储 |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | 全仓 Ruff 捕获 `F811` 重复定义，定位到 remediation 增量中出现两套同名模型或标识符 |
+| 影响 | 如果放过，会让导入目标不稳定，测试和运行时可能引用到不同版本的计划模型 |
+| 排查过程 | 按 Ruff 行号检查领域模型、数据库模型、映射器、仓储和 `__init__` 导出链路 |
+| 根因 | 并发增量在相同职责边界内重复创建类型，缺少落盘后的一次统一命名审计 |
+| 解决方案 | 统一保留单套 remediation 领域模型、数据库模型、映射器和仓储导出，删除重复标识符 |
+| 验证证据 | 修复后全仓 Ruff 通过；后续定向 remediation 测试通过 |
+| 残余风险 | 后续多模块并行编辑仍可能再次引入同名导出冲突 |
+| 预防措施 | 新领域模块落盘后立刻运行 Ruff，并用 `rg` 检查同名 class、repository、identifier 导出 |
+
+### DEV-018：迁移数量精确断言在新增计划表后失效
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-23 / Step 6 |
+| 模块 | Alembic 迁移资产测试 |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | 新增 `20260723_0028_create_remediation_plans.py` 后，旧测试仍按 27 个迁移文件做精确断言 |
+| 影响 | 迁移链本身正确，但资产测试误判新增迁移为失败 |
+| 排查过程 | 对比 `migrations/versions` 实际文件数、测试断言和 Alembic head 线性检查 |
+| 根因 | 测试把迁移数量作为稳定事实硬编码，而迁移数量本身会随功能增长正常变化 |
+| 解决方案 | 将当前预期推进到 28，并保留更重要的单 head、线性链和 PostgreSQL 离线编译检查 |
+| 验证证据 | 迁移资产定向测试通过；后续定向回归 `188 passed` |
+| 残余风险 | 后续仍需在新增迁移时同步资产测试语义 |
+| 预防措施 | 迁移测试优先验证链路性质，少用会随功能增长变化的精确数量 |
+
+### DEV-019：新增文本 dataclass 后旧测试硬编码 28 导致全量失败
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-23 / Step 6 |
+| 模块 | Step 4 completion 资产测试 |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | 新增 7 个文本类 dataclass 后，旧测试硬编码 `== 28` 导致全量测试失败 |
+| 影响 | 测试没有发现真实质量问题，却阻断了新增合法领域对象 |
+| 排查过程 | 对比失败断言、实际扫描到的 dataclass 数量和新增模块职责 |
+| 根因 | 完成度测试把“至少具备若干 dataclass 契约”写成了精确数量 |
+| 解决方案 | 改为动态扫描加下限断言 `>= 28`，保留架构完成度信号但允许功能增长 |
+| 验证证据 | `tests/unit/ops/test_step4_completion.py` 更新后定向测试通过 |
+| 残余风险 | 下限断言只能防止能力倒退，不能表达每个新增领域对象的业务正确性 |
+| 预防措施 | 资产完成度测试使用下限、存在性和契约性质组合，不对增长型集合写精确数量 |
+
+### DEV-020：修复风险、回滚和效果不能来自 HTTP 正文
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-24 / Step 6 |
+| 模块 | 平台级 Remediation API、Service、Policy、Action Catalog、Ops Console |
+| 分类 | 难点 |
+| 状态 | 已解决 |
+| 现象与证据 | 初版创建计划可从 HTTP 或页面传入 `risk`、`rollback_action_key`、`expected_effect`，存在低报风险、伪造回滚动作和伪造效果说明的边界问题 |
+| 影响 | 如果调用方或 LLM 可影响这些字段，审批者看到的风险与回滚信息不再可信 |
+| 排查过程 | 审查创建命令、DTO、服务构造计划、执行请求、策略校验、环境变量和控制台表单 |
+| 根因 | 把受部署控制的动作元数据与用户创建请求混在同一输入面 |
+| 解决方案 | 新增 JSON 动作目录；创建请求只接受 `action_key`、`target`、`evidence_ids`；目录派生风险、效果和回滚动作；执行前重检目录漂移、RCA 审计证据、租户、维护窗口和 kill switch；控制台不再提供任意命令文本 |
+| 验证证据 | `ruff check src tests migrations ops` 通过；remediation 目录、服务、API、运行时和仓储定向测试通过；`node --check app.js` 与 Ops Console API 测试通过 |
+| 残余风险 | 仓库只提供固定 HTTP 控制器适配器和 MiniShop 沙箱；真实生产控制器、凭据、工作负载身份与目标验收仍需组织环境完成 |
+| 预防措施 | 把风险、回滚、效果和目标白名单视为部署配置，不从 HTTP、页面或 LLM 响应接收；新增动作必须先补目录测试和目标环境 dry-run/rollback 验收 |
+
+### DEV-021：OIDC `nbf` 负向测试使用收集期时间导致全量运行后失效
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-24 / Step 6 |
+| 模块 | OIDC 管理员认证测试 |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | 最终全量 pytest 第一次在 75% 处失败：`claims_overrides3` 未抛出 `AuthenticationRequired` |
+| 影响 | 业务认证器正确，但负向测试在全量耗时超过 1 分钟时会把未来 `nbf` 等到变成有效时间 |
+| 排查过程 | 查看参数化测试，确认 `datetime.now(UTC) + timedelta(minutes=1)` 在 pytest 收集阶段求值，而不是在测试执行时求值 |
+| 根因 | 时间敏感 claim 使用过短的固定相对窗口，且窗口起点绑定到测试收集时间 |
+| 解决方案 | 将 `exp`/`nbf` 参数改成 lambda，在测试执行时动态生成；`nbf` 未来窗口扩大到 10 分钟 |
+| 验证证据 | OIDC 定向测试通过；最终根平台全量 `1606 passed, 9 skipped` |
+| 残余风险 | 其它长耗时全量测试若在收集期生成相对时间，仍可能出现同类脆弱性 |
+| 预防措施 | 时间负向测试使用执行期时间、注入时钟或足够大的窗口，避免依赖全量测试执行速度 |
+
+### DEV-022：新增调查策略导出后导入顺序未通过 Ruff
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-26 / Step 4 |
+| 模块 | C1 调查策略公共导出 |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | C0/C1 首轮定向 Ruff 检查报 `agent/__init__.py:3:1 I001 Import block is un-sorted or un-formatted` |
+| 影响 | 仅阻断静态检查，未进入运行时行为验证 |
+| 排查过程 | 对照 Ruff 给出的导入块，确认 `investigation_policy` 应排在 `llm_report_generator` 前 |
+| 根因 | 手工追加公共导出时没有按模块路径排序 |
+| 解决方案 | 仅调整两个导入块顺序，不改变导出名称或运行时语义 |
+| 验证证据 | C0/C1 定向 Ruff 通过；pytest `190 passed` |
+| 残余风险 | 后续新增公共导出仍可能重复出现机械排序问题 |
+| 预防措施 | 修改 `__init__.py` 后先运行最窄 Ruff 检查，再进入全量测试 |
+
+### DEV-023：调查策略测试误判了解析 API 的空白规范化语义
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-26 / Step 5 |
+| 模块 | C1 调查策略解析与单元测试 |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | C0/C1 定向测试 `189 passed, 1 failed`；`test_unknown_or_dynamic_policy_is_rejected[fixed_default ]` 未抛异常 |
+| 影响 | 新增测试错误阻断回归，且暴露 `build_plan_for_policy` 与 `parse_investigation_policy` 对空白处理不一致 |
+| 排查过程 | 检查失败参数与解析实现，确认解析 API 会先 `strip()`，而 Settings 作为部署配置边界仍严格拒绝首尾空白 |
+| 根因 | 测试把规范化输入误当未知策略，同时计划构造函数重复了另一套解析逻辑 |
+| 解决方案 | `build_plan_for_policy` 统一复用解析函数；测试改为验证 API 规范化空白、未知/动态策略仍失败；Settings 脏配置负向测试保持不变 |
+| 验证证据 | C0/C1 定向 Ruff 通过；pytest `190 passed` |
+| 残余风险 | API 解析与部署配置边界的严格程度不同，需要在文档中明确 |
+| 预防措施 | 对归一化函数分别测试“可规范化输入”和“不可接受输入”，避免把配置边界规则误套到内部 API |
+
+### DEV-024：全仓 Ruff 捕获 Remediation 接线中的超长中文注释
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-26 / Step 6 |
+| 模块 | Remediation Runtime 装配 |
+| 分类 | 踩坑 |
+| 状态 | 已解决 |
+| 现象与证据 | C0/C1 全量回归中 pytest 已通过，但全仓 Ruff 报 `bootstrap/runtime.py:759 E501 Line too long (93 > 88)` |
+| 影响 | 不影响运行时行为，但阻断仓库统一静态门禁 |
+| 排查过程 | 根据 Ruff 行号定位到路线 B 接线注释，确认只是注释超过项目 88 字符行宽 |
+| 根因 | 先前定向检查未覆盖整个 `bootstrap/runtime.py` 的既有未提交变更 |
+| 解决方案 | 将注释拆为两行，不修改租约或超时参数 |
+| 验证证据 | `uv run pytest -W error -q` 为 `1625 passed, 9 skipped`；`uv run ruff check .` 通过 |
+| 残余风险 | 定向 lint 仍可能遗漏同一工作区内其它未提交文件 |
+| 预防措施 | 模块定向检查之后必须再跑一次 `uv run ruff check .` 作为最终仓库门禁 |
 
 ## 6. 分类汇总
 
@@ -262,6 +496,17 @@
 ### 犯过的错误
 
 - DEV-003：首个组合补丁粒度过大，因单个上下文不匹配而整体失败。
+- DEV-013：供应商适配器复合表达式首轮未满足 88 字符行宽。
+- DEV-014：根项目虚拟环境不能替代 MiniShop 的独立锁定依赖环境。
+- DEV-015：新增依赖必须与项目声明的全部 Python marker 分支兼容。
+- DEV-016：新测试夹具必须跟随当前领域模型的必填构造契约。
+- DEV-017：并发增量落盘后必须统一清理重复模型和导出。
+- DEV-018：迁移数量会随功能增长变化，测试不应只依赖精确计数。
+- DEV-019：增长型 dataclass 集合应使用动态扫描和下限断言。
+- DEV-021：时间负向测试不能用收集期短窗口作为稳定失败条件。
+- DEV-022：公共导出变更后应立即检查导入排序。
+- DEV-023：解析 API 的规范化语义与部署配置的严格校验应分别测试。
+- DEV-024：定向 lint 之后仍需全仓门禁覆盖其它未提交增量。
 
 ### 主要难点
 
@@ -271,6 +516,8 @@
 - DEV-008：tmpfs 挂载必须匹配非 root 容器的实际 UID/GID。
 - DEV-009：外部 Trace API 的 ID 序列化需要规范化兼容层。
 - DEV-011：锁定环境必须同时验证依赖和项目本体的标准打包元数据。
+- DEV-012：并发前端增量必须先统一资源目录、路由和打包契约。
+- DEV-020：修复动作的风险、回滚和效果必须由部署控制目录提供。
 
 ## 7. 可复用解决经验
 
@@ -291,6 +538,7 @@
 | Alertmanager 接入 | 修改平台 canonical DTO / Alertmanager Relay | MiniShop 内置 Relay | 保留平台现有 HMAC 与扁平告警契约 | Relay 需要独立测试和超时处理 |
 | 管理员认证 | 完整 IdP / 绕过认证 / 演练认证器 | 受控演练认证器 | 自包含且不破坏生产默认 | 必须严格防止生产启用 |
 | 场景数据 | Markdown / JSON Manifest | 版本化 JSON Manifest + Pydantic 校验 | 无新增 YAML 解析依赖，便于测试和工具消费 | 人工编辑略显冗长 |
+| 修复动作安全边界 | HTTP 正文传完整计划 / LLM 生成动作文本 / 部署目录派生 | 部署控制 JSON 动作目录派生风险、效果、回滚和目标白名单 | 审批者看到的风险和回滚路径必须可信，执行前可检测目录漂移 | 新增动作需要同步目录文件、测试和目标环境验收 |
 
 ## 9. 技术债清偿状态
 
@@ -321,10 +569,10 @@
 
 ### 验证与已知限制
 
-- 已完成验证：平台 `1531 passed, 9 skipped`，MiniShop `37 passed`，
+- 已完成验证：平台 `1625 passed, 9 skipped`，MiniShop `37 passed`，
   E2E 资产 `3 passed`，Ruff check 和 Compose config 通过。
 - 已完成真实链路：三份 Manifest 均在重建后的 Docker 环境得到
   `SUCCEEDED` Workflow 与四类 Evidence，结果文件 `passed: true`。
 - 已完成工程基线：独立 Git `main` 仓库、两个 `uv.lock`、锁定 CI 与锁定
   Docker 安装路径均已验证。
-- 已知限制：TestClient 保留一条上游弃用告警，后续升级到 httpx2 时再迁移。
+- 已知限制：仓库没有真实生产控制器凭据、Kubernetes/SSH/cloud/shell 写适配器或外部供应商验收环境。

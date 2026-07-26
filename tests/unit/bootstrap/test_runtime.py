@@ -4,6 +4,7 @@ from collections.abc import MutableSequence
 from typing import Any
 
 import pytest
+from pydantic import SecretStr
 
 from devops_agent_platform.application.services import (
     ticket_submission_consumer_runner as ticket_consumer_runner,
@@ -49,6 +50,9 @@ from devops_agent_platform.infrastructure.auth import (
 from devops_agent_platform.infrastructure.config.settings import Settings
 from devops_agent_platform.infrastructure.ticketing import (
     HttpJsonTicketingGateway,
+    JiraTicketingGateway,
+    RoutingTicketingGateway,
+    ServiceNowTicketingGateway,
 )
 from devops_agent_platform.ports.ticketing import (
     TicketingSubmitOutcome,
@@ -702,6 +706,48 @@ async def test_build_runtime_can_construct_http_json_ticketing_gateway() -> None
     assert gateway._http_client.is_closed is True
 
 
+async def test_build_runtime_constructs_vendor_ticketing_router() -> None:
+    """Jira 与 ServiceNow 可同时启用并由 Runtime 统一托管。"""
+    observer = FakeTicketingGatewayObserver()
+    runtime = build_runtime(
+        Settings(
+            _env_file=None,
+            database_url="sqlite+aiosqlite:///:memory:",
+            ticket_submission_consumer_enabled=True,
+            ticketing_jira_enabled=True,
+            ticketing_jira_base_url="https://example.atlassian.net",
+            ticketing_jira_user_email="ops@example.com",
+            ticketing_jira_api_token=SecretStr("jira-secret"),
+            ticketing_jira_project_key="OPS",
+            ticketing_servicenow_enabled=True,
+            ticketing_servicenow_base_url=(
+                "https://example.service-now.com"
+            ),
+            ticketing_servicenow_username="devops.integration",
+            ticketing_servicenow_password=SecretStr("snow-secret"),
+        ),
+        ticketing_gateway_observer=observer,
+    )
+    try:
+        assert len(runtime.managed_resources) == 1
+        gateway = runtime.managed_resources[0]
+        assert isinstance(gateway, RoutingTicketingGateway)
+        assert isinstance(gateway._routes["jira"], JiraTicketingGateway)
+        assert isinstance(
+            gateway._routes["servicenow"],
+            ServiceNowTicketingGateway,
+        )
+        jira_support = gateway._routes["jira"]._support
+        snow_support = gateway._routes["servicenow"]._support
+        assert jira_support.observer is observer
+        assert snow_support.observer is observer
+    finally:
+        await runtime.close()
+
+    assert jira_support.http_client.is_closed is True
+    assert snow_support.http_client.is_closed is True
+
+
 async def test_injected_ticket_gateway_is_not_runtime_managed() -> None:
     """外部注入的工单端口生命周期仍由上层容器负责。"""
     runtime = build_runtime(
@@ -1143,6 +1189,26 @@ async def test_build_runtime_keeps_ticket_submission_consumer_disabled() -> None
         assert not isinstance(
             runtime.ticket_submission_consumer_worker,
             TicketSubmissionConsumerRunner,
+        )
+    finally:
+        await runtime.close()
+
+
+async def test_build_runtime_wires_remediation_with_kill_switch_off() -> None:
+    runtime = build_runtime(
+        Settings(
+            _env_file=None,
+            database_url="sqlite+aiosqlite:///:memory:",
+            remediation_controller_base_url="https://automation.example",
+            remediation_action_catalog_path=(
+                "ops/remediation/actions.example.json"
+            ),
+        )
+    )
+    try:
+        assert runtime.remediation_service is not None
+        assert (
+            runtime.remediation_service._policy.execution_enabled is False  # noqa: SLF001
         )
     finally:
         await runtime.close()

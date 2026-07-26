@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   test:
@@ -52,16 +51,20 @@ jobs:
           image: devops-agent-platform:${{ github.sha }}
           format: spdx-json
           output-file: sbom.spdx.json
-      - name: Scan image
-        uses: aquasecurity/trivy-action@0.28.0
+      - name: Report all high and critical vulnerabilities
+        # v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: devops-agent-platform:${{ github.sha }}
-          format: sarif
-          output: trivy-results.sarif
+          format: table
           severity: CRITICAL,HIGH
-          exit-code: "1"
-      - name: Upload Trivy SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+          exit-code: "0"
+      - name: Block fixable high and critical vulnerabilities
+        # v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
-          sarif_file: trivy-results.sarif
+          image-ref: devops-agent-platform:${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: "true"
+          exit-code: "1"

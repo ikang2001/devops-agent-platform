@@ -285,7 +285,8 @@ E2E 使用 `ops/minishop-e2e/llm_stub.py` 返回确定性候选结论。它不�
 4. ⚠️ Runbook 必须先保存 draft，再带正确 ETag/revision 发布；未发布版本不会被 RCA 工具返回。
 5. ⚠️ 故障清理必须放在 `finally`，否则上一个场景会污染下一个场景。
 6. ⚠️ Workflow 的 `SUCCEEDED` 只说明执行链完成；E2E 还要校验根因与 Ground Truth 是否一致。
-7. ⚠️ 当前项目没有独立 Git HEAD，源码定位不能绑定不可变 commit。
+7. ⚠️ 项目已有独立 Git `main` 基线；本地未提交增量仍应以当前工作树为准，
+   不要把文件行号误当成跨版本稳定接口。
 
 ## 推荐阅读顺序
 

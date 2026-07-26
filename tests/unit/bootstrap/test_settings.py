@@ -324,9 +324,7 @@ def test_demo_and_oidc_administrator_authentication_are_mutually_exclusive() -> 
             admin_oidc_enabled=True,
             admin_oidc_issuer="https://identity.example.com/",
             admin_oidc_audience="devops-agent-api",
-            admin_oidc_jwks_url=(
-                "https://identity.example.com/.well-known/jwks.json"
-            ),
+            admin_oidc_jwks_url=("https://identity.example.com/.well-known/jwks.json"),
         )
 
 
@@ -358,6 +356,8 @@ def test_rca_consumer_and_llm_are_disabled_by_default() -> None:
     settings = Settings(_env_file=None)
 
     assert settings.rca_consumer_enabled is False
+    assert settings.rca_continue_on_step_failure is False
+    assert settings.rca_investigation_policy == "fixed_default"
     assert settings.ticket_submission_consumer_enabled is False
     assert settings.ticketing_http_json_enabled is False
     assert settings.llm_report_enabled is False
@@ -418,6 +418,27 @@ def test_enabled_rca_consumer_requires_all_observability_urls(
 
     with pytest.raises(ValidationError, match="incomplete"):
         Settings(_env_file=None, **values)
+
+
+def test_trace_free_policy_does_not_require_tempo() -> None:
+    settings = Settings(
+        _env_file=None,
+        rca_consumer_enabled=True,
+        rca_investigation_policy="fixed_no_traces",
+        prometheus_base_url="https://prometheus.example.com",
+        loki_base_url="https://loki.example.com",
+    )
+
+    assert settings.tempo_base_url is None
+
+
+@pytest.mark.parametrize(
+    "policy",
+    ["auto", "fixed_default ", "", "unknown"],
+)
+def test_rca_investigation_policy_rejects_unknown_values(policy: str) -> None:
+    with pytest.raises(ValidationError, match="rca_investigation_policy"):
+        Settings(_env_file=None, rca_investigation_policy=policy)
 
 
 @pytest.mark.parametrize(
@@ -487,13 +508,9 @@ def test_enabled_consumers_require_distinct_dead_letter_topics() -> None:
             loki_base_url="https://loki.example.com",
             tempo_base_url="https://tempo.example.com",
             rca_consumer_group_id="devops-agent-rca-v1",
-            ticket_submission_consumer_group_id=(
-                "devops-agent-ticket-submission-v1"
-            ),
+            ticket_submission_consumer_group_id=("devops-agent-ticket-submission-v1"),
             rca_dead_letter_topic="devops-agent.dead-letter.v1",
-            ticket_submission_dead_letter_topic=(
-                "devops-agent.dead-letter.v1"
-            ),
+            ticket_submission_dead_letter_topic=("devops-agent.dead-letter.v1"),
         )
 
 
@@ -555,14 +572,12 @@ def test_enabled_llm_accepts_ordered_provider_chain() -> None:
     )
 
     assert settings.llm_provider_order == "openai,dashscope"
-    assert tuple(
-        config.provider_name for config in settings.llm_provider_configs
-    ) == ("openai", "dashscope")
-    assert settings.llm_provider_configs[0].api_style == "responses"
-    assert (
-        settings.llm_provider_configs[0].base_url
-        == "https://api.openai.com"
+    assert tuple(config.provider_name for config in settings.llm_provider_configs) == (
+        "openai",
+        "dashscope",
     )
+    assert settings.llm_provider_configs[0].api_style == "responses"
+    assert settings.llm_provider_configs[0].base_url == "https://api.openai.com"
     assert settings.llm_provider_configs[1].api_style == "chat_completions"
     assert settings.llm_provider_configs[1].base_url == (
         "https://dashscope.aliyuncs.com/compatible-mode"
@@ -715,9 +730,7 @@ def test_ticketing_http_json_valid_configuration_masks_token() -> None:
         _env_file=None,
         ticket_submission_consumer_enabled=True,
         ticketing_http_json_enabled=True,
-        ticketing_http_json_endpoint_url=(
-            "https://ticketing.example.com/api/tickets"
-        ),
+        ticketing_http_json_endpoint_url=("https://ticketing.example.com/api/tickets"),
         ticketing_http_json_bearer_token=SecretStr("private-ticket-token"),
     )
 
@@ -771,6 +784,93 @@ def test_enabled_ticketing_http_json_rejects_invalid_token() -> None:
                 ),
                 ticketing_http_json_bearer_token=SecretStr(token),
             )
+
+
+def test_vendor_ticketing_defaults_are_disabled() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.ticketing_jira_enabled is False
+    assert settings.ticketing_servicenow_enabled is False
+    assert settings.ticketing_jira_issue_type == "Task"
+    assert settings.ticketing_servicenow_table == "incident"
+
+
+def test_vendor_ticketing_valid_configuration_masks_credentials() -> None:
+    settings = Settings(
+        _env_file=None,
+        ticket_submission_consumer_enabled=True,
+        ticketing_jira_enabled=True,
+        ticketing_jira_base_url="https://example.atlassian.net",
+        ticketing_jira_user_email="ops@example.com",
+        ticketing_jira_api_token=SecretStr("jira-secret"),
+        ticketing_jira_project_key="OPS",
+        ticketing_jira_issue_type="Service Request",
+        ticketing_servicenow_enabled=True,
+        ticketing_servicenow_base_url=("https://example.service-now.com"),
+        ticketing_servicenow_username="devops.integration",
+        ticketing_servicenow_password=SecretStr("snow-secret"),
+    )
+
+    assert settings.ticketing_jira_project_key == "OPS"
+    assert settings.ticketing_servicenow_table == "incident"
+    assert "jira-secret" not in repr(settings)
+    assert "snow-secret" not in repr(settings)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {
+            "ticketing_jira_enabled": True,
+            "ticketing_jira_base_url": "https://example.atlassian.net",
+            "ticketing_jira_user_email": "ops@example.com",
+            "ticketing_jira_api_token": SecretStr("jira-secret"),
+            "ticketing_jira_project_key": "OPS",
+        },
+        {
+            "ticket_submission_consumer_enabled": True,
+            "ticketing_jira_enabled": True,
+            "ticketing_jira_base_url": "https://example.atlassian.net",
+            "ticketing_jira_user_email": "ops@example.com",
+            "ticketing_jira_project_key": "OPS",
+        },
+        {
+            "ticket_submission_consumer_enabled": True,
+            "ticketing_servicenow_enabled": True,
+            "ticketing_servicenow_base_url": ("https://example.service-now.com"),
+            "ticketing_servicenow_username": "devops.integration",
+        },
+        {
+            "ticket_submission_consumer_enabled": True,
+            "ticketing_jira_enabled": True,
+            "ticketing_jira_base_url": "https://example.atlassian.net/",
+            "ticketing_jira_user_email": "ops@example.com",
+            "ticketing_jira_api_token": SecretStr("jira-secret"),
+            "ticketing_jira_project_key": "OPS",
+        },
+    ],
+)
+def test_incomplete_vendor_ticketing_configuration_is_rejected(
+    changes: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, **changes)
+
+
+def test_production_vendor_ticketing_requires_https() -> None:
+    with pytest.raises(ValueError):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            alert_webhook_auth_enabled=True,
+            alert_webhook_secret=SecretStr("a" * 32),
+            ticket_submission_consumer_enabled=True,
+            ticketing_jira_enabled=True,
+            ticketing_jira_base_url="http://jira.internal",
+            ticketing_jira_user_email="ops@example.com",
+            ticketing_jira_api_token=SecretStr("jira-secret"),
+            ticketing_jira_project_key="OPS",
+        )
 
 
 @pytest.mark.parametrize(
@@ -840,9 +940,7 @@ def test_enabled_oidc_requires_complete_trust_configuration(
         "admin_oidc_enabled": True,
         "admin_oidc_issuer": "https://identity.example.com/",
         "admin_oidc_audience": "devops-agent-api",
-        "admin_oidc_jwks_url": (
-            "https://identity.example.com/.well-known/jwks.json"
-        ),
+        "admin_oidc_jwks_url": ("https://identity.example.com/.well-known/jwks.json"),
     }
     values[missing_field] = None
 
@@ -876,9 +974,7 @@ def test_enabled_oidc_rejects_dirty_trust_configuration(
         "admin_oidc_enabled": True,
         "admin_oidc_issuer": "https://identity.example.com/",
         "admin_oidc_audience": "devops-agent-api",
-        "admin_oidc_jwks_url": (
-            "https://identity.example.com/.well-known/jwks.json"
-        ),
+        "admin_oidc_jwks_url": ("https://identity.example.com/.well-known/jwks.json"),
     }
     values.update(changes)
 
@@ -897,3 +993,114 @@ def test_oidc_algorithm_list_is_trimmed_deduplicated_and_ordered() -> None:
         "RS256",
         "ES256",
     )
+
+
+def test_notification_credentials_are_optional_and_remain_secret() -> None:
+    settings = Settings(
+        _env_file=None,
+        notification_slack_webhook_url=("https://hooks.slack.test/services/secret"),
+        notification_teams_webhook_url=("https://teams.test/webhook/secret"),
+        notification_pagerduty_routing_key="pager-secret-key",
+    )
+
+    assert isinstance(settings.notification_slack_webhook_url, SecretStr)
+    assert isinstance(settings.notification_teams_webhook_url, SecretStr)
+    assert isinstance(
+        settings.notification_pagerduty_routing_key,
+        SecretStr,
+    )
+    assert "pager-secret-key" not in repr(settings)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"notification_slack_webhook_url": ("ftp://hooks.slack.test/services/secret")},
+        {
+            "notification_teams_webhook_url": (
+                "https://user:password@teams.test/webhook"
+            )
+        },
+        {
+            "notification_pagerduty_routing_key": " dirty-key ",
+        },
+    ],
+)
+def test_notification_configuration_rejects_dirty_credentials(
+    changes: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **changes)
+
+
+def test_production_notification_webhooks_require_https() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="notification_slack_webhook_url",
+    ):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            alert_webhook_auth_enabled=True,
+            alert_webhook_secret=SecretStr("a" * 32),
+            admin_oidc_enabled=True,
+            admin_oidc_issuer="https://identity.example.com/",
+            admin_oidc_audience="devops-agent-api",
+            admin_oidc_jwks_url=("https://identity.example.com/.well-known/jwks.json"),
+            notification_slack_webhook_url=("http://hooks.slack.test/services/secret"),
+        )
+
+
+def test_remediation_defaults_to_disabled_and_requires_action_catalog() -> None:
+    defaults = Settings(_env_file=None)
+    assert defaults.remediation_execution_enabled is False
+    assert defaults.remediation_controller_base_url is None
+    assert defaults.remediation_action_catalog_path is None
+    assert defaults.remediation_lease_seconds == 60
+    assert defaults.remediation_request_timeout_seconds == 10
+
+    with pytest.raises(ValidationError, match="configured together"):
+        Settings(
+            _env_file=None,
+            remediation_controller_base_url="https://automation.example",
+        )
+
+
+def test_remediation_request_timeout_must_be_shorter_than_lease() -> None:
+    with pytest.raises(ValidationError, match="shorter than"):
+        Settings(
+            _env_file=None,
+            remediation_controller_base_url="https://automation.example",
+            remediation_action_catalog_path="ops/remediation/actions.example.json",
+            remediation_request_timeout_seconds=60,
+            remediation_lease_seconds=30,
+        )
+
+
+def test_remediation_execution_requires_tenant_allowlist() -> None:
+    with pytest.raises(ValidationError, match="allowed tenants"):
+        Settings(
+            _env_file=None,
+            remediation_controller_base_url="https://automation.example",
+            remediation_action_catalog_path="ops/remediation/actions.example.json",
+            remediation_execution_enabled=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://automation.example/path",
+        "https://automation.example/",
+        "https://user:secret@automation.example",
+    ],
+)
+def test_remediation_controller_rejects_dynamic_or_credentialed_urls(
+    base_url: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            remediation_controller_base_url=base_url,
+            remediation_action_catalog_path="ops/remediation/actions.example.json",
+        )

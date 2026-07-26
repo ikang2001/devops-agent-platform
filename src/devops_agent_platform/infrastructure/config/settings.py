@@ -19,11 +19,16 @@ _KAFKA_TOPIC_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,248}$")
 _KAFKA_SECURITY_PROTOCOLS = frozenset(
     {"PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL"}
 )
-_KAFKA_SASL_MECHANISMS = frozenset(
-    {"PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"}
-)
+_KAFKA_SASL_MECHANISMS = frozenset({"PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"})
 _PROMETHEUS_METRIC_IDENTIFIER = re.compile(r"^[A-Za-z_:][A-Za-z0-9_:]*$")
 _PROMETHEUS_LABEL_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_RCA_INVESTIGATION_POLICIES = frozenset(
+    {
+        "fixed_default",
+        "fixed_no_traces",
+        "fixed_metrics_logs_runbooks",
+    }
+)
 
 
 # 我现在是本地环境还是生产环境？
@@ -74,12 +79,8 @@ class Settings(BaseSettings):
     rca_consumer_enabled: bool = Field(default=False)
     rca_consumer_worker_id: str | None = Field(default=None)
     rca_consumer_group_id: str = Field(default="devops-agent-rca-v1")
-    rca_consumer_client_id: str = Field(
-        default="devops-agent-rca-consumer"
-    )
-    rca_dead_letter_topic: str = Field(
-        default="devops-agent.rca.dead-letter.v1"
-    )
+    rca_consumer_client_id: str = Field(default="devops-agent-rca-consumer")
+    rca_dead_letter_topic: str = Field(default="devops-agent.rca.dead-letter.v1")
     rca_consumer_poll_timeout_ms: int = Field(
         default=1000,
         ge=1,
@@ -115,6 +116,8 @@ class Settings(BaseSettings):
         ge=2,
         le=86_400,
     )
+    rca_continue_on_step_failure: bool = Field(default=False)
+    rca_investigation_policy: str = Field(default="fixed_default")
     rca_consumer_shutdown_timeout_seconds: int = Field(
         default=30,
         ge=1,
@@ -143,9 +146,7 @@ class Settings(BaseSettings):
     )
     ticketing_http_json_enabled: bool = Field(default=False)
     ticketing_http_json_endpoint_url: str | None = Field(default=None)
-    ticketing_http_json_bearer_token: SecretStr | None = Field(
-        default=None
-    )
+    ticketing_http_json_bearer_token: SecretStr | None = Field(default=None)
     ticketing_http_json_request_timeout_seconds: float = Field(
         default=5,
         gt=0,
@@ -153,6 +154,81 @@ class Settings(BaseSettings):
     )
     ticketing_http_json_max_response_bytes: int = Field(
         default=256 * 1024,
+        ge=1,
+        le=1024 * 1024,
+    )
+    ticketing_jira_enabled: bool = Field(default=False)
+    ticketing_jira_base_url: str | None = Field(default=None)
+    ticketing_jira_user_email: str | None = Field(default=None)
+    ticketing_jira_api_token: SecretStr | None = Field(default=None)
+    ticketing_jira_project_key: str | None = Field(default=None)
+    ticketing_jira_issue_type: str = Field(default="Task")
+    ticketing_jira_request_timeout_seconds: float = Field(
+        default=5,
+        gt=0,
+        le=60,
+    )
+    ticketing_jira_max_response_bytes: int = Field(
+        default=256 * 1024,
+        ge=1,
+        le=1024 * 1024,
+    )
+    ticketing_servicenow_enabled: bool = Field(default=False)
+    ticketing_servicenow_base_url: str | None = Field(default=None)
+    ticketing_servicenow_username: str | None = Field(default=None)
+    ticketing_servicenow_password: SecretStr | None = Field(default=None)
+    ticketing_servicenow_table: str = Field(default="incident")
+    ticketing_servicenow_request_timeout_seconds: float = Field(
+        default=5,
+        gt=0,
+        le=60,
+    )
+    ticketing_servicenow_max_response_bytes: int = Field(
+        default=256 * 1024,
+        ge=1,
+        le=1024 * 1024,
+    )
+    remediation_controller_base_url: str | None = Field(default=None)
+    remediation_controller_bearer_token: SecretStr | None = Field(default=None)
+    remediation_request_timeout_seconds: float = Field(
+        default=10,
+        gt=0,
+        le=60,
+    )
+    # 执行/回滚认领租约时长；必须严格大于 request timeout，崩溃后靠过期收口。
+    remediation_lease_seconds: int = Field(
+        default=60,
+        ge=5,
+        le=3600,
+    )
+    remediation_max_response_bytes: int = Field(
+        default=64 * 1024,
+        ge=1,
+        le=1024 * 1024,
+    )
+    remediation_execution_enabled: bool = Field(default=False)
+    remediation_allowed_tenants: tuple[str, ...] = Field(default=())
+    remediation_action_catalog_path: str | None = Field(default=None)
+    remediation_maintenance_start_hour_utc: int = Field(
+        default=0,
+        ge=0,
+        le=23,
+    )
+    remediation_maintenance_end_hour_utc: int = Field(
+        default=24,
+        ge=1,
+        le=24,
+    )
+    notification_slack_webhook_url: SecretStr | None = Field(default=None)
+    notification_teams_webhook_url: SecretStr | None = Field(default=None)
+    notification_pagerduty_routing_key: SecretStr | None = Field(default=None)
+    notification_request_timeout_seconds: float = Field(
+        default=5,
+        gt=0,
+        le=60,
+    )
+    notification_max_response_bytes: int = Field(
+        default=64 * 1024,
         ge=1,
         le=1024 * 1024,
     )
@@ -304,6 +380,17 @@ class Settings(BaseSettings):
             raise ValueError("log_level is not supported")
         return normalized
 
+    @field_validator("rca_investigation_policy")
+    @classmethod
+    def validate_rca_investigation_policy(cls, value: str) -> str:
+        """只接受服务端发布的固定计划键，未知策略不得静默回落。"""
+        if value != value.strip() or value not in _RCA_INVESTIGATION_POLICIES:
+            allowed = ", ".join(sorted(_RCA_INVESTIGATION_POLICIES))
+            raise ValueError(
+                f"rca_investigation_policy must be one of: {allowed}"
+            )
+        return value
+
     @field_validator("llm_provider")
     @classmethod
     def validate_llm_provider(cls, value: str) -> str:
@@ -453,9 +540,14 @@ class Settings(BaseSettings):
         except AppValidationError as exc:
             raise ValueError(exc.message) from exc
 
-    @field_validator("ticketing_http_json_endpoint_url")
+    @field_validator(
+        "ticketing_http_json_endpoint_url",
+        "ticketing_jira_base_url",
+        "ticketing_servicenow_base_url",
+        "remediation_controller_base_url",
+    )
     @classmethod
-    def validate_ticketing_http_json_endpoint_url(
+    def validate_ticketing_endpoint_url(
         cls,
         value: str | None,
     ) -> str | None:
@@ -473,7 +565,37 @@ class Settings(BaseSettings):
             or parsed.query
             or parsed.fragment
         ):
-            raise ValueError("ticketing_http_json_endpoint_url is invalid")
+            raise ValueError("ticketing endpoint URL is invalid")
+        return value
+
+    @field_validator("remediation_action_catalog_path")
+    @classmethod
+    def validate_remediation_action_catalog_path(
+        cls,
+        value: str | None,
+    ) -> str | None:
+        if value is None:
+            return None
+        if (
+            not 1 <= len(value) <= 1024
+            or value != value.strip()
+            or cls._contains_ascii_control(value)
+        ):
+            raise ValueError("remediation_action_catalog_path is invalid")
+        return value
+
+    @field_validator(
+        "ticketing_jira_base_url",
+        "ticketing_servicenow_base_url",
+    )
+    @classmethod
+    def validate_ticketing_vendor_base_url(
+        cls,
+        value: str | None,
+    ) -> str | None:
+        """供应商 base URL 后续会拼固定 API 路径，禁止尾部斜杠。"""
+        if value is not None and value.endswith("/"):
+            raise ValueError("ticketing vendor base URL must not end with slash")
         return value
 
     @model_validator(mode="after")
@@ -498,8 +620,7 @@ class Settings(BaseSettings):
         if self.alert_webhook_auth_enabled:
             if self.alert_webhook_secret is None:
                 raise ValueError(
-                    "Alert webhook configuration is incomplete: "
-                    "alert_webhook_secret"
+                    "Alert webhook configuration is incomplete: alert_webhook_secret"
                 )
             webhook_secret = self.alert_webhook_secret.get_secret_value()
             if (
@@ -521,8 +642,7 @@ class Settings(BaseSettings):
             ]
             if missing:
                 raise ValueError(
-                    "OIDC configuration is incomplete: "
-                    f"{', '.join(missing)}"
+                    f"OIDC configuration is incomplete: {', '.join(missing)}"
                 )
             self._validate_https_endpoint(
                 "admin_oidc_issuer",
@@ -550,8 +670,7 @@ class Settings(BaseSettings):
         if self.admin_demo_enabled:
             if self.admin_demo_token is None:
                 raise ValueError(
-                    "Demo administrator configuration is incomplete: "
-                    "admin_demo_token"
+                    "Demo administrator configuration is incomplete: admin_demo_token"
                 )
             demo_token = self.admin_demo_token.get_secret_value()
             if (
@@ -585,23 +704,20 @@ class Settings(BaseSettings):
             self.rca_consumer_heartbeat_seconds
             >= self.rca_consumer_execution_timeout_seconds
         ):
-            raise ValueError(
-                "RCA heartbeat must be shorter than execution timeout"
-            )
-        if (
-            self.rca_consumer_heartbeat_seconds
-            >= self.rca_consumer_lease_seconds
-        ):
-            raise ValueError(
-                "RCA heartbeat must be shorter than workflow lease"
-            )
+            raise ValueError("RCA heartbeat must be shorter than execution timeout")
+        if self.rca_consumer_heartbeat_seconds >= self.rca_consumer_lease_seconds:
+            raise ValueError("RCA heartbeat must be shorter than workflow lease")
         if self.rca_consumer_enabled:
+            required_observability_endpoints = {
+                "prometheus_base_url": self.prometheus_base_url,
+                "loki_base_url": self.loki_base_url,
+            }
+            if self.rca_investigation_policy == "fixed_default":
+                required_observability_endpoints["tempo_base_url"] = (
+                    self.tempo_base_url
+                )
             self._require_non_empty_fields(
-                {
-                    "prometheus_base_url": self.prometheus_base_url,
-                    "loki_base_url": self.loki_base_url,
-                    "tempo_base_url": self.tempo_base_url,
-                },
+                required_observability_endpoints,
                 "RCA consumer configuration is incomplete",
             )
             self._validate_http_endpoint(
@@ -612,10 +728,11 @@ class Settings(BaseSettings):
                 "loki_base_url",
                 self.loki_base_url or "",
             )
-            self._validate_http_endpoint(
-                "tempo_base_url",
-                self.tempo_base_url or "",
-            )
+            if self.tempo_base_url is not None:
+                self._validate_http_endpoint(
+                    "tempo_base_url",
+                    self.tempo_base_url,
+                )
             self._validate_optional_secret(
                 "prometheus_bearer_token",
                 self.prometheus_bearer_token,
@@ -655,23 +772,25 @@ class Settings(BaseSettings):
                 "Ticketing HTTP JSON configuration is incomplete",
             )
             if self.ticketing_http_json_bearer_token is not None:
-                token = (
-                    self.ticketing_http_json_bearer_token
-                    .get_secret_value()
-                )
+                token = self.ticketing_http_json_bearer_token.get_secret_value()
                 if (
                     not token.strip()
                     or token != token.strip()
                     or self._contains_ascii_control(token)
                 ):
-                    raise ValueError(
-                        "Ticketing HTTP JSON bearer token is invalid"
-                    )
+                    raise ValueError("Ticketing HTTP JSON bearer token is invalid")
+        self._validate_ticketing_vendor_configuration(
+            production_environment=production_environment,
+        )
+        self._validate_remediation_configuration(
+            production_environment=production_environment,
+        )
+        self._validate_notification_configuration(
+            production_environment=production_environment,
+        )
         if self.llm_report_enabled:
             if not self.rca_consumer_enabled:
-                raise ValueError(
-                    "LLM reports require the RCA consumer to be enabled"
-                )
+                raise ValueError("LLM reports require the RCA consumer to be enabled")
             self._validate_llm_provider_fields()
             try:
                 llm_provider_configs = self.llm_provider_configs
@@ -679,18 +798,14 @@ class Settings(BaseSettings):
                 raise ValueError(exc.message) from exc
             if not llm_provider_configs:
                 raise ValueError(
-                    "LLM configuration is incomplete: "
-                    "no usable provider credentials"
+                    "LLM configuration is incomplete: no usable provider credentials"
                 )
         return self
 
     @staticmethod
     def _contains_ascii_control(value: str) -> bool:
         """识别配置文本中的不可见ASCII控制字符。"""
-        return any(
-            ord(character) < 32 or ord(character) == 127
-            for character in value
-        )
+        return any(ord(character) < 32 or ord(character) == 127 for character in value)
 
     @staticmethod
     def _validate_http_endpoint(field_name: str, value: str) -> None:
@@ -737,6 +852,197 @@ class Settings(BaseSettings):
             value.get_secret_value(),
             8192,
         )
+
+    def _validate_ticketing_vendor_configuration(
+        self,
+        *,
+        production_environment: bool,
+    ) -> None:
+        """校验 Jira 与 ServiceNow 直连适配器的启用边界。"""
+        enabled = self.ticketing_jira_enabled or self.ticketing_servicenow_enabled
+        if enabled and not self.ticket_submission_consumer_enabled:
+            raise ValueError(
+                "Vendor ticketing gateways require the ticket submission "
+                "consumer to be enabled"
+            )
+        if self.ticketing_jira_enabled:
+            self._require_non_empty_fields(
+                {
+                    "ticketing_jira_base_url": self.ticketing_jira_base_url,
+                    "ticketing_jira_user_email": (self.ticketing_jira_user_email),
+                    "ticketing_jira_project_key": (self.ticketing_jira_project_key),
+                },
+                "Jira ticketing configuration is incomplete",
+            )
+            if self.ticketing_jira_api_token is None:
+                raise ValueError(
+                    "Jira ticketing configuration is incomplete: "
+                    "ticketing_jira_api_token"
+                )
+            self._validate_plain_text_identifier(
+                "ticketing_jira_user_email",
+                self.ticketing_jira_user_email or "",
+                320,
+            )
+            self._validate_plain_text_identifier(
+                "ticketing_jira_project_key",
+                self.ticketing_jira_project_key or "",
+                64,
+            )
+            self._validate_plain_text_identifier(
+                "ticketing_jira_issue_type",
+                self.ticketing_jira_issue_type,
+                128,
+            )
+            self._validate_secret_text(
+                "ticketing_jira_api_token",
+                self.ticketing_jira_api_token.get_secret_value(),
+                8192,
+            )
+            if production_environment:
+                self._validate_https_endpoint(
+                    "ticketing_jira_base_url",
+                    self.ticketing_jira_base_url or "",
+                )
+        if self.ticketing_servicenow_enabled:
+            self._require_non_empty_fields(
+                {
+                    "ticketing_servicenow_base_url": (
+                        self.ticketing_servicenow_base_url
+                    ),
+                    "ticketing_servicenow_username": (
+                        self.ticketing_servicenow_username
+                    ),
+                },
+                "ServiceNow ticketing configuration is incomplete",
+            )
+            if self.ticketing_servicenow_password is None:
+                raise ValueError(
+                    "ServiceNow ticketing configuration is incomplete: "
+                    "ticketing_servicenow_password"
+                )
+            self._validate_plain_text_identifier(
+                "ticketing_servicenow_username",
+                self.ticketing_servicenow_username or "",
+                256,
+            )
+            self._validate_plain_text_identifier(
+                "ticketing_servicenow_table",
+                self.ticketing_servicenow_table,
+                128,
+            )
+            self._validate_secret_text(
+                "ticketing_servicenow_password",
+                self.ticketing_servicenow_password.get_secret_value(),
+                8192,
+            )
+            if production_environment:
+                self._validate_https_endpoint(
+                    "ticketing_servicenow_base_url",
+                    self.ticketing_servicenow_base_url or "",
+                )
+
+    def _validate_remediation_configuration(
+        self,
+        *,
+        production_environment: bool,
+    ) -> None:
+        """修复控制器必须固定地址、白名单完整且执行默认关闭。"""
+        configured = self.remediation_controller_base_url is not None
+        catalog_configured = self.remediation_action_catalog_path is not None
+        if self.remediation_execution_enabled and not configured:
+            raise ValueError(
+                "Remediation execution requires a configured controller"
+            )
+        if configured != catalog_configured:
+            raise ValueError(
+                "Remediation controller and action catalog must be configured together"
+            )
+        if not configured:
+            if (
+                self.remediation_allowed_tenants
+                or self.remediation_controller_bearer_token is not None
+            ):
+                raise ValueError(
+                    "Remediation policy requires a configured controller"
+                )
+            return
+        if self.remediation_execution_enabled and not self.remediation_allowed_tenants:
+            raise ValueError(
+                "Remediation execution requires allowed tenants"
+            )
+        if (
+            self.remediation_maintenance_start_hour_utc
+            >= self.remediation_maintenance_end_hour_utc
+        ):
+            raise ValueError("Remediation maintenance window is invalid")
+        # 请求超时必须短于租约，否则外部调用可能在租约仍有效时挂死且无法被 reclaim。
+        if self.remediation_request_timeout_seconds >= self.remediation_lease_seconds:
+            raise ValueError(
+                "remediation_request_timeout_seconds must be shorter than "
+                "remediation_lease_seconds"
+            )
+        for tenant_id in self.remediation_allowed_tenants:
+            self._validate_demo_identity(
+                "remediation_allowed_tenant",
+                tenant_id,
+            )
+        self._validate_optional_secret(
+            "remediation_controller_bearer_token",
+            self.remediation_controller_bearer_token,
+        )
+        if self.remediation_controller_base_url is not None:
+            parsed = urlparse(self.remediation_controller_base_url)
+            if (
+                self.remediation_controller_base_url.endswith("/")
+                or parsed.path not in {"", "/"}
+            ):
+                raise ValueError(
+                    "remediation_controller_base_url must be an origin URL"
+                )
+        if production_environment:
+            self._validate_https_endpoint(
+                "remediation_controller_base_url",
+                self.remediation_controller_base_url or "",
+            )
+
+    def _validate_notification_configuration(
+        self,
+        *,
+        production_environment: bool,
+    ) -> None:
+        """校验通知 Webhook 和 PagerDuty 路由密钥。"""
+        for field_name, secret in (
+            (
+                "notification_slack_webhook_url",
+                self.notification_slack_webhook_url,
+            ),
+            (
+                "notification_teams_webhook_url",
+                self.notification_teams_webhook_url,
+            ),
+        ):
+            if secret is None:
+                continue
+            value = secret.get_secret_value()
+            self._validate_secret_text(field_name, value, 8192)
+            parsed = urlparse(value)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.netloc
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.fragment
+            ):
+                raise ValueError(f"{field_name} is invalid")
+            if production_environment:
+                self._validate_https_endpoint(field_name, value)
+        if self.notification_pagerduty_routing_key is not None:
+            self._validate_secret_text(
+                "notification_pagerduty_routing_key",
+                self.notification_pagerduty_routing_key.get_secret_value(),
+                8192,
+            )
 
     def _validate_llm_provider_fields(self) -> None:
         """Validate configured LLM provider fields before building gateways."""
@@ -819,8 +1125,7 @@ class Settings(BaseSettings):
         ]
         if missing:
             raise ValueError(
-                "Kafka SASL configuration is incomplete: "
-                f"{', '.join(missing)}"
+                f"Kafka SASL configuration is incomplete: {', '.join(missing)}"
             )
         password = configured_fields["kafka_sasl_password"]
         if password is None:
@@ -875,9 +1180,7 @@ class Settings(BaseSettings):
     ) -> None:
         """启用消费者时死信Topic不能回写到主业务事件流。"""
         if self.kafka_topic.strip() == dead_letter_topic.strip():
-            raise ValueError(
-                f"{field_name} must be different from kafka_topic"
-            )
+            raise ValueError(f"{field_name} must be different from kafka_topic")
 
     def _require_consumer_group_ids_distinct(self) -> None:
         """共享Topic上的不同业务消费者必须使用独立消费组。"""
@@ -930,15 +1233,9 @@ class Settings(BaseSettings):
             dashscope_base_url=self.llm_dashscope_base_url,
             dashscope_api_key=self.llm_dashscope_api_key,
             dashscope_model=self.llm_dashscope_model,
-            openai_compatible_api_style=(
-                self.llm_openai_compatible_api_style
-            ),
-            openai_compatible_base_url=(
-                self.llm_openai_compatible_base_url
-            ),
-            openai_compatible_api_key=(
-                self.llm_openai_compatible_api_key
-            ),
+            openai_compatible_api_style=(self.llm_openai_compatible_api_style),
+            openai_compatible_base_url=(self.llm_openai_compatible_base_url),
+            openai_compatible_api_key=(self.llm_openai_compatible_api_key),
             openai_compatible_model=self.llm_openai_compatible_model,
             custom_api_style=self.llm_custom_api_style,
             custom_base_url=self.llm_custom_base_url,

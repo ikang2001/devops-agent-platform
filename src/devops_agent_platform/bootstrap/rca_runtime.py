@@ -6,9 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from devops_agent_platform.agent import (
     ControlledAgentWorkflow,
+    ControlledAgentWorkflowConfig,
     LLMRCAReportGeneratorConfig,
     ResilientLLMRCAReportGenerator,
-    build_default_observability_plan,
+    build_plan_for_policy,
 )
 from devops_agent_platform.application.services.rca_consumer_runner import (
     RCAConsumerRunner,
@@ -104,6 +105,9 @@ def build_rca_consumer_runtime(
     if not settings.rca_consumer_enabled:
         raise ValueError("RCA consumer is not enabled")
 
+    plan = build_plan_for_policy(settings.rca_investigation_policy)
+    plan_tool_names = frozenset(step.tool_name for step in plan.steps)
+
     prometheus_config = PrometheusRangeClientConfig(
         base_url=settings.prometheus_base_url or "",
         bearer_token=settings.prometheus_bearer_token,
@@ -111,10 +115,6 @@ def build_rca_consumer_runtime(
     loki_config = LokiRangeClientConfig(
         base_url=settings.loki_base_url or "",
         bearer_token=settings.loki_bearer_token,
-    )
-    tempo_config = TempoSearchClientConfig(
-        base_url=settings.tempo_base_url or "",
-        bearer_token=settings.tempo_bearer_token,
     )
     kafka_password = (
         settings.kafka_sasl_password.get_secret_value()
@@ -172,13 +172,12 @@ def build_rca_consumer_runtime(
 
     prometheus = PrometheusRangeClient(prometheus_config)
     loki = LokiRangeClient(loki_config)
-    tempo = TempoSearchClient(tempo_config)
-    resources: list[AsyncCloseable] = [prometheus, loki, tempo]
+    resources: list[AsyncCloseable] = [prometheus, loki]
 
     target_resolver = SQLAlchemyObservabilityTargetResolver(session_factory)
     runbook_search = SQLAlchemyRunbookSearch(session_factory)
     handler_registry = ToolHandlerRegistry()
-    definitions = (
+    definitions = [
         register_prometheus_metrics_tool(
             handler_registry,
             PrometheusMetricsQueryHandler(
@@ -202,17 +201,29 @@ def build_rca_consumer_runtime(
             handler_registry,
             LokiLogsQueryHandler(target_resolver, loki),
         ),
-        register_tempo_traces_tool(
-            handler_registry,
-            TempoTracesQueryHandler(target_resolver, tempo),
-        ),
+    ]
+    if "traces.query" in plan_tool_names:
+        tempo = TempoSearchClient(
+            TempoSearchClientConfig(
+                base_url=settings.tempo_base_url or "",
+                bearer_token=settings.tempo_bearer_token,
+            )
+        )
+        resources.append(tempo)
+        definitions.append(
+            register_tempo_traces_tool(
+                handler_registry,
+                TempoTracesQueryHandler(target_resolver, tempo),
+            )
+        )
+    definitions.append(
         register_runbook_retrieval_tool(
             handler_registry,
             RunbookRetrievalHandler(
                 target_resolver,
                 runbook_search,
             ),
-        ),
+        )
     )
     report_generator = None
     if llm_gateway is not None and llm_generator_config is not None:
@@ -224,12 +235,15 @@ def build_rca_consumer_runtime(
         )
 
     workflow = ControlledAgentWorkflow(
-        plan=build_default_observability_plan(),
+        plan=plan,
         registry=ToolRegistry(definitions),
         permission_checker=ToolPermissionChecker(
             SQLAlchemyToolPermissionProvider(session_factory)
         ),
         tool_executor=ToolExecutor(handler_registry),
+        config=ControlledAgentWorkflowConfig(
+            continue_on_step_failure=settings.rca_continue_on_step_failure,
+        ),
         report_generator=report_generator,
     )
 

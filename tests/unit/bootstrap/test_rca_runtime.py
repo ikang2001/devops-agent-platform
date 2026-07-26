@@ -81,6 +81,8 @@ async def test_bundle_builds_complete_deterministic_consumer_graph() -> None:
             ._execution_coordinator._agent_workflow
         )
         assert len(workflow._plan.steps) == 4
+        assert workflow._plan.plan_id == "default.observability-rca"
+        assert workflow._config.continue_on_step_failure is False
         assert isinstance(
             workflow._report_generator,
             DeterministicRCAReportGenerator,
@@ -117,6 +119,39 @@ async def test_bundle_applies_configured_metrics_contract() -> None:
             registration.handler._config.requests_metric
             == "minishop_requests_total"
         )
+    finally:
+        for resource in reversed(bundle.resources):
+            await resource.close()
+
+
+async def test_bundle_wires_trace_free_partial_degrade_policy() -> None:
+    """无 Trace 固定策略不要求 Tempo，并把 C0 开关注入工作流。"""
+    bundle = build_rca_consumer_runtime(
+        build_settings(
+            rca_investigation_policy="fixed_no_traces",
+            rca_continue_on_step_failure=True,
+            tempo_base_url=None,
+        ),
+        fake_session_factory,  # type: ignore[arg-type]
+    )
+    try:
+        assert tuple(type(item) for item in bundle.resources) == (
+            PrometheusRangeClient,
+            LokiRangeClient,
+        )
+        workflow = (
+            bundle.worker._consumer._processor._handler
+            ._execution_coordinator._agent_workflow
+        )
+        assert workflow._plan.plan_id == "observability-rca.no-traces"
+        assert [step.tool_name for step in workflow._plan.steps] == [
+            "metrics.query",
+            "logs.query",
+            "runbooks.retrieve",
+        ]
+        assert workflow._config.continue_on_step_failure is True
+        assert len(workflow._registry.list_tools()) == 3
+        assert len(workflow._tool_executor._registry.list_handlers()) == 3
     finally:
         for resource in reversed(bundle.resources):
             await resource.close()

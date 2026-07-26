@@ -43,3 +43,11 @@ class IdentifierGeneratorPort(Protocol):
     def new_ticket_submission_id(self) -> str:
         """生成新的外部工单提交请求标识。"""
         ...
+
+    def new_rca_feedback_id(self) -> str:
+        """生成新的 RCA 人工反馈标识。"""
+        ...
+
+    def new_remediation_plan_id(self) -> str:
+        """生成新的受控修复计划标识。"""
+        ...

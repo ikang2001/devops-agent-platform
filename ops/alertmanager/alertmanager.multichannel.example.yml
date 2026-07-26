@@ -1,0 +1,121 @@
+global:
+  resolve_timeout: 5m
+
+templates:
+  - /etc/alertmanager/templates/*.tmpl
+
+route:
+  receiver: platform-warning-slack
+  group_by:
+    - alertname
+    - service
+    - job
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # continue=true 使同一组 Critical 告警进入三个独立通知通道。
+    - receiver: platform-critical-slack
+      matchers:
+        - team="platform"
+        - severity="critical"
+      group_wait: 10s
+      group_interval: 2m
+      repeat_interval: 30m
+      continue: true
+
+    - receiver: platform-critical-teams
+      matchers:
+        - team="platform"
+        - severity="critical"
+      group_wait: 10s
+      group_interval: 2m
+      repeat_interval: 30m
+      continue: true
+
+    - receiver: platform-critical-pagerduty
+      matchers:
+        - team="platform"
+        - severity="critical"
+      group_wait: 10s
+      group_interval: 2m
+      repeat_interval: 30m
+
+    - receiver: platform-warning-slack
+      matchers:
+        - team="platform"
+        - severity="warning"
+      group_wait: 1m
+      group_interval: 10m
+      repeat_interval: 4h
+
+receivers:
+  - name: platform-critical-slack
+    slack_configs:
+      - api_url_file: /run/secrets/alertmanager-slack-critical-url
+        channel: "#devops-oncall"
+        send_resolved: true
+        timeout: 10s
+        title: '{{ template "devops.title" . }}'
+        text: '{{ template "devops.text" . }}'
+        color: '{{ template "devops.color" . }}'
+
+  - name: platform-warning-slack
+    slack_configs:
+      - api_url_file: /run/secrets/alertmanager-slack-warning-url
+        channel: "#devops-alerts"
+        send_resolved: true
+        timeout: 10s
+        title: '{{ template "devops.title" . }}'
+        text: '{{ template "devops.text" . }}'
+        color: '{{ template "devops.color" . }}'
+
+  - name: platform-critical-teams
+    msteamsv2_configs:
+      - webhook_url_file: /run/secrets/alertmanager-teams-critical-url
+        send_resolved: true
+        title: '{{ template "devops.title" . }}'
+        text: '{{ template "devops.text" . }}'
+
+  - name: platform-critical-pagerduty
+    pagerduty_configs:
+      - routing_key_file: /run/secrets/alertmanager-pagerduty-routing-key
+        send_resolved: true
+        timeout: 10s
+        description: '{{ template "devops.title" . }}'
+        severity: critical
+        source: '{{ .CommonLabels.service }}'
+        component: '{{ .CommonLabels.job }}'
+        group: platform
+        class: '{{ .CommonLabels.alertname }}'
+        details:
+          service: '{{ .CommonLabels.service }}'
+          job: '{{ .CommonLabels.job }}'
+          firing: '{{ len .Alerts.Firing }}'
+          resolved: '{{ len .Alerts.Resolved }}'
+
+inhibit_rules:
+  - source_matchers:
+      - alertname="DevOpsAgentRuntimeComponentDown"
+    target_matchers:
+      - service="devops-agent-platform"
+      - severity="warning"
+    equal:
+      - job
+      - service
+
+  - source_matchers:
+      - alertname="DevOpsAgentOutboxWorkerStopped"
+    target_matchers:
+      - alertname=~"DevOpsAgentOutboxBacklogHigh|DevOpsAgentOutboxWorkerRepeatedFailures"
+    equal:
+      - job
+      - service
+
+  - source_matchers:
+      - alertname="DevOpsAgentOutboxOldestMessageTooOld"
+    target_matchers:
+      - alertname="DevOpsAgentOutboxBacklogHigh"
+    equal:
+      - job
+      - service

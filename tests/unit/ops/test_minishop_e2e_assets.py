@@ -41,6 +41,9 @@ def test_compose_contains_the_real_rca_dependency_chain() -> None:
         "redpanda",
         "tempo",
     }.issubset(services)
+    assert services["alertmanager"]["image"] == (
+        "prom/alertmanager:v0.32.0"
+    )
     agent_environment = compose["x-agent-environment"]
     assert agent_environment["DEVOPS_AGENT_OUTBOX_WORKER_ENABLED"] == "true"
     assert agent_environment["DEVOPS_AGENT_RCA_CONSUMER_ENABLED"] == "true"

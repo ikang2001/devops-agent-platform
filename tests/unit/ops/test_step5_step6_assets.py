@@ -108,6 +108,11 @@ def test_step5_ci_pipeline_keeps_quality_supply_chain_and_migration_gates() -> N
         str(step.get("run", "")) + str(step.get("uses", ""))
         for step in jobs["image"]["steps"]
     )
+    trivy_steps = [
+        step
+        for step in jobs["image"]["steps"]
+        if "aquasecurity/trivy-action" in str(step.get("uses", ""))
+    ]
     assert "uv sync --locked --extra dev" in test_steps
     assert "uv run ruff check" in test_steps
     assert 'uv run pytest -q -m "not live"' in test_steps
@@ -115,6 +120,15 @@ def test_step5_ci_pipeline_keeps_quality_supply_chain_and_migration_gates() -> N
     assert "docker build" in image_steps
     assert "anchore/sbom-action" in image_steps
     assert "aquasecurity/trivy-action" in image_steps
+    assert len(trivy_steps) == 2
+    assert trivy_steps[0]["with"]["exit-code"] == "0"
+    assert trivy_steps[1]["with"] == {
+        "image-ref": "devops-agent-platform:${{ github.sha }}",
+        "format": "table",
+        "severity": "CRITICAL,HIGH",
+        "ignore-unfixed": "true",
+        "exit-code": "1",
+    }
 
 
 def test_step5_documentation_keeps_target_environment_boundary() -> None:
@@ -145,13 +159,27 @@ def test_step6_productization_assets_define_feedback_eval_and_governance() -> No
         encoding="utf-8"
     )
 
-    assert "full UI and provider" in step6
+    assert "partial local product surfaces implemented" in step6
+    assert "Example Or Blueprint Only" in step6
+    assert "Not Loaded By Runtime" in step6
+    assert "Platform-level remediation plan API" in step6
+    assert "MiniShop allowlisted remediation sandbox" in step6
     assert "Incident Workbench" in console
     assert "RCA Report Review" in console
     assert "Regression Gate" in loop
+    assert "Not implemented" in loop
     assert "Feature Flags" in loop
+    assert "governance draft only" in rag
     assert "tenant-scoped" in rag
     assert "No execution from raw LLM text" in remediation
+    assert "Risk, expected effect, rollback action" in remediation
+    assert "production automated-remediation engine" in remediation
+    assert (ROOT / "ops/remediation/actions.example.json").is_file()
+    assert (ROOT / "ops/remediation/minishop-remediation.py").is_file()
+
+    product_readme = (PRODUCT_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "Example / blueprint only" in product_readme
+    assert "Not loaded by runtime" in product_readme
 
 
 def test_step6_yaml_examples_are_versioned_and_rollout_gated() -> None:

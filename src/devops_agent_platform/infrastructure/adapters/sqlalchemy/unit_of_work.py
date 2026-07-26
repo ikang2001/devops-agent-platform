@@ -14,7 +14,9 @@ from .evidence_repository import SQLAlchemyEvidenceRepository
 from .incident_lock import PostgreSQLIncidentCorrelationLock
 from .incident_repository import SQLAlchemyIncidentRepository
 from .outbox_repository import SQLAlchemyOutboxRepository
+from .rca_feedback_repository import SQLAlchemyRCAFeedbackRepository
 from .rca_report_repository import SQLAlchemyRCAReportRepository
+from .remediation_repository import SQLAlchemyRemediationPlanRepository
 from .ticket_draft_repository import SQLAlchemyTicketDraftRepository
 from .ticket_submission_repository import SQLAlchemyTicketSubmissionRepository
 from .tool_invocation_repository import SQLAlchemyToolInvocationRepository
@@ -52,6 +54,8 @@ class SQLAlchemyUnitOfWork:
         self._evidence: SQLAlchemyEvidenceRepository | None = None
         self._tool_invocations: SQLAlchemyToolInvocationRepository | None = None
         self._rca_reports: SQLAlchemyRCAReportRepository | None = None
+        self._rca_feedback: SQLAlchemyRCAFeedbackRepository | None = None
+        self._remediation_plans: SQLAlchemyRemediationPlanRepository | None = None
         self._ticket_drafts: SQLAlchemyTicketDraftRepository | None = None
         self._ticket_submissions: SQLAlchemyTicketSubmissionRepository | None = None
         self._completed = False
@@ -113,9 +117,7 @@ class SQLAlchemyUnitOfWork:
         """返回与工作流终态共享事务的工具调用审计仓储。"""
         self._require_active_session()
         if self._tool_invocations is None:
-            raise RuntimeError(
-                "Unit of work tool invocations are not initialized"
-            )
+            raise RuntimeError("Unit of work tool invocations are not initialized")
         return self._tool_invocations
 
     @property
@@ -123,19 +125,31 @@ class SQLAlchemyUnitOfWork:
         """返回与工作流终态共享事务的 RCA 报告仓储。"""
         self._require_active_session()
         if self._rca_reports is None:
-            raise RuntimeError(
-                "Unit of work RCA reports are not initialized"
-            )
+            raise RuntimeError("Unit of work RCA reports are not initialized")
         return self._rca_reports
+
+    @property
+    def rca_feedback(self) -> SQLAlchemyRCAFeedbackRepository:
+        """返回与报告和 Outbox 共享事务的人工反馈仓储。"""
+        self._require_active_session()
+        if self._rca_feedback is None:
+            raise RuntimeError("Unit of work RCA feedback is not initialized")
+        return self._rca_feedback
+
+    @property
+    def remediation_plans(self) -> SQLAlchemyRemediationPlanRepository:
+        """返回与报告和 Outbox 共享事务的受控修复计划仓储。"""
+        self._require_active_session()
+        if self._remediation_plans is None:
+            raise RuntimeError("Unit of work remediation plans are not initialized")
+        return self._remediation_plans
 
     @property
     def ticket_drafts(self) -> SQLAlchemyTicketDraftRepository:
         """返回与报告和 Outbox 共享事务的工单草稿仓储。"""
         self._require_active_session()
         if self._ticket_drafts is None:
-            raise RuntimeError(
-                "Unit of work ticket drafts are not initialized"
-            )
+            raise RuntimeError("Unit of work ticket drafts are not initialized")
         return self._ticket_drafts
 
     @property
@@ -143,9 +157,7 @@ class SQLAlchemyUnitOfWork:
         """返回与草稿和 Outbox 共享事务的工单提交请求仓储。"""
         self._require_active_session()
         if self._ticket_submissions is None:
-            raise RuntimeError(
-                "Unit of work ticket submissions are not initialized"
-            )
+            raise RuntimeError("Unit of work ticket submissions are not initialized")
         return self._ticket_submissions
 
     async def __aenter__(self) -> "SQLAlchemyUnitOfWork":
@@ -159,19 +171,13 @@ class SQLAlchemyUnitOfWork:
         self._outbox = SQLAlchemyOutboxRepository(self._session)
         self._workflow_runs = SQLAlchemyWorkflowRunRepository(self._session)
         self._evidence = SQLAlchemyEvidenceRepository(self._session)
-        self._tool_invocations = SQLAlchemyToolInvocationRepository(
-            self._session
-        )
+        self._tool_invocations = SQLAlchemyToolInvocationRepository(self._session)
         self._rca_reports = SQLAlchemyRCAReportRepository(self._session)
-        self._ticket_drafts = SQLAlchemyTicketDraftRepository(
-            self._session
-        )
-        self._ticket_submissions = SQLAlchemyTicketSubmissionRepository(
-            self._session
-        )
-        self._incident_correlation_lock = self._correlation_lock_factory(
-            self._session
-        )
+        self._rca_feedback = SQLAlchemyRCAFeedbackRepository(self._session)
+        self._remediation_plans = SQLAlchemyRemediationPlanRepository(self._session)
+        self._ticket_drafts = SQLAlchemyTicketDraftRepository(self._session)
+        self._ticket_submissions = SQLAlchemyTicketSubmissionRepository(self._session)
+        self._incident_correlation_lock = self._correlation_lock_factory(self._session)
         self._completed = False
         return self
 
@@ -189,18 +195,14 @@ class SQLAlchemyUnitOfWork:
             if session.in_transaction():
                 await session.rollback()
         except SQLAlchemyError as exc:
-            cleanup_error = PersistenceError(
-                "Could not rollback database transaction"
-            )
+            cleanup_error = PersistenceError("Could not rollback database transaction")
             cleanup_error.__cause__ = exc
         finally:
             try:
                 await session.close()
             except SQLAlchemyError as exc:
                 if cleanup_error is None:
-                    cleanup_error = PersistenceError(
-                        "Could not close database session"
-                    )
+                    cleanup_error = PersistenceError("Could not close database session")
                     cleanup_error.__cause__ = exc
             self._clear_state()
 
@@ -239,9 +241,7 @@ class SQLAlchemyUnitOfWork:
         try:
             await session.rollback()
         except SQLAlchemyError as exc:
-            raise PersistenceError(
-                "Could not rollback database transaction"
-            ) from exc
+            raise PersistenceError("Could not rollback database transaction") from exc
 
         self._completed = True
 
@@ -279,6 +279,8 @@ class SQLAlchemyUnitOfWork:
         self._evidence = None
         self._tool_invocations = None
         self._rca_reports = None
+        self._rca_feedback = None
+        self._remediation_plans = None
         self._ticket_drafts = None
         self._ticket_submissions = None
         self._session = None

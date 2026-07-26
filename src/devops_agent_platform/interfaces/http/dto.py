@@ -1,14 +1,26 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from devops_agent_platform.application.commands.alerts import ReceiveAlertCommand
 from devops_agent_platform.application.commands.incidents import (
     CloseIncidentCommand,
     ResolveIncidentCommand,
 )
+from devops_agent_platform.application.commands.notifications import (
+    SendWorkflowNotificationCommand,
+)
 from devops_agent_platform.application.commands.rca import (
     CancelRCAWorkflowCommand,
+)
+from devops_agent_platform.application.commands.rca_feedback import (
+    CreateRCAFeedbackCommand,
+)
+from devops_agent_platform.application.commands.remediation import (
+    CreateRemediationPlanCommand,
+    DecideRemediationPlanCommand,
+    ExecuteRemediationPlanCommand,
+    RollbackRemediationPlanCommand,
 )
 from devops_agent_platform.application.commands.runbooks import (
     SaveRunbookDraftCommand,
@@ -22,6 +34,8 @@ from devops_agent_platform.application.commands.tool_permissions import (
 )
 from devops_agent_platform.domain.enums import (
     AlertSeverity,
+    EvidenceType,
+    RCAFeedbackVerdict,
     TicketDecision,
 )
 
@@ -86,6 +100,223 @@ class CancelRCAWorkflowRequest(BaseModel):
             workflow_run_id=workflow_run_id,
             expected_version=expected_version,
             reason=self.reason,
+            idempotency_key=idempotency_key,
+            requested_by=requested_by,
+            trace_id=trace_id,
+        )
+
+
+class CreateRCAFeedbackRequest(BaseModel):
+    """人工复核 RCA 报告时提交的结构化发现。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: RCAFeedbackVerdict
+    corrected_root_cause: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=4096,
+    )
+    missing_evidence_types: list[EvidenceType] = Field(
+        default_factory=list,
+        max_length=5,
+    )
+    unsafe_recommendation_indexes: list[int] = Field(
+        default_factory=list,
+        max_length=100,
+    )
+    follow_up_label: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+    )
+    notes: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=4096,
+    )
+
+    @field_validator("missing_evidence_types")
+    @classmethod
+    def validate_missing_evidence_types(
+        cls,
+        value: list[EvidenceType],
+    ) -> list[EvidenceType]:
+        if len(set(value)) != len(value):
+            raise ValueError("missing_evidence_types must be unique")
+        return value
+
+    @field_validator("unsafe_recommendation_indexes")
+    @classmethod
+    def validate_unsafe_recommendation_indexes(
+        cls,
+        value: list[int],
+    ) -> list[int]:
+        if any(index < 0 or index > 99 for index in value) or value != sorted(
+            set(value)
+        ):
+            raise ValueError("unsafe_recommendation_indexes must be sorted and unique")
+        return value
+
+    def to_command(
+        self,
+        *,
+        tenant_id: str,
+        workflow_run_id: str,
+        idempotency_key: str,
+        requested_by: str,
+        trace_id: str,
+    ) -> CreateRCAFeedbackCommand:
+        return CreateRCAFeedbackCommand(
+            tenant_id=tenant_id,
+            workflow_run_id=workflow_run_id,
+            verdict=self.verdict,
+            corrected_root_cause=self.corrected_root_cause,
+            missing_evidence_types=tuple(self.missing_evidence_types),
+            unsafe_recommendation_indexes=tuple(self.unsafe_recommendation_indexes),
+            follow_up_label=self.follow_up_label,
+            notes=self.notes,
+            idempotency_key=idempotency_key,
+            requested_by=requested_by,
+            trace_id=trace_id,
+        )
+
+
+class CreateRemediationPlanRequest(BaseModel):
+    """只选择动作目录中的键、精确目标和可信证据引用。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action_key: str = Field(min_length=1, max_length=128)
+    target: str = Field(min_length=1, max_length=256)
+    evidence_ids: list[str] = Field(min_length=4, max_length=100)
+
+    @field_validator("evidence_ids")
+    @classmethod
+    def validate_evidence_ids(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("evidence_ids must be unique")
+        return value
+
+    def to_command(
+        self,
+        *,
+        tenant_id: str,
+        workflow_run_id: str,
+        idempotency_key: str,
+        requested_by: str,
+        trace_id: str,
+    ) -> CreateRemediationPlanCommand:
+        return CreateRemediationPlanCommand(
+            tenant_id=tenant_id,
+            workflow_run_id=workflow_run_id,
+            action_key=self.action_key,
+            target=self.target,
+            evidence_ids=tuple(self.evidence_ids),
+            idempotency_key=idempotency_key,
+            requested_by=requested_by,
+            trace_id=trace_id,
+        )
+
+
+class DecideRemediationPlanRequest(BaseModel):
+    """人工审批或拒绝明确版本的修复计划。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    approved: bool
+    reason: str = Field(min_length=1, max_length=4096)
+
+    def to_command(
+        self,
+        *,
+        tenant_id: str,
+        remediation_plan_id: str,
+        expected_version: int,
+        idempotency_key: str,
+        requested_by: str,
+        trace_id: str,
+    ) -> DecideRemediationPlanCommand:
+        return DecideRemediationPlanCommand(
+            tenant_id=tenant_id,
+            remediation_plan_id=remediation_plan_id,
+            expected_version=expected_version,
+            approved=self.approved,
+            reason=self.reason,
+            idempotency_key=idempotency_key,
+            requested_by=requested_by,
+            trace_id=trace_id,
+        )
+
+
+class RemediationActionRequest(BaseModel):
+    """执行与回滚不接收命令文本或动态参数。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    def to_execute_command(
+        self,
+        *,
+        tenant_id: str,
+        remediation_plan_id: str,
+        expected_version: int,
+        idempotency_key: str,
+        requested_by: str,
+        trace_id: str,
+    ) -> ExecuteRemediationPlanCommand:
+        return ExecuteRemediationPlanCommand(
+            tenant_id=tenant_id,
+            remediation_plan_id=remediation_plan_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            requested_by=requested_by,
+            trace_id=trace_id,
+        )
+
+    def to_rollback_command(
+        self,
+        *,
+        tenant_id: str,
+        remediation_plan_id: str,
+        expected_version: int,
+        idempotency_key: str,
+        requested_by: str,
+        trace_id: str,
+    ) -> RollbackRemediationPlanCommand:
+        return RollbackRemediationPlanCommand(
+            tenant_id=tenant_id,
+            remediation_plan_id=remediation_plan_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            requested_by=requested_by,
+            trace_id=trace_id,
+        )
+
+
+class SendWorkflowNotificationRequest(BaseModel):
+    """请求向已配置供应商发送可信 RCA 摘要。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_system: str = Field(
+        min_length=1,
+        max_length=32,
+        pattern=r"^(slack|teams|pagerduty)$",
+    )
+
+    def to_command(
+        self,
+        *,
+        tenant_id: str,
+        workflow_run_id: str,
+        idempotency_key: str,
+        requested_by: str,
+        trace_id: str,
+    ) -> SendWorkflowNotificationCommand:
+        return SendWorkflowNotificationCommand(
+            tenant_id=tenant_id,
+            workflow_run_id=workflow_run_id,
+            target_system=self.target_system,
             idempotency_key=idempotency_key,
             requested_by=requested_by,
             trace_id=trace_id,

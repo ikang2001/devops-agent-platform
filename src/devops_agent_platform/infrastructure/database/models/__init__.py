@@ -5,8 +5,14 @@ from devops_agent_platform.infrastructure.database.models.incident import Incide
 from devops_agent_platform.infrastructure.database.models.outbox import (
     OutboxEventRecord,
 )
+from devops_agent_platform.infrastructure.database.models.rca_feedback import (
+    RCAFeedbackRecord,
+)
 from devops_agent_platform.infrastructure.database.models.rca_report import (
     RCAReportRecord,
+)
+from devops_agent_platform.infrastructure.database.models.remediation import (
+    RemediationPlanRecord,
 )
 from devops_agent_platform.infrastructure.database.models.runbook import (
     RunbookHeadRecord,
@@ -39,6 +45,8 @@ __all__ = [
     "IncidentRecord",
     "OutboxEventRecord",
     "RCAReportRecord",
+    "RCAFeedbackRecord",
+    "RemediationPlanRecord",
     "RunbookHeadRecord",
     "RunbookRecord",
     "RunbookOperationRecord",

@@ -10,7 +10,9 @@ from .metrics_target_resolver import (
 from .outbox_dispatch_store import SQLAlchemyOutboxDispatchStore
 from .outbox_metrics_reader import SQLAlchemyOutboxMetricsReader
 from .outbox_repository import SQLAlchemyOutboxRepository
+from .rca_feedback_repository import SQLAlchemyRCAFeedbackRepository
 from .rca_report_repository import SQLAlchemyRCAReportRepository
+from .remediation_repository import SQLAlchemyRemediationPlanRepository
 from .runbook_admin_store import SQLAlchemyRunbookAdminStore
 from .runbook_search import SQLAlchemyRunbookSearch
 from .ticket_draft_repository import SQLAlchemyTicketDraftRepository
@@ -32,6 +34,8 @@ __all__ = [
     "PostgreSQLIncidentCorrelationLock",
     "SQLAlchemyOutboxRepository",
     "SQLAlchemyRCAReportRepository",
+    "SQLAlchemyRCAFeedbackRepository",
+    "SQLAlchemyRemediationPlanRepository",
     "SQLAlchemyRunbookAdminStore",
     "SQLAlchemyRunbookSearch",
     "SQLAlchemyOutboxDispatchStore",

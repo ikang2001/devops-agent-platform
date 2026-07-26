@@ -33,6 +33,30 @@ class TicketingGatewayError(AppException):
     default_message = "Ticketing gateway is unavailable"
 
 
+class RemediationGatewayError(AppException):
+    """自动化控制器无法返回可信动作结果。"""
+
+    code = "REMEDIATION_GATEWAY_UNAVAILABLE"
+    status_code = 503
+    default_message = "Remediation gateway is unavailable"
+
+
+class NotificationGatewayError(AppException):
+    """外部通知系统无法返回可信投递结果。"""
+
+    code = "NOTIFICATION_GATEWAY_UNAVAILABLE"
+    status_code = 503
+    default_message = "Notification gateway is unavailable"
+
+
+class RemediationExecutorError(AppException):
+    """受控修复执行器不可用或返回了不可信结果。"""
+
+    code = "REMEDIATION_EXECUTOR_UNAVAILABLE"
+    status_code = 503
+    default_message = "Remediation executor is unavailable"
+
+
 class EventPublishError(AppException):
     """事件消息系统不可用或拒绝发布请求。"""
 

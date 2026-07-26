@@ -51,7 +51,11 @@ from typing import Protocol, Self
 from devops_agent_platform.ports.evidence import EvidenceRepositoryPort
 from devops_agent_platform.ports.locks import IncidentCorrelationLockPort
 from devops_agent_platform.ports.outbox import OutboxRepositoryPort
+from devops_agent_platform.ports.rca_feedback import (
+    RCAFeedbackRepositoryPort,
+)
 from devops_agent_platform.ports.rca_report import RCAReportRepositoryPort
+from devops_agent_platform.ports.remediation import RemediationPlanRepositoryPort
 from devops_agent_platform.ports.repositories import (
     AlertRepositoryPort,
     IncidentRepositoryPort,
@@ -113,6 +117,16 @@ class UnitOfWorkPort(Protocol):
     @property
     def rca_reports(self) -> RCAReportRepositoryPort:
         """返回当前事务作用域内的 RCA 报告仓储。"""
+        ...
+
+    @property
+    def rca_feedback(self) -> RCAFeedbackRepositoryPort:
+        """返回当前事务作用域内的 RCA 人工反馈仓储。"""
+        ...
+
+    @property
+    def remediation_plans(self) -> RemediationPlanRepositoryPort:
+        """返回当前事务作用域内的受控修复计划仓储。"""
         ...
 
     @property
