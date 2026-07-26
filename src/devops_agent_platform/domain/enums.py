@@ -70,6 +70,15 @@ class AuditRetentionWorkerState(StrEnum):
     STOPPING = "STOPPING"
 
 
+class RemediationReclaimWorkerState(StrEnum):
+    """修复执行租约回收 Worker 的运行状态。"""
+
+    STOPPED = "STOPPED"
+    RUNNING = "RUNNING"
+    DEGRADED = "DEGRADED"
+    STOPPING = "STOPPING"
+
+
 class RCAConsumerWorkerState(StrEnum):
     """RCA消息消费Worker的运行状态。"""
 

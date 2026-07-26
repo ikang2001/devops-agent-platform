@@ -30,7 +30,7 @@ A 诚实叙事 ──► B 执行租约 ──► C0 部分失败降级 ──�
 | 路线 | 价值 | 不做 |
 | --- | --- | --- |
 | A | 面试/README 不穿帮 | 不借机“补实现”蓝图功能 |
-| B | 生产缺陷：`EXECUTING` 永久卡住 | 无自动重试、无独立 reclaim worker（MVP） |
+| B | 生产缺陷：`EXECUTING` 永久卡住 | 无自动重试/接管外部写、无 HTTP reclaim API |
 | C0 | 单步工具挂了仍能出部分报告 | 不把部分证据标 CONFIRMED |
 | C1 | 无 Tempo 等环境可选更短固定计划 | 不做运行时多轮自适应推理 |
 
@@ -46,7 +46,7 @@ A 诚实叙事 ──► B 执行租约 ──► C0 部分失败降级 ──�
 | 资产测试改为断言边界短语 | ✅ | 同上 |
 | 禁止话术列表 | ✅ | `缺少内容.md` + 面试文档 |
 
-### 2.2 路线 B — 已完成（MVP）
+### 2.2 路线 B — 已完成（MVP + 后台回收加固）
 
 | 项 | 状态 | 文档 |
 | --- | --- | --- |
@@ -55,7 +55,9 @@ A 诚实叙事 ──► B 执行租约 ──► C0 部分失败降级 ──�
 | 迁移 0028 / ORM / mapper / repo stale 列表 | ✅ | 同上 |
 | settings：`timeout < lease` | ✅ | 同上 |
 | 单测 service / repository | ✅ | 同上 |
-| 独立后台 reclaim worker / HTTP reclaim API | ❌ 刻意不做（仍需项） | — |
+| 默认关闭的独立 reclaim Worker + Runtime 监督 | ✅ | [`remediation-execution-lease.md`](remediation-execution-lease.md) |
+| readiness / 指标 / 告警 / Runbook / 部署示例 | ✅ | `ops/runbooks/devops-agent-remediation-reclaim.md` |
+| HTTP reclaim API | ❌ 不做 | 运维入口保持内部应用服务，避免扩大写面 |
 
 ### 2.3 路线 C0 — 已完成
 
@@ -99,7 +101,7 @@ A 诚实叙事 ──► B 执行租约 ──► C0 部分失败降级 ──�
 ### T3. 路线 B 文档对齐（若已有则只校验）
 
 - [x] `docs/remediation-execution-lease.md` + `docs/route-b-remediation-lease.md`
-- 验收：明确“无后台 worker / 无自动重试”
+- 验收：明确“Worker 只收口失败态 / 无自动重试或接管外部写”
 
 ### T4. C0 接线与诚实置信度 — [x]
 
@@ -230,7 +232,7 @@ uv run pytest -q tests/unit/bootstrap/test_settings.py
 1. 自由多轮 Agent / ReAct / 工具自选循环
 2. LLM 输出 `CONFIRMED` 根因
 3. Remediation 自动重试外部写、自动接管重跑
-4. 独立生产级 reclaim 后台 worker（可后续加，不在本路线）
+4. Remediation HTTP reclaim API
 5. Prompt Registry / Feature Flags / RAG 运行时接线
 6. 把本地 E2E 包装成 staging 签字
 
@@ -246,8 +248,8 @@ uv run pytest -q tests/unit/bootstrap/test_settings.py
 
 1. A/B/C0/C1 代码、配置、测试和中文说明均已完成。
 2. C0/C1 定向回归：`190 passed`，相关 Ruff 检查通过。
-3. 根平台全量回归：`1625 passed, 9 skipped`，锁文件一致。
+3. 根平台全量回归：`1656 passed, 9 skipped`，Ruff 与锁文件一致性通过。
 4. 下一边界不是继续扩成自由 Agent，而是在真实 staging/sandbox 验证观测数据源、
    LLM、OIDC、Kafka 和外部修复控制器；未取得证据前不得宣称生产验收完成。
-5. Remediation 后台 reclaim worker、外部写自动重试、自适应多轮调查、
-   Prompt/Flag/RAG 运行时接线仍属于后续独立工程。
+5. Remediation 后台 reclaim Worker 已作为默认关闭能力接入；外部写自动重试、
+   自适应多轮调查、Prompt/Flag/RAG 运行时接线仍属于后续独立工程。

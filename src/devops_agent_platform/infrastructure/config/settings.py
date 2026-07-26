@@ -209,6 +209,29 @@ class Settings(BaseSettings):
     remediation_execution_enabled: bool = Field(default=False)
     remediation_allowed_tenants: tuple[str, ...] = Field(default=())
     remediation_action_catalog_path: str | None = Field(default=None)
+    remediation_reclaim_worker_enabled: bool = Field(default=False)
+    remediation_reclaim_worker_id: str | None = Field(default=None)
+    remediation_reclaim_batch_size: int = Field(default=50, ge=1, le=1000)
+    remediation_reclaim_interval_seconds: float = Field(
+        default=30,
+        gt=0,
+        le=3600,
+    )
+    remediation_reclaim_error_backoff_initial_seconds: float = Field(
+        default=5,
+        gt=0,
+        le=3600,
+    )
+    remediation_reclaim_error_backoff_max_seconds: float = Field(
+        default=300,
+        gt=0,
+        le=86400,
+    )
+    remediation_reclaim_shutdown_timeout_seconds: float = Field(
+        default=30,
+        gt=0,
+        le=3600,
+    )
     remediation_maintenance_start_hour_utc: int = Field(
         default=0,
         ge=0,
@@ -386,9 +409,7 @@ class Settings(BaseSettings):
         """只接受服务端发布的固定计划键，未知策略不得静默回落。"""
         if value != value.strip() or value not in _RCA_INVESTIGATION_POLICIES:
             allowed = ", ".join(sorted(_RCA_INVESTIGATION_POLICIES))
-            raise ValueError(
-                f"rca_investigation_policy must be one of: {allowed}"
-            )
+            raise ValueError(f"rca_investigation_policy must be one of: {allowed}")
         return value
 
     @field_validator("llm_provider")
@@ -526,6 +547,7 @@ class Settings(BaseSettings):
         "rca_consumer_worker_id",
         "ticket_submission_consumer_worker_id",
         "audit_retention_worker_id",
+        "remediation_reclaim_worker_id",
     )
     @classmethod
     def validate_optional_worker_id(
@@ -701,6 +723,13 @@ class Settings(BaseSettings):
                 "audit retention error backoff initial must not exceed max"
             )
         if (
+            self.remediation_reclaim_error_backoff_initial_seconds
+            > self.remediation_reclaim_error_backoff_max_seconds
+        ):
+            raise ValueError(
+                "remediation reclaim error backoff initial must not exceed max"
+            )
+        if (
             self.rca_consumer_heartbeat_seconds
             >= self.rca_consumer_execution_timeout_seconds
         ):
@@ -713,9 +742,7 @@ class Settings(BaseSettings):
                 "loki_base_url": self.loki_base_url,
             }
             if self.rca_investigation_policy == "fixed_default":
-                required_observability_endpoints["tempo_base_url"] = (
-                    self.tempo_base_url
-                )
+                required_observability_endpoints["tempo_base_url"] = self.tempo_base_url
             self._require_non_empty_fields(
                 required_observability_endpoints,
                 "RCA consumer configuration is incomplete",
@@ -951,26 +978,24 @@ class Settings(BaseSettings):
         configured = self.remediation_controller_base_url is not None
         catalog_configured = self.remediation_action_catalog_path is not None
         if self.remediation_execution_enabled and not configured:
-            raise ValueError(
-                "Remediation execution requires a configured controller"
-            )
+            raise ValueError("Remediation execution requires a configured controller")
         if configured != catalog_configured:
             raise ValueError(
                 "Remediation controller and action catalog must be configured together"
+            )
+        if self.remediation_reclaim_worker_enabled and not configured:
+            raise ValueError(
+                "Remediation reclaim worker requires a configured controller"
             )
         if not configured:
             if (
                 self.remediation_allowed_tenants
                 or self.remediation_controller_bearer_token is not None
             ):
-                raise ValueError(
-                    "Remediation policy requires a configured controller"
-                )
+                raise ValueError("Remediation policy requires a configured controller")
             return
         if self.remediation_execution_enabled and not self.remediation_allowed_tenants:
-            raise ValueError(
-                "Remediation execution requires allowed tenants"
-            )
+            raise ValueError("Remediation execution requires allowed tenants")
         if (
             self.remediation_maintenance_start_hour_utc
             >= self.remediation_maintenance_end_hour_utc
@@ -993,10 +1018,9 @@ class Settings(BaseSettings):
         )
         if self.remediation_controller_base_url is not None:
             parsed = urlparse(self.remediation_controller_base_url)
-            if (
-                self.remediation_controller_base_url.endswith("/")
-                or parsed.path not in {"", "/"}
-            ):
+            if self.remediation_controller_base_url.endswith(
+                "/"
+            ) or parsed.path not in {"", "/"}:
                 raise ValueError(
                     "remediation_controller_base_url must be an origin URL"
                 )

@@ -258,6 +258,91 @@ groups:
           description: "审计留存清理Worker连续失败次数已持续5分钟不低于5次。"
           runbook: "ops/runbooks/devops-agent-audit-retention.md#repeated-failures"
 
+  - name: devops-agent-remediation-reclaim
+    interval: 30s
+    rules:
+      - alert: DevOpsAgentRemediationReclaimWorkerStopped
+        expr: |
+          (
+            max by (job) (
+              devops_agent_remediation_reclaim_worker_enabled
+            ) == 1
+          )
+          and on (job)
+          (
+            max by (job) (
+              devops_agent_remediation_reclaim_worker_state{state="STOPPED"}
+            ) == 1
+          )
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "修复租约回收Worker已停止"
+          description: "已启用的修复租约回收Worker连续2分钟处于STOPPED状态。"
+          runbook: "ops/runbooks/devops-agent-remediation-reclaim.md#worker-stopped"
+
+      - alert: DevOpsAgentRemediationReclaimWorkerStalled
+        expr: |
+          (
+            max by (job) (
+              devops_agent_remediation_reclaim_worker_enabled
+            ) == 1
+          )
+          and on (job)
+          (
+            max by (job) (
+              devops_agent_remediation_reclaim_worker_state{state="RUNNING"}
+            ) == 1
+          )
+          and on (job)
+          (
+            time() - max by (job) (
+              devops_agent_remediation_reclaim_worker_last_cycle_timestamp_seconds
+            ) > 300
+          )
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "修复租约回收循环停滞"
+          description: "修复租约回收Worker保持RUNNING但最近扫描已超过5分钟不推进。"
+          runbook: "ops/runbooks/devops-agent-remediation-reclaim.md#worker-stalled"
+
+      - alert: DevOpsAgentRemediationReclaimRepeatedFailures
+        expr: |
+          max by (job) (
+            devops_agent_remediation_reclaim_worker_consecutive_failures
+          ) >= 5
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "修复租约回收连续失败"
+          description: "修复租约回收Worker连续失败次数已持续5分钟不低于5次。"
+          runbook: "ops/runbooks/devops-agent-remediation-reclaim.md#repeated-failures"
+
+      - alert: DevOpsAgentRemediationLeaseExpired
+        expr: |
+          sum by (job) (
+            increase(devops_agent_remediation_reclaimed_plans[10m])
+          ) > 0
+        for: 1m
+        labels:
+          severity: warning
+          team: platform
+          service: devops-agent-platform
+        annotations:
+          summary: "修复执行或回滚租约已过期"
+          description: "最近10分钟至少一个修复计划因执行或回滚租约过期被收口为失败态。"
+          runbook: "ops/runbooks/devops-agent-remediation-reclaim.md#lease-expired"
+
   - name: devops-agent-rca-consumer
     interval: 30s
     rules:

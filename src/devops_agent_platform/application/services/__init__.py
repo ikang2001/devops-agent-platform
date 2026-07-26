@@ -20,6 +20,9 @@ from devops_agent_platform.application.services.rca_query_service import (
     RCAExecutionQueryService,
 )
 from devops_agent_platform.application.services.rca_service import RCAApplicationService
+from devops_agent_platform.application.services.remediation_reclaim_worker import (
+    RemediationReclaimWorkerRunner,
+)
 from devops_agent_platform.application.services.runbook_admin_service import (
     RunbookAdminService,
 )
@@ -33,5 +36,6 @@ __all__ = [
     "RCAApplicationService",
     "RCACancellationService",
     "RCAExecutionQueryService",
+    "RemediationReclaimWorkerRunner",
     "RunbookAdminService",
 ]

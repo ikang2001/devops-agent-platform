@@ -64,6 +64,11 @@ from devops_agent_platform.application.services.rca_query_service import (
 from devops_agent_platform.application.services.rca_service import (
     RCAApplicationService,
 )
+from devops_agent_platform.application.services.remediation_reclaim_worker import (
+    RemediationReclaimWorkerConfig,
+    RemediationReclaimWorkerHealth,
+    RemediationReclaimWorkerRunner,
+)
 from devops_agent_platform.application.services.remediation_service import (
     RemediationApplicationService,
 )
@@ -222,11 +227,13 @@ class ApplicationRuntime:
     readiness_cache_ttl_seconds: float = 2.0
     rca_consumer_shutdown_timeout_seconds: float = 30.0
     audit_retention_shutdown_timeout_seconds: float = 30.0
+    remediation_reclaim_shutdown_timeout_seconds: float = 30.0
     ticket_submission_consumer_shutdown_timeout_seconds: float = 30.0
     publisher: PublisherLifecycle | None = None
     worker: WorkerLifecycle | None = None
     rca_consumer_worker: WorkerLifecycle | None = None
     audit_retention_worker: WorkerLifecycle | None = None
+    remediation_reclaim_worker: WorkerLifecycle | None = None
     ticket_submission_consumer_worker: WorkerLifecycle | None = None
     outbox_backlog_monitor: OutboxBacklogMonitor | None = None
     managed_resources: tuple[AsyncCloseable, ...] = ()
@@ -242,6 +249,10 @@ class ApplicationRuntime:
         if self.audit_retention_shutdown_timeout_seconds <= 0:
             raise ValueError(
                 "audit_retention_shutdown_timeout_seconds must be positive"
+            )
+        if self.remediation_reclaim_shutdown_timeout_seconds <= 0:
+            raise ValueError(
+                "remediation_reclaim_shutdown_timeout_seconds must be positive"
             )
         if self.ticket_submission_consumer_shutdown_timeout_seconds <= 0:
             raise ValueError(
@@ -262,6 +273,8 @@ class ApplicationRuntime:
         self._rca_consumer_failure: str | None = None
         self._audit_retention_task: asyncio.Task[None] | None = None
         self._audit_retention_failure: str | None = None
+        self._remediation_reclaim_task: asyncio.Task[None] | None = None
+        self._remediation_reclaim_failure: str | None = None
         self._ticket_submission_consumer_task: asyncio.Task[None] | None = None
         self._ticket_submission_consumer_failure: str | None = None
         self._database_ready_cache: bool | None = None
@@ -290,6 +303,14 @@ class ApplicationRuntime:
         """返回审计清理 Worker 健康快照。"""
         health = getattr(self.audit_retention_worker, "health", None)
         return health if isinstance(health, AuditRetentionWorkerHealth) else None
+
+    @property
+    def remediation_reclaim_health(
+        self,
+    ) -> RemediationReclaimWorkerHealth | None:
+        """返回修复租约回收 Worker 健康快照。"""
+        health = getattr(self.remediation_reclaim_worker, "health", None)
+        return health if isinstance(health, RemediationReclaimWorkerHealth) else None
 
     @property
     def ticket_submission_consumer_health(
@@ -348,6 +369,17 @@ class ApplicationRuntime:
                         worker_name="audit_retention",
                     )
                 )
+            if self.remediation_reclaim_worker is not None:
+                self._remediation_reclaim_task = asyncio.create_task(
+                    self.remediation_reclaim_worker.run(),
+                    name="remediation-reclaim-worker",
+                )
+                self._remediation_reclaim_task.add_done_callback(
+                    partial(
+                        self._on_worker_done,
+                        worker_name="remediation_reclaim",
+                    )
+                )
             if self.ticket_submission_consumer_worker is not None:
                 self._ticket_submission_consumer_task = asyncio.create_task(
                     self.ticket_submission_consumer_worker.run(),
@@ -363,6 +395,7 @@ class ApplicationRuntime:
                 self._worker_task is not None
                 or self._rca_consumer_task is not None
                 or self._audit_retention_task is not None
+                or self._remediation_reclaim_task is not None
                 or self._ticket_submission_consumer_task is not None
             ):
                 await asyncio.sleep(0)
@@ -375,6 +408,11 @@ class ApplicationRuntime:
                 and self._audit_retention_task.done()
             ):
                 await self._audit_retention_task
+            if (
+                self._remediation_reclaim_task is not None
+                and self._remediation_reclaim_task.done()
+            ):
+                await self._remediation_reclaim_task
             if (
                 self._ticket_submission_consumer_task is not None
                 and self._ticket_submission_consumer_task.done()
@@ -438,6 +476,14 @@ class ApplicationRuntime:
                         self.audit_retention_worker,
                         self._audit_retention_task,
                         self._audit_retention_failure,
+                    ),
+                ),
+                (
+                    "remediation_reclaim",
+                    self._background_worker_readiness(
+                        self.remediation_reclaim_worker,
+                        self._remediation_reclaim_task,
+                        self._remediation_reclaim_failure,
                     ),
                 ),
                 (
@@ -522,6 +568,10 @@ class ApplicationRuntime:
                 "_audit_retention_failure",
                 "Audit Retention Worker",
             ),
+            "remediation_reclaim": (
+                "_remediation_reclaim_failure",
+                "Remediation Reclaim Worker",
+            ),
             "ticket_submission_consumer": (
                 "_ticket_submission_consumer_failure",
                 "Ticket Submission Consumer",
@@ -554,6 +604,8 @@ class ApplicationRuntime:
             self.rca_consumer_worker.request_stop()
         if self.audit_retention_worker is not None:
             self.audit_retention_worker.request_stop()
+        if self.remediation_reclaim_worker is not None:
+            self.remediation_reclaim_worker.request_stop()
         if self.ticket_submission_consumer_worker is not None:
             self.ticket_submission_consumer_worker.request_stop()
         await self._await_worker_shutdown(
@@ -580,6 +632,14 @@ class ApplicationRuntime:
             errors=errors,
         )
         self._audit_retention_task = None
+        await self._await_worker_shutdown(
+            task=self._remediation_reclaim_task,
+            timeout_seconds=self.remediation_reclaim_shutdown_timeout_seconds,
+            stage_name="remediation_reclaim",
+            display_name="Remediation Reclaim Worker",
+            errors=errors,
+        )
+        self._remediation_reclaim_task = None
         await self._await_worker_shutdown(
             task=self._ticket_submission_consumer_task,
             timeout_seconds=(self.ticket_submission_consumer_shutdown_timeout_seconds),
@@ -719,9 +779,7 @@ def build_runtime(
             HttpRemediationExecutorConfig(
                 base_url=settings.remediation_controller_base_url,
                 bearer_token=settings.remediation_controller_bearer_token,
-                request_timeout_seconds=(
-                    settings.remediation_request_timeout_seconds
-                ),
+                request_timeout_seconds=(settings.remediation_request_timeout_seconds),
                 max_response_bytes=settings.remediation_max_response_bytes,
             )
         )
@@ -742,12 +800,8 @@ def build_runtime(
     remediation_policy = RemediationExecutionPolicy(
         execution_enabled=settings.remediation_execution_enabled,
         allowed_tenants=frozenset(settings.remediation_allowed_tenants),
-        maintenance_start_hour_utc=(
-            settings.remediation_maintenance_start_hour_utc
-        ),
-        maintenance_end_hour_utc=(
-            settings.remediation_maintenance_end_hour_utc
-        ),
+        maintenance_start_hour_utc=(settings.remediation_maintenance_start_hour_utc),
+        maintenance_end_hour_utc=(settings.remediation_maintenance_end_hour_utc),
     )
     remediation_service = (
         RemediationApplicationService(
@@ -807,6 +861,7 @@ def build_runtime(
     publisher: KafkaEventPublisher | None = None
     worker: OutboxWorkerRunner | None = None
     audit_retention_worker: AuditRetentionWorkerRunner | None = None
+    remediation_reclaim_worker: RemediationReclaimWorkerRunner | None = None
     rca_consumer_worker: RCAConsumerRunner | None = None
     ticket_submission_consumer_worker: TicketSubmissionConsumerRunner | None
     ticket_submission_consumer_worker = None
@@ -893,6 +948,33 @@ def build_runtime(
                 batch_size=retention_batch_size,
             ),
         )
+    if settings.remediation_reclaim_worker_enabled:
+        if remediation_service is None:
+            raise ValueError(
+                "Remediation reclaim worker requires configured remediation"
+            )
+        remediation_reclaim_worker = RemediationReclaimWorkerRunner(
+            service=remediation_service,
+            worker_id=(
+                settings.remediation_reclaim_worker_id
+                or derive_suffixed_id(
+                    _default_worker_id(),
+                    "remediation-reclaim",
+                )
+            ),
+            config=RemediationReclaimWorkerConfig(
+                interval=timedelta(
+                    seconds=settings.remediation_reclaim_interval_seconds
+                ),
+                error_backoff_initial=timedelta(
+                    seconds=(settings.remediation_reclaim_error_backoff_initial_seconds)
+                ),
+                error_backoff_max=timedelta(
+                    seconds=(settings.remediation_reclaim_error_backoff_max_seconds)
+                ),
+                batch_size=settings.remediation_reclaim_batch_size,
+            ),
+        )
     if settings.rca_consumer_enabled:
         rca_bundle = build_rca_consumer_runtime(
             settings,
@@ -951,6 +1033,7 @@ def build_runtime(
         incident_query_service=incident_query_service,
         incident_resolution_service=incident_resolution_service,
         audit_retention_worker=audit_retention_worker,
+        remediation_reclaim_worker=remediation_reclaim_worker,
         rca_consumer_worker=rca_consumer_worker,
         ticket_submission_consumer_worker=(ticket_submission_consumer_worker),
         rca_consumer_shutdown_timeout_seconds=(
@@ -958,6 +1041,9 @@ def build_runtime(
         ),
         audit_retention_shutdown_timeout_seconds=(
             settings.audit_retention_shutdown_timeout_seconds
+        ),
+        remediation_reclaim_shutdown_timeout_seconds=(
+            settings.remediation_reclaim_shutdown_timeout_seconds
         ),
         ticket_submission_consumer_shutdown_timeout_seconds=(
             settings.ticket_submission_consumer_shutdown_timeout_seconds

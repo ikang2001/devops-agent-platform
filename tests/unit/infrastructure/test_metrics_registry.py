@@ -18,11 +18,15 @@ from devops_agent_platform.application.services.outbox_worker import (
 from devops_agent_platform.application.services.rca_consumer_runner import (
     RCAConsumerHealth,
 )
+from devops_agent_platform.application.services.remediation_reclaim_worker import (
+    RemediationReclaimWorkerHealth,
+)
 from devops_agent_platform.domain.enums import (
     AuditRetentionWorkerState,
     OutboxStatus,
     OutboxWorkerState,
     RCAConsumerWorkerState,
+    RemediationReclaimWorkerState,
     TicketSubmissionConsumerWorkerState,
 )
 from devops_agent_platform.infrastructure.metrics import ApplicationMetrics
@@ -35,9 +39,7 @@ from devops_agent_platform.ports.ticketing import (
 )
 
 NOW = datetime(2026, 6, 28, 12, 0, tzinfo=UTC)
-TicketSubmissionConsumerHealth = (
-    ticket_consumer_runner.TicketSubmissionConsumerHealth
-)
+TicketSubmissionConsumerHealth = ticket_consumer_runner.TicketSubmissionConsumerHealth
 
 
 def test_each_application_uses_an_independent_registry() -> None:
@@ -220,12 +222,7 @@ def test_rca_consumer_gauges_are_refreshed_and_reset() -> None:
 
     metrics.update_rca_consumer(health)
 
-    assert (
-        metrics.registry.get_sample_value(
-            "devops_agent_rca_consumer_enabled"
-        )
-        == 1
-    )
+    assert metrics.registry.get_sample_value("devops_agent_rca_consumer_enabled") == 1
     assert (
         metrics.registry.get_sample_value(
             "devops_agent_rca_consumer_state",
@@ -247,9 +244,7 @@ def test_rca_consumer_gauges_are_refreshed_and_reset() -> None:
         == (NOW - timedelta(seconds=30)).timestamp()
     )
     assert (
-        metrics.registry.get_sample_value(
-            "devops_agent_rca_consumer_lag_source_up"
-        )
+        metrics.registry.get_sample_value("devops_agent_rca_consumer_lag_source_up")
         == 1
     )
     assert (
@@ -269,12 +264,7 @@ def test_rca_consumer_gauges_are_refreshed_and_reset() -> None:
 
     metrics.update_rca_consumer(None)
 
-    assert (
-        metrics.registry.get_sample_value(
-            "devops_agent_rca_consumer_enabled"
-        )
-        == 0
-    )
+    assert metrics.registry.get_sample_value("devops_agent_rca_consumer_enabled") == 0
     assert (
         metrics.registry.get_sample_value(
             "devops_agent_rca_consumer_state",
@@ -296,9 +286,7 @@ def test_rca_consumer_gauges_are_refreshed_and_reset() -> None:
         == 0
     )
     assert (
-        metrics.registry.get_sample_value(
-            "devops_agent_rca_consumer_lag_source_up"
-        )
+        metrics.registry.get_sample_value("devops_agent_rca_consumer_lag_source_up")
         == 0
     )
     assert (
@@ -456,9 +444,7 @@ def test_audit_retention_gauges_are_refreshed_and_reset() -> None:
     metrics.update_audit_retention(health)
 
     assert (
-        metrics.registry.get_sample_value(
-            "devops_agent_audit_retention_worker_enabled"
-        )
+        metrics.registry.get_sample_value("devops_agent_audit_retention_worker_enabled")
         == 1
     )
     assert (
@@ -475,9 +461,7 @@ def test_audit_retention_gauges_are_refreshed_and_reset() -> None:
         == 2
     )
     assert (
-        metrics.registry.get_sample_value(
-            "devops_agent_audit_retention_worker_cycles"
-        )
+        metrics.registry.get_sample_value("devops_agent_audit_retention_worker_cycles")
         == 17
     )
     assert (
@@ -496,9 +480,7 @@ def test_audit_retention_gauges_are_refreshed_and_reset() -> None:
     metrics.update_audit_retention(None)
 
     assert (
-        metrics.registry.get_sample_value(
-            "devops_agent_audit_retention_worker_enabled"
-        )
+        metrics.registry.get_sample_value("devops_agent_audit_retention_worker_enabled")
         == 0
     )
     assert (
@@ -509,14 +491,94 @@ def test_audit_retention_gauges_are_refreshed_and_reset() -> None:
         == 0
     )
     assert (
-        metrics.registry.get_sample_value(
-            "devops_agent_audit_retention_worker_cycles"
-        )
+        metrics.registry.get_sample_value("devops_agent_audit_retention_worker_cycles")
         == 0
     )
     assert (
         metrics.registry.get_sample_value(
             "devops_agent_audit_retention_worker_last_cycle_timestamp_seconds"
+        )
+        == 0
+    )
+
+
+def test_remediation_reclaim_gauges_are_refreshed_and_reset() -> None:
+    """租约回收健康快照应覆盖状态、时间戳和累计收口量。"""
+    metrics = ApplicationMetrics()
+    health = RemediationReclaimWorkerHealth(
+        state=RemediationReclaimWorkerState.DEGRADED,
+        started_at=NOW - timedelta(hours=1),
+        stopped_at=None,
+        last_cycle_at=NOW - timedelta(seconds=20),
+        last_success_at=NOW - timedelta(minutes=5),
+        last_error="database unavailable",
+        consecutive_failures=2,
+        total_cycles=17,
+        total_reclaimed_plans=9,
+    )
+
+    metrics.update_remediation_reclaim(health)
+
+    assert (
+        metrics.registry.get_sample_value(
+            "devops_agent_remediation_reclaim_worker_enabled"
+        )
+        == 1
+    )
+    assert (
+        metrics.registry.get_sample_value(
+            "devops_agent_remediation_reclaim_worker_state",
+            {"state": "DEGRADED"},
+        )
+        == 1
+    )
+    assert (
+        metrics.registry.get_sample_value(
+            "devops_agent_remediation_reclaim_worker_consecutive_failures"
+        )
+        == 2
+    )
+    assert (
+        metrics.registry.get_sample_value(
+            "devops_agent_remediation_reclaim_worker_cycles"
+        )
+        == 17
+    )
+    assert (
+        metrics.registry.get_sample_value("devops_agent_remediation_reclaimed_plans")
+        == 9
+    )
+    assert (
+        metrics.registry.get_sample_value(
+            "devops_agent_remediation_reclaim_worker_last_success_timestamp_seconds"
+        )
+        == (NOW - timedelta(minutes=5)).timestamp()
+    )
+
+    metrics.update_remediation_reclaim(None)
+
+    assert (
+        metrics.registry.get_sample_value(
+            "devops_agent_remediation_reclaim_worker_enabled"
+        )
+        == 0
+    )
+    assert (
+        metrics.registry.get_sample_value(
+            "devops_agent_remediation_reclaim_worker_state",
+            {"state": "DEGRADED"},
+        )
+        == 0
+    )
+    assert (
+        metrics.registry.get_sample_value(
+            "devops_agent_remediation_reclaim_worker_cycles"
+        )
+        == 0
+    )
+    assert (
+        metrics.registry.get_sample_value(
+            "devops_agent_remediation_reclaim_worker_last_cycle_timestamp_seconds"
         )
         == 0
     )
@@ -655,14 +717,6 @@ def test_outbox_backlog_gauges_include_age_and_stale_state() -> None:
         == 90
     )
     assert (
-        metrics.registry.get_sample_value(
-            "devops_agent_outbox_backlog_source_up"
-        )
-        == 0
+        metrics.registry.get_sample_value("devops_agent_outbox_backlog_source_up") == 0
     )
-    assert (
-        metrics.registry.get_sample_value(
-            "devops_agent_outbox_backlog_stale"
-        )
-        == 1
-    )
+    assert metrics.registry.get_sample_value("devops_agent_outbox_backlog_stale") == 1

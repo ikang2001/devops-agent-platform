@@ -668,6 +668,7 @@ def test_explicit_worker_id_is_not_silently_cleaned(
         "rca_consumer_worker_id",
         "ticket_submission_consumer_worker_id",
         "audit_retention_worker_id",
+        "remediation_reclaim_worker_id",
     ):
         with pytest.raises(ValidationError, match="worker_id"):
             Settings(_env_file=None, **{field_name: worker_id})
@@ -925,6 +926,34 @@ def test_audit_retention_error_backoff_order_is_validated() -> None:
 
 
 @pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("remediation_reclaim_batch_size", 0),
+        ("remediation_reclaim_batch_size", 1001),
+        ("remediation_reclaim_interval_seconds", 0),
+        ("remediation_reclaim_error_backoff_initial_seconds", 0),
+        ("remediation_reclaim_error_backoff_max_seconds", 86401),
+        ("remediation_reclaim_shutdown_timeout_seconds", 0),
+    ],
+)
+def test_invalid_remediation_reclaim_settings_are_rejected(
+    field_name: str,
+    value: float,
+) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **{field_name: value})
+
+
+def test_remediation_reclaim_error_backoff_order_is_validated() -> None:
+    with pytest.raises(ValidationError, match="initial must not exceed"):
+        Settings(
+            _env_file=None,
+            remediation_reclaim_error_backoff_initial_seconds=10,
+            remediation_reclaim_error_backoff_max_seconds=5,
+        )
+
+
+@pytest.mark.parametrize(
     "missing_field",
     [
         "admin_oidc_issuer",
@@ -1058,11 +1087,20 @@ def test_remediation_defaults_to_disabled_and_requires_action_catalog() -> None:
     assert defaults.remediation_action_catalog_path is None
     assert defaults.remediation_lease_seconds == 60
     assert defaults.remediation_request_timeout_seconds == 10
+    assert defaults.remediation_reclaim_worker_enabled is False
+    assert defaults.remediation_reclaim_batch_size == 50
+    assert defaults.remediation_reclaim_interval_seconds == 30
 
     with pytest.raises(ValidationError, match="configured together"):
         Settings(
             _env_file=None,
             remediation_controller_base_url="https://automation.example",
+        )
+
+    with pytest.raises(ValidationError, match="reclaim worker requires"):
+        Settings(
+            _env_file=None,
+            remediation_reclaim_worker_enabled=True,
         )
 
 

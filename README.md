@@ -103,6 +103,8 @@ The current Step 4 implementation includes:
 - graceful application lifecycle and Outbox Worker shutdown
 - opt-in audit retention Worker with bounded RCA audit cleanup batches
 - low-cardinality audit retention metrics, alerts, runbook, and dashboard panels
+- opt-in remediation lease reclaim Worker with bounded polling and fenced failure closure
+- low-cardinality remediation reclaim health, metrics, alerts, and failure runbook
 - bounded Prometheus Metrics, Loki Logs, and Tempo Traces read-only adapters
 - tenant-scoped, versioned, bounded read-only Runbook retrieval
 - authenticated Runbook draft and publication workflow with aggregate ETags
@@ -376,6 +378,12 @@ remove RCA reports, ticket drafts, or external submission records. Its metrics,
 alerts, Runbook, and dashboard panels focus on Worker liveness, successful
 cycle progress, repeated failures, and total cleaned workflow runs without
 using tenant, workflow, or worker identifiers as labels.
+Remediation execution and rollback use owner/attempt-fenced leases. An opt-in
+Runtime-supervised reclaim Worker scans expired `EXECUTING` and `ROLLING_BACK`
+plans in bounded batches and closes them as `FAILED` or `ROLLBACK_FAILED`.
+It has cooperative shutdown, capped error backoff, readiness, low-cardinality
+metrics, alerts, and a Runbook. It never retries, resumes, or takes over the
+external write; an operator must reassess the incident and approve a new plan.
 Administrators with `ticket_drafts:write` may generate one local Ticket Draft
 from a successful workflow while `ticket_drafts:read` controls later access.
 The API accepts no ticket content: title, priority, evidence references, and

@@ -21,6 +21,7 @@ async def metrics(request: Request) -> Response:
     worker_health = None
     rca_consumer_health = None
     audit_retention_health = None
+    remediation_reclaim_health = None
     ticket_submission_consumer_health = None
     backlog_report = None
     if runtime is not None:
@@ -34,6 +35,11 @@ async def metrics(request: Request) -> Response:
             "audit_retention_health",
             None,
         )
+        remediation_reclaim_health = getattr(
+            runtime,
+            "remediation_reclaim_health",
+            None,
+        )
         ticket_submission_consumer_health = getattr(
             runtime,
             "ticket_submission_consumer_health",
@@ -42,8 +48,7 @@ async def metrics(request: Request) -> Response:
         try:
             readiness = await runtime.check_readiness()
             component_statuses = tuple(
-                (name, status.value)
-                for name, status in readiness.components
+                (name, status.value) for name, status in readiness.components
             )
             worker_health = getattr(runtime, "worker_health", None)
         except Exception:
@@ -58,6 +63,7 @@ async def metrics(request: Request) -> Response:
     application_metrics.update_runtime(component_statuses, worker_health)
     application_metrics.update_rca_consumer(rca_consumer_health)
     application_metrics.update_audit_retention(audit_retention_health)
+    application_metrics.update_remediation_reclaim(remediation_reclaim_health)
     application_metrics.update_ticket_submission_consumer(
         ticket_submission_consumer_health
     )
