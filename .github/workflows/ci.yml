@@ -53,7 +53,8 @@ jobs:
           format: spdx-json
           output-file: sbom.spdx.json
       - name: Scan image
-        uses: aquasecurity/trivy-action@0.28.0
+        # v0.28.0
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2
         with:
           image-ref: devops-agent-platform:${{ github.sha }}
           format: sarif
