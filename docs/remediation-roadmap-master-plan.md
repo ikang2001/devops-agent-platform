@@ -248,7 +248,7 @@ uv run pytest -q tests/unit/bootstrap/test_settings.py
 
 1. A/B/C0/C1 代码、配置、测试和中文说明均已完成。
 2. C0/C1 定向回归：`190 passed`，相关 Ruff 检查通过。
-3. 根平台当前全量回归：`1704 passed, 9 skipped`，Ruff 与锁文件一致性通过。
+3. 根平台当前全量回归：`1711 passed, 9 skipped`，Ruff 与锁文件一致性通过。
 4. 下一边界不是继续扩成自由 Agent，而是在真实 staging/sandbox 验证观测数据源、
    LLM、OIDC、Kafka 和外部修复控制器；未取得证据前不得宣称生产验收完成。
 5. Remediation 后台 reclaim Worker 已作为默认关闭能力接入；外部写自动重试、

@@ -19,7 +19,7 @@
   真实 Compose RCA 验收、演练管理员认证、逐模块代码导读，以及按单条人工反馈
   导出机器可读评测候选，以及要求显式批准、隐私复核、人工改写和 Evidence
   重映射的离线策展工具，以及只允许进入人工发布评审的离线评测报告门禁。
-- 已完成验证：平台全量 `1704 passed, 9 skipped`；MiniShop 全量
+- 已完成验证：平台全量 `1711 passed, 9 skipped`；MiniShop 全量
   `37 passed`（均使用 `-W error`）；E2E 静态资产 `3 passed`；Compose 配置展开通过；三场景真实
   Docker E2E 全部通过。
 - 端到端证据：`checkout-latency`、`inventory-db-timeout`、
@@ -38,7 +38,7 @@
 | Step 2 架构设计 | 选择原生 Alertmanager Relay、兼容 Telemetry、演练专用认证和 Compose 验收 | 现有端口/适配器边界 | 1 | 无 |
 | Step 3 代码骨架 | 新增 Alertmanager Mapper、Relay、Agent Alert Client 与路由 | Relay 定向测试 6 项通过 | 1 | 无 |
 | Step 4 增量实现 | Alertmanager Relay、兼容指标/日志、分服务 Trace、Tempo Ground Truth、演练认证、代码导读和固定调查策略接线 | C0/C1 定向测试 `190 passed`；MiniShop `37 passed` | 2 | 无 |
-| Step 5 测试排错 | 修复 FastAPI 生命周期、Buildx 路径、tmpfs 权限、Tempo Trace ID、锁定环境打包和策略解析测试假设 | 平台当前 `1704 passed, 9 skipped`；MiniShop `37 passed` | 7 | 无 |
+| Step 5 测试排错 | 修复 FastAPI 生命周期、Buildx 路径、tmpfs 权限、Tempo Trace ID、锁定环境打包和策略解析测试假设 | 平台当前 `1711 passed, 9 skipped`；MiniShop `37 passed` | 7 | 无 |
 | Step 6 整合运维 | 真实 Compose 三场景验收、锁定镜像验证、独立 Git 基线、平台受审修复、reclaim Worker、C0/C1 文档收口、反馈候选下载、离线策展、静态评测、报告门禁和版本发布守护 | `artifacts/results.json` 中 `passed: true`；反馈/策展/评测/版本定向回归与全量 pytest 通过 | 24 | 无 |
 
 ## 4. 事件索引
@@ -844,6 +844,7 @@
 | DEBT-001 | 项目没有独立 Git HEAD | 已解决 | 在项目根目录初始化独立 `main` 仓库，提交前排除 `.env`、虚拟环境、缓存和临时输出 | `git rev-parse --show-toplevel` 指向当前项目；基线提交后工作区干净 |
 | DEBT-002 | 开发依赖和 Ruff 未精确锁定 | 已解决 | 根平台与 MiniShop 各自提交 `uv.lock`；CI/Docker 使用 `uv 0.11.31 --locked`；Ruff 固定 `0.15.22` | 两个 lock check、隔离环境全量测试、Ruff、锁定版 Docker E2E 均通过 |
 | DEBT-003 | Git Release 与根平台包/API/部署版本漂移 | 已解决 | `pyproject.toml` 作为唯一版本源；锁文件、FastAPI、Kubernetes 示例统一为 `0.3.1`，Tag CI 校验版本与 wheel/sdist | 版本定向测试、真实 `uv build`、Tag 工作流和全量门禁 |
+| DEBT-004 | GitHub Release 页面没有可下载的 Python 包和独立校验和 | 已解决 | Tag CI 暂存已校验的 wheel/sdist；测试、镜像、SBOM 和漏洞门禁全部通过后，以最小写权限发布包与 `SHA256SUMS`；同名不同内容失败关闭 | 发布器单测、工作流守护测试，以及 `v0.3.2` Tag 的真实发布 CI |
 
 ## 10. 最终复盘
 
@@ -867,7 +868,7 @@
 
 ### 验证与已知限制
 
-- 已完成验证：平台 `1704 passed, 9 skipped`，MiniShop `37 passed`，
+- 已完成验证：平台 `1711 passed, 9 skipped`，MiniShop `37 passed`，
   E2E 资产 `3 passed`，Ruff check 和 Compose config 通过。
 - 已完成真实链路：三份 Manifest 均在重建后的 Docker 环境得到
   `SUCCEEDED` Workflow 与四类 Evidence，结果文件 `passed: true`。
