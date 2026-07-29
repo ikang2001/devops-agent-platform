@@ -21,6 +21,7 @@ _DEMO_ADMIN_SCOPES = frozenset(
         "rca:cancel",
         "rca:read",
         "rca_feedback:read",
+        "rca_feedback:export",
         "rca_feedback:write",
         "remediation:approve",
         "remediation:execute",

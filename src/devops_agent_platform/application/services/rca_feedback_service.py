@@ -10,6 +10,7 @@ from devops_agent_platform.application.commands.rca_feedback import (
 )
 from devops_agent_platform.application.events import OutboxEvent
 from devops_agent_platform.application.queries.rca_feedback import (
+    GetRCAFeedbackEvaluationCandidateQuery,
     ListRCAFeedbackQuery,
 )
 from devops_agent_platform.domain.enums import WorkflowRunStatus
@@ -82,6 +83,57 @@ class RCAFeedbackView:
         return result
 
 
+@dataclass(frozen=True)
+class EvaluationEvidenceView:
+    """评测候选只保留证据投影，不导出原始内容。"""
+
+    evidence_id: str
+    evidence_type: str
+    source: str
+    summary: str
+
+
+@dataclass(frozen=True)
+class RCAFeedbackEvaluationCandidateView:
+    """由一条人工反馈派生、仍需人工策展的机器可读候选。"""
+
+    schema_version: int
+    case_id: str
+    workflow_run_id: str
+    incident_id: str
+    report_id: str
+    feedback_id: str
+    review_required: bool
+    baseline_generator_name: str
+    baseline_generator_version: str
+    baseline_conclusion_status: str
+    baseline_title: str
+    baseline_summary: str
+    baseline_confidence: float
+    baseline_recommendations: tuple[str, ...]
+    verdict: str
+    expected_root_cause: str
+    required_evidence_ids: tuple[str, ...]
+    missing_evidence_types: tuple[str, ...]
+    unsafe_recommendation_indexes: tuple[int, ...]
+    follow_up_label: str | None
+    evidence: tuple[EvaluationEvidenceView, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        """生成稳定 JSON 投影，并显式保留人工复核门禁。"""
+        result = asdict(self)
+        result["baseline_recommendations"] = list(
+            self.baseline_recommendations
+        )
+        result["required_evidence_ids"] = list(self.required_evidence_ids)
+        result["missing_evidence_types"] = list(self.missing_evidence_types)
+        result["unsafe_recommendation_indexes"] = list(
+            self.unsafe_recommendation_indexes
+        )
+        result["evidence"] = [asdict(item) for item in self.evidence]
+        return result
+
+
 class RCAFeedbackApplicationService:
     """持久化人工复核，并将其作为后续评测数据的可信输入。"""
 
@@ -137,6 +189,122 @@ class RCAFeedbackApplicationService:
                 query.limit,
             )
         return tuple(RCAFeedbackView.from_domain(item) for item in feedback)
+
+    async def get_evaluation_candidate(
+        self,
+        query: GetRCAFeedbackEvaluationCandidateQuery,
+    ) -> RCAFeedbackEvaluationCandidateView:
+        """导出单条反馈对应的有限候选，不自动纳入评测数据集。"""
+        async with self._unit_of_work_factory() as unit_of_work:
+            workflow = await unit_of_work.workflow_runs.get_by_id(
+                query.tenant_id,
+                query.workflow_run_id,
+            )
+            if workflow is None:
+                raise ResourceNotFound("Workflow run not found")
+            if workflow.status is not WorkflowRunStatus.SUCCEEDED:
+                raise ConflictError(
+                    "Evaluation export requires a succeeded workflow"
+                )
+            if workflow.audit_purged_at is not None:
+                raise ConflictError(
+                    "Evaluation export requires available audit evidence"
+                )
+            feedback = await unit_of_work.rca_feedback.get_by_id(
+                query.tenant_id,
+                query.feedback_id,
+            )
+            if (
+                feedback is None
+                or feedback.workflow_run_id != query.workflow_run_id
+            ):
+                raise ResourceNotFound("RCA feedback not found")
+            report = await unit_of_work.rca_reports.get_by_workflow_run(
+                query.tenant_id,
+                query.workflow_run_id,
+            )
+            if report is None or report.report_id != feedback.report_id:
+                raise ConflictError("RCA feedback report is unavailable")
+            evidence = await unit_of_work.evidence.list_by_ids(
+                query.tenant_id,
+                report.evidence_ids,
+            )
+
+        indexed_evidence = {item.evidence_id: item for item in evidence}
+        if set(indexed_evidence) != set(report.evidence_ids):
+            raise ConflictError(
+                "Evaluation export requires every referenced evidence item"
+            )
+        if any(
+            item.workflow_run_id != query.workflow_run_id
+            or item.execution_attempt != report.execution_attempt
+            for item in evidence
+        ):
+            raise ConflictError(
+                "Evaluation export evidence does not match the report execution"
+            )
+        ordered_evidence = tuple(
+            indexed_evidence[evidence_id] for evidence_id in report.evidence_ids
+        )
+        expected_root_cause = _safe_export_text(
+            feedback.corrected_root_cause or report.summary,
+            maximum=4096,
+            multiline=True,
+        )
+        return RCAFeedbackEvaluationCandidateView(
+            schema_version=1,
+            case_id=f"rca-feedback-{feedback.feedback_id}",
+            workflow_run_id=query.workflow_run_id,
+            incident_id=report.incident_id,
+            report_id=report.report_id,
+            feedback_id=feedback.feedback_id,
+            review_required=True,
+            baseline_generator_name=report.generator_name,
+            baseline_generator_version=report.generator_version,
+            baseline_conclusion_status=report.conclusion_status.value,
+            baseline_title=_safe_export_text(
+                report.title,
+                maximum=256,
+                multiline=False,
+            ),
+            baseline_summary=_safe_export_text(
+                report.summary,
+                maximum=4096,
+                multiline=True,
+            ),
+            baseline_confidence=float(report.confidence),
+            baseline_recommendations=tuple(
+                _safe_export_text(
+                    item,
+                    maximum=1024,
+                    multiline=False,
+                )
+                for item in report.recommendations
+            ),
+            verdict=feedback.verdict.value,
+            expected_root_cause=expected_root_cause,
+            required_evidence_ids=report.evidence_ids,
+            missing_evidence_types=tuple(
+                item.value for item in feedback.missing_evidence_types
+            ),
+            unsafe_recommendation_indexes=(
+                feedback.unsafe_recommendation_indexes
+            ),
+            follow_up_label=feedback.follow_up_label,
+            evidence=tuple(
+                EvaluationEvidenceView(
+                    evidence_id=item.evidence_id,
+                    evidence_type=item.evidence_type.value,
+                    source=item.source,
+                    summary=_safe_export_text(
+                        item.summary,
+                        maximum=4096,
+                        multiline=False,
+                    ),
+                )
+                for item in ordered_evidence
+            ),
+        )
 
     async def _create_once(
         self,
@@ -317,3 +485,18 @@ def _safe_optional_text(
     )
     safe = redact_sensitive_text(normalized)[0][:maximum].strip()
     return safe or None
+
+
+def _safe_export_text(
+    value: str,
+    *,
+    maximum: int,
+    multiline: bool,
+) -> str:
+    """在只读导出边界二次净化历史文本，并保持字段非空。"""
+    safe = _safe_optional_text(
+        value,
+        maximum=maximum,
+        multiline=multiline,
+    )
+    return safe or "[REDACTED]"

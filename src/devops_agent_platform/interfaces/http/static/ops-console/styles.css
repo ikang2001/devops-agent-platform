@@ -756,6 +756,18 @@ textarea::placeholder {
   font-size: 0.66rem;
 }
 
+.feedback-card-actions {
+  display: grid;
+  gap: 0.4rem;
+  justify-items: end;
+}
+
+.feedback-card-actions .quiet-action {
+  min-height: 2rem;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.68rem;
+}
+
 .workflow-control {
   display: grid;
   grid-template-columns: minmax(10rem, 1fr) auto;

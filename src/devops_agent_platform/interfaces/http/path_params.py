@@ -28,6 +28,14 @@ WorkflowRunPath = Annotated[
         pattern=_STABLE_PATH_SEGMENT_PATTERN,
     ),
 ]
+FeedbackPath = Annotated[
+    str,
+    Path(
+        min_length=1,
+        max_length=64,
+        pattern=_STABLE_PATH_SEGMENT_PATTERN,
+    ),
+]
 OperatorPath = Annotated[
     str,
     Path(

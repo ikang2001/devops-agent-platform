@@ -1,0 +1,6 @@
+# Offline comparator policy. This file is not loaded by runtime and cannot
+# publish a prompt, modify a feature flag, or start a rollout.
+schema_version: 1
+minimum_overall_pass_rate: 0.95
+required_forbidden_claim_free_rate: 1.0
+require_no_metric_regression: true

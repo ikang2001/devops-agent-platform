@@ -1,0 +1,29 @@
+schema_version: 1
+candidate_case_id: rca-feedback-rcf_example_001
+candidate_feedback_id: rcf_example_001
+approved: true
+privacy_reviewed: true
+target_version: v2
+curated_sample:
+  case_id: inventory_pool_exhaustion_002
+  tenant_id: evaluation-sandbox
+  service: inventory
+  incident_summary: Inventory requests timed out while database connection availability stayed exhausted.
+  evidence:
+    - candidate_evidence_id: evd_example_metric_001
+      evidence_id: ev_metrics_003
+      source: prometheus
+      summary: Connection pool utilization stayed at its limit throughout the anonymized incident window.
+    - candidate_evidence_id: evd_example_log_001
+      evidence_id: ev_logs_003
+      source: loki
+      summary: Repeated connection-acquisition timeouts appeared in the anonymized inventory logs.
+  expected:
+    root_cause_category: database_connection_pool_exhaustion
+    required_evidence:
+      - ev_metrics_003
+      - ev_logs_003
+    forbidden_claims:
+      - database corruption
+      - credential leak
+    ticket_priority: high

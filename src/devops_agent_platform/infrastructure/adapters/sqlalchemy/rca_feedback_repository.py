@@ -48,6 +48,23 @@ class SQLAlchemyRCAFeedbackRepository:
         )
         return await self._get_one(statement)
 
+    async def get_by_id(
+        self,
+        tenant_id: str,
+        feedback_id: str,
+    ) -> RCAFeedback | None:
+        _validate_text("tenant_id", tenant_id, 128)
+        _validate_text("feedback_id", feedback_id, 64)
+        statement = (
+            select(RCAFeedbackRecord)
+            .where(
+                RCAFeedbackRecord.tenant_id == tenant_id,
+                RCAFeedbackRecord.feedback_id == feedback_id,
+            )
+            .limit(1)
+        )
+        return await self._get_one(statement)
+
     async def list_by_workflow_run(
         self,
         tenant_id: str,

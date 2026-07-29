@@ -223,6 +223,40 @@ async def test_list_by_workflow_run_returns_ordered_limited_snapshot(
     assert [item.evidence_id for item in loaded] == ["ev_001"]
 
 
+async def test_list_by_ids_is_tenant_scoped_and_stably_ordered(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    first = build_evidence(
+        "ev_001",
+        step_id="metrics.query",
+        source="prometheus",
+    )
+    second = build_evidence(
+        "ev_002",
+        step_id="logs.query",
+        source="loki",
+    )
+    async with session_factory() as session:
+        repository = SQLAlchemyEvidenceRepository(session)
+        await repository.save(second)
+        await repository.save(first)
+        await session.commit()
+
+    async with session_factory() as session:
+        repository = SQLAlchemyEvidenceRepository(session)
+        loaded = await repository.list_by_ids(
+            "tenant_001",
+            ("ev_002", "ev_001"),
+        )
+        cross_tenant = await repository.list_by_ids(
+            "tenant_other",
+            ("ev_001",),
+        )
+
+    assert [item.evidence_id for item in loaded] == ["ev_001", "ev_002"]
+    assert cross_tenant == []
+
+
 async def test_stored_invalid_public_fields_are_mapped_to_persistence_error(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -281,6 +315,22 @@ async def test_invalid_query_limit_is_rejected_before_database_io(
                 "wfr_001",
                 limit=0,
             )
+
+    assert not session.in_transaction()
+
+
+@pytest.mark.parametrize(
+    "evidence_ids",
+    [(), ("ev_001", "ev_001"), tuple(f"ev_{index}" for index in range(101))],
+)
+async def test_list_by_ids_rejects_unbounded_or_duplicate_identifiers(
+    session_factory: async_sessionmaker[AsyncSession],
+    evidence_ids: tuple[str, ...],
+) -> None:
+    async with session_factory() as session:
+        repository = SQLAlchemyEvidenceRepository(session)
+        with pytest.raises(AppValidationError, match="evidence_ids"):
+            await repository.list_by_ids("tenant_001", evidence_ids)
 
     assert not session.in_transaction()
 
