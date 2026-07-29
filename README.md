@@ -654,7 +654,7 @@ projects with their own versions. Before publishing an annotated Tag, run:
 ```powershell
 uv build --out-dir dist
 uv run python scripts/check-release-version.py `
-  --tag v0.3.2 --dist-dir dist
+  --tag v0.3.3 --dist-dir dist
 ```
 
 Tag pushes also run this check in CI. After tests, the container build, SBOM
@@ -663,6 +663,10 @@ validated wheel, sdist, and `SHA256SUMS` to the immutable Tag's GitHub Release.
 The release step is retry-safe: matching assets are retained, missing assets
 are uploaded, and a same-name asset with different content fails closed. Only
 that final job receives `contents: write`; all preceding jobs remain read-only.
+Every third-party Action is pinned to a reviewed immutable commit. The current
+checkout, Python setup, uv setup, artifact transfer, and SBOM Actions use their
+Node.js 24 releases; the adjacent version comment makes controlled upgrades
+auditable without restoring mutable `@v*` references.
 
 The test suite verifies that Alembic has one linear Head and compiles the full
 `base -> head` chain with the PostgreSQL dialect in offline mode. SQLite is used
