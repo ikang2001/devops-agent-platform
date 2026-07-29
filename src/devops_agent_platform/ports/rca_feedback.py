@@ -18,6 +18,14 @@ class RCAFeedbackRepositoryPort(Protocol):
         """按租户幂等摘要读取反馈。"""
         ...
 
+    async def get_by_id(
+        self,
+        tenant_id: str,
+        feedback_id: str,
+    ) -> RCAFeedback | None:
+        """按租户和反馈 ID 精确读取一条反馈。"""
+        ...
+
     async def list_by_workflow_run(
         self,
         tenant_id: str,

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "case_id": "rca-feedback-rcf_example_001",
+  "workflow_run_id": "wfr_example_001",
+  "incident_id": "inc_example_001",
+  "report_id": "rpt_example_001",
+  "feedback_id": "rcf_example_001",
+  "review_required": true,
+  "baseline_generator_name": "deterministic",
+  "baseline_generator_version": "1",
+  "baseline_conclusion_status": "CANDIDATE",
+  "baseline_title": "Inventory request timeout",
+  "baseline_summary": "Connection pool saturation coincided with inventory request timeouts.",
+  "baseline_confidence": 0.82,
+  "baseline_recommendations": [
+    "Inspect pool limits and dependency latency before changing capacity."
+  ],
+  "verdict": "PARTIAL",
+  "expected_root_cause": "Inventory database connection pool exhaustion.",
+  "required_evidence_ids": [
+    "evd_example_metric_001",
+    "evd_example_log_001"
+  ],
+  "missing_evidence_types": ["TRACE"],
+  "unsafe_recommendation_indexes": [],
+  "follow_up_label": "needs-capacity-runbook",
+  "evidence": [
+    {
+      "evidence_id": "evd_example_metric_001",
+      "evidence_type": "METRIC",
+      "source": "prometheus",
+      "summary": "Pool utilization remained saturated during the incident window."
+    },
+    {
+      "evidence_id": "evd_example_log_001",
+      "evidence_type": "LOG",
+      "source": "loki",
+      "summary": "Inventory requests repeatedly timed out while acquiring connections."
+    }
+  ]
+}

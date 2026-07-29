@@ -22,6 +22,7 @@ async def test_ops_console_serves_hardened_shell_without_credentials() -> None:
     assert 'src="/console/assets/app.js"' in response.text
     assert 'id="remediation-form"' in response.text
     assert 'id="remediation-evidence-ids"' in response.text
+    assert "候选下载仍需离线匿名化和人工策展" in response.text
     assert "仅保存在当前页面内存" in response.text
     assert "Bearer token_" not in response.text
 
@@ -46,6 +47,9 @@ async def test_ops_console_only_serves_allowlisted_assets() -> None:
     assert 'sessionStorage.setItem("ops.token"' not in script.text
     assert 'sessionStorage.getItem("ops.token"' not in script.text
     assert "/remediation-plans" in script.text
+    assert "/evaluation-candidate" in script.text
+    assert "downloadEvaluationCandidate" in script.text
+    assert "review_required !== true" in script.text
     assert stylesheet.status_code == 200
     assert stylesheet.headers["content-type"].startswith("text/css")
     assert unknown.status_code == 404

@@ -35,3 +35,11 @@ class EvidenceRepositoryPort(Protocol):
     ) -> list[Evidence]:
         """按工作流运行加载有限数量证据，调用方必须显式接受分页上限。"""
         ...
+
+    async def list_by_ids(
+        self,
+        tenant_id: str,
+        evidence_ids: tuple[str, ...],
+    ) -> list[Evidence]:
+        """按租户精确加载有限且唯一的证据 ID 集合。"""
+        ...

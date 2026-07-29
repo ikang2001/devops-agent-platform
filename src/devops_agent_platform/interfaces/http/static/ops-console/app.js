@@ -458,6 +458,25 @@ function feedbackPath() {
   );
 }
 
+function evaluationCandidatePath(feedbackId) {
+  return `${feedbackPath()}/${encodeURIComponent(
+    feedbackId,
+  )}/evaluation-candidate`;
+}
+
+function downloadJson(documentValue, filename) {
+  const content = `${JSON.stringify(documentValue, null, 2)}\n`;
+  const blob = new Blob([content], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function remediationCreatePath() {
   const workflowId = elements.workflowId.value.trim();
   if (!workflowId) {
@@ -579,10 +598,22 @@ async function loadFeedback() {
           : null,
         item.notes,
       ].filter(Boolean);
+      const actions = document.createElement("div");
+      actions.className = "feedback-card-actions";
+      const download = textNode(
+        "button",
+        "下载评测候选",
+        "quiet-action",
+      );
+      download.type = "button";
+      download.addEventListener("click", () => {
+        downloadEvaluationCandidate(item.feedback_id);
+      });
+      actions.append(textNode("time", formatTime(item.created_at)), download);
       card.append(
         textNode("strong", item.verdict),
         textNode("p", findings.join("；") || "报告结论已接受"),
-        textNode("time", formatTime(item.created_at)),
+        actions,
       );
       return card;
     });
@@ -591,6 +622,24 @@ async function loadFeedback() {
       renderEmpty(elements.feedbackList, "✓", "尚无人工复核记录。");
     }
     addActivity(`读取 ${cards.length} 条 RCA 反馈`);
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function downloadEvaluationCandidate(feedbackId) {
+  try {
+    const result = await apiRequest(evaluationCandidatePath(feedbackId));
+    const candidate = result.data;
+    if (!candidate || candidate.review_required !== true) {
+      throw new Error("服务端未返回需要人工复核的评测候选");
+    }
+    const safeCaseId = String(candidate.case_id || "evaluation-candidate")
+      .replace(/[^A-Za-z0-9._-]/g, "_")
+      .slice(0, 128);
+    downloadJson(candidate, `${safeCaseId}.json`);
+    showToast("候选已下载；进入数据集前仍需人工匿名化与策展");
+    addActivity(`下载评测候选：${candidate.case_id}`);
   } catch (error) {
     showToast(error.message, true);
   }

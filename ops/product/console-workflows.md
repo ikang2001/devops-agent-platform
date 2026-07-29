@@ -31,7 +31,9 @@
   recommendations.
 - Reviewer feedback fields: accepted root cause, missing evidence, unsafe
   recommendation, and follow-up label.
-- Report revision history once persistent feedback is implemented.
+- Immutable feedback history with an explicit per-record evaluation-candidate
+  download. Downloaded candidates still require the separate offline privacy
+  review and curation gate; the console does not approve or publish datasets.
 
 ### Ticket Approval
 

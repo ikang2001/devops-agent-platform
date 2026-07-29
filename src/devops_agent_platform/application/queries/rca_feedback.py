@@ -31,3 +31,30 @@ class ListRCAFeedbackQuery:
             or not 1 <= self.limit <= 100
         ):
             raise AppValidationError("limit must be between 1 and 100")
+
+
+@dataclass(frozen=True)
+class GetRCAFeedbackEvaluationCandidateQuery:
+    """读取一条指定反馈对应的人工策展候选。"""
+
+    tenant_id: str
+    workflow_run_id: str
+    feedback_id: str
+
+    def __post_init__(self) -> None:
+        for name, value, maximum in (
+            ("tenant_id", self.tenant_id, 128),
+            ("workflow_run_id", self.workflow_run_id, 64),
+            ("feedback_id", self.feedback_id, 64),
+        ):
+            if (
+                not isinstance(value, str)
+                or not 1 <= len(value) <= maximum
+                or value != value.strip()
+                or any(character.isspace() for character in value)
+                or any(
+                    ord(character) < 32 or ord(character) == 127
+                    for character in value
+                )
+            ):
+                raise AppValidationError(f"{name} is invalid")

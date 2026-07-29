@@ -62,10 +62,21 @@ async def test_repository_round_trips_feedback_and_enforces_idempotency() -> Non
                 "tenant_001",
                 "a" * 64,
             )
+            by_id = await repository.get_by_id(
+                "tenant_001",
+                "rcf_001",
+            )
+            cross_tenant = await repository.get_by_id(
+                "tenant_other",
+                "rcf_001",
+            )
 
         assert [item.feedback_id for item in items] == ["rcf_001"]
         assert restored is not None
         assert restored.missing_evidence_types == (EvidenceType.TRACE,)
+        assert by_id is not None
+        assert by_id.feedback_id == "rcf_001"
+        assert cross_tenant is None
 
         async with factory() as session:
             repository = SQLAlchemyRCAFeedbackRepository(session)

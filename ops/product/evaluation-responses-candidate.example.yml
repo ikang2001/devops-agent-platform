@@ -1,0 +1,30 @@
+# Synthetic candidate responses for the offline report-comparison example.
+# Changing prompt_version here identifies a variant; it does not publish or
+# activate a prompt in runtime.
+dataset_id: rca_step6_baseline
+dataset_version: v1
+run:
+  prompt_version: rca-report-v2
+  model_version: deterministic-baseline
+  retrieval_version: runbook-index-v1
+responses:
+  - case_id: checkout_latency_001
+    root_cause_category: downstream_dependency_timeout
+    cited_evidence:
+      - ev_metrics_001
+      - ev_logs_001
+      - ev_trace_001
+    report_text: >-
+      Payment dependency calls time out after the deployment. Metrics, logs,
+      and traces consistently identify the downstream timeout boundary.
+    ticket_priority: high
+
+  - case_id: inventory_error_001
+    root_cause_category: insufficient_evidence
+    cited_evidence:
+      - ev_metrics_002
+      - ev_runbook_001
+    report_text: >-
+      The available metrics and runbook narrow the next investigation to
+      consumer lag, but logs or traces are required before confirming a cause.
+    ticket_priority: medium

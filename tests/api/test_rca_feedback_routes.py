@@ -4,11 +4,14 @@ from fastapi.testclient import TestClient
 
 from devops_agent_platform.application.security import AdministratorPrincipal
 from devops_agent_platform.application.services.rca_feedback_service import (
+    EvaluationEvidenceView,
+    RCAFeedbackEvaluationCandidateView,
     RCAFeedbackView,
 )
 from devops_agent_platform.bootstrap.app import create_app
 
 URL = "/api/v1/admin/tenants/tenant_001/workflow-runs/wfr_001/feedback"
+EXPORT_URL = f"{URL}/rcf_001/evaluation-candidate"
 NOW = datetime(2026, 7, 23, 10, 0, tzinfo=UTC)
 
 
@@ -37,6 +40,10 @@ class RecordingFeedbackService:
         self.queries.append(query)
         return (feedback_view(),)
 
+    async def get_evaluation_candidate(self, query):
+        self.queries.append(query)
+        return evaluation_candidate_view()
+
 
 def feedback_view() -> RCAFeedbackView:
     return RCAFeedbackView(
@@ -53,6 +60,39 @@ def feedback_view() -> RCAFeedbackView:
         created_by="admin_001",
         trace_id="trc_feedback_001",
         created_at=NOW,
+    )
+
+
+def evaluation_candidate_view() -> RCAFeedbackEvaluationCandidateView:
+    return RCAFeedbackEvaluationCandidateView(
+        schema_version=1,
+        case_id="rca-feedback-rcf_001",
+        workflow_run_id="wfr_001",
+        incident_id="inc_001",
+        report_id="rpt_001",
+        feedback_id="rcf_001",
+        review_required=True,
+        baseline_generator_name="deterministic",
+        baseline_generator_version="1",
+        baseline_conclusion_status="CANDIDATE",
+        baseline_title="Inventory timeout",
+        baseline_summary="Inventory pool exhausted.",
+        baseline_confidence=0.9,
+        baseline_recommendations=("Restart inventory.",),
+        verdict="PARTIAL",
+        expected_root_cause="Inventory pool exhaustion.",
+        required_evidence_ids=("evd_001",),
+        missing_evidence_types=("TRACE",),
+        unsafe_recommendation_indexes=(0,),
+        follow_up_label="needs-runbook",
+        evidence=(
+            EvaluationEvidenceView(
+                evidence_id="evd_001",
+                evidence_type="METRIC",
+                source="prometheus",
+                summary="Pool saturation increased.",
+            ),
+        ),
     )
 
 
@@ -140,3 +180,53 @@ def test_feedback_routes_require_dedicated_scopes_and_valid_indexes() -> None:
     assert forbidden.status_code == 403
     assert invalid.status_code == 422
     assert service.commands == []
+
+
+def test_export_candidate_requires_dedicated_scope_and_returns_safe_shape() -> None:
+    client, service = build_client(frozenset({"rca_feedback:export"}))
+
+    response = client.get(
+        EXPORT_URL,
+        headers={"Authorization": "Bearer admin-token"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["review_required"] is True
+    assert data["evidence"][0]["evidence_id"] == "evd_001"
+    query = service.queries[0]
+    assert query.tenant_id == "tenant_001"
+    assert query.workflow_run_id == "wfr_001"
+    assert query.feedback_id == "rcf_001"
+    assert "notes" not in data
+    assert "created_by" not in data
+    assert "trace_id" not in data
+
+    read_client, read_service = build_client(
+        frozenset({"rca_feedback:read", "rca_feedback:write"})
+    )
+    forbidden = read_client.get(
+        EXPORT_URL,
+        headers={"Authorization": "Bearer admin-token"},
+    )
+    assert forbidden.status_code == 403
+    assert read_service.queries == []
+
+
+def test_export_candidate_rejects_dirty_feedback_path() -> None:
+    client, service = build_client(frozenset({"rca_feedback:export"}))
+    headers = {"Authorization": "Bearer admin-token"}
+
+    dirty_control = client.get(
+        f"{URL}/rcf_001%7F/evaluation-candidate",
+        headers=headers,
+    )
+    dirty_space = client.get(
+        f"{URL}/rcf%20001/evaluation-candidate",
+        headers=headers,
+    )
+
+    for response in (dirty_control, dirty_space):
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "REQUEST_VALIDATION_ERROR"
+    assert service.queries == []

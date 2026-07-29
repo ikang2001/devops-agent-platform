@@ -184,6 +184,8 @@ def test_step6_productization_assets_define_feedback_eval_and_governance() -> No
     assert "partial local product surfaces implemented" in step6
     assert "Example Or Blueprint Only" in step6
     assert "Not Loaded By Runtime" in step6
+    assert "Implemented Offline (Not Loaded By Runtime)" in step6
+    assert "static Ground Truth dataset" in step6
     assert "Platform-level remediation plan API" in step6
     assert "MiniShop allowlisted remediation sandbox" in step6
     assert "Incident Workbench" in console
@@ -191,6 +193,18 @@ def test_step6_productization_assets_define_feedback_eval_and_governance() -> No
     assert "Regression Gate" in loop
     assert "Not implemented" in loop
     assert "Feature Flags" in loop
+    assert (
+        "GET /api/v1/admin/tenants/{tenant_id}/workflow-runs/"
+        "{workflow_run_id}/feedback/{feedback_id}/evaluation-candidate"
+        in loop
+    )
+    assert "rca_feedback:export" in loop
+    assert "review_required: true" in loop
+    assert "does **not** write a file" in loop
+    assert "A human must" in loop
+    assert "Explicit Offline Curation" in loop
+    assert "approved: true" in loop
+    assert "does not read PostgreSQL" in loop
     assert "governance draft only" in rag
     assert "tenant-scoped" in rag
     assert "No execution from raw LLM text" in remediation
@@ -202,12 +216,36 @@ def test_step6_productization_assets_define_feedback_eval_and_governance() -> No
     product_readme = (PRODUCT_ROOT / "README.md").read_text(encoding="utf-8")
     assert "Example / blueprint only" in product_readme
     assert "Not loaded by runtime" in product_readme
+    assert "single-feedback read-only evaluation-candidate export" in product_readme
+    assert "Automatic curation" in product_readme
+    assert "Implemented and testable offline" in product_readme
+    assert "curate_evaluation_candidate.py" in product_readme
+    assert "compare_evaluation_reports.py" in product_readme
+    assert "human release review" in product_readme
+    assert (PRODUCT_ROOT / "curate_evaluation_candidate.py").is_file()
+    assert (PRODUCT_ROOT / "evaluation-candidate.example.json").is_file()
+    assert (PRODUCT_ROOT / "compare_evaluation_reports.py").is_file()
+    assert (
+        PRODUCT_ROOT / "evaluation-responses-candidate.example.yml"
+    ).is_file()
+    assert (
+        PRODUCT_ROOT / "evaluation-curation-review.example.yml"
+    ).is_file()
 
 
 def test_step6_yaml_examples_are_versioned_and_rollout_gated() -> None:
     prompts = load_yaml(PRODUCT_ROOT / "prompt-registry.example.yml")
     flags = load_yaml(PRODUCT_ROOT / "feature-flags.example.yml")
     dataset = load_yaml(PRODUCT_ROOT / "evaluation-dataset.example.yml")
+    baseline_responses = load_yaml(
+        PRODUCT_ROOT / "evaluation-responses.example.yml"
+    )
+    candidate_responses = load_yaml(
+        PRODUCT_ROOT / "evaluation-responses-candidate.example.yml"
+    )
+    gate_policy = load_yaml(
+        PRODUCT_ROOT / "evaluation-gate-policy.example.yml"
+    )
 
     prompt = prompts["prompts"][0]
     assert prompt["version"] == "v1"
@@ -225,6 +263,19 @@ def test_step6_yaml_examples_are_versioned_and_rollout_gated() -> None:
     assert dataset["dataset_id"] == "rca_step6_baseline"
     assert dataset["version"] == "v1"
     assert all(sample["expected"]["required_evidence"] for sample in dataset["samples"])
+    assert baseline_responses["dataset_id"] == candidate_responses["dataset_id"]
+    assert (
+        baseline_responses["dataset_version"]
+        == candidate_responses["dataset_version"]
+    )
+    assert baseline_responses["run"] != candidate_responses["run"]
+
+    assert gate_policy == {
+        "schema_version": 1,
+        "minimum_overall_pass_rate": 0.95,
+        "required_forbidden_claim_free_rate": 1.0,
+        "require_no_metric_regression": True,
+    }
 
 
 def test_interview_document_keeps_project_story_and_no_overclaim_boundary() -> None:

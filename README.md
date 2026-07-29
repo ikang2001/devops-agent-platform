@@ -48,13 +48,20 @@ Step 6 mixes **implemented product surfaces** with **governance blueprints**:
 
 | Status | Capability |
 |---|---|
-| Implemented locally | Same-origin Ops Console shell, immutable RCA feedback API, opt-in Jira/ServiceNow adapters, Alertmanager multi-channel examples, MiniShop three-scenario E2E gate, approval-first remediation plan API, MiniShop allowlisted remediation sandbox |
-| Example / not wired into runtime | Prompt Registry YAML, Feature Flag YAML, offline evaluation dataset/runner, RAG governance markdown |
+| Implemented in runtime | Same-origin Ops Console shell, immutable RCA feedback API, candidate download/export, opt-in Jira/ServiceNow adapters, approval-first remediation plan API, MiniShop allowlisted remediation sandbox |
+| Implemented offline | Explicit candidate curator, static YAML evaluation runner, fail-closed baseline/candidate report gate, MiniShop three-scenario E2E gate |
+| Example / not wired into runtime | Prompt Registry YAML, Feature Flag YAML, evaluation fixture YAML, Alertmanager multi-channel example, RAG governance markdown |
 
 Do not describe Prompt Registry, Feature Flags, RAG, or the feedback→evaluation
-loop as a running product system. Feedback is persisted; automatic sample
-export, scheduled multi-variant evaluation, and flag-gated prompt rollout are
-not implemented in `src/`. See
+loop as a running product system. Feedback is persisted, and an administrator
+with `rca_feedback:export` can project one explicitly selected feedback record
+through a read-only endpoint into a machine-readable candidate marked
+`review_required: true`. A separate offline CLI requires an explicit human
+approval/privacy review, new public IDs and rewritten text before it creates a
+non-overwriting next-version dataset file. Automatic anonymization, online
+approval/publication, scheduled real-variant generation/evaluation, and
+flag-gated prompt rollout are not implemented in `src/`. The offline report
+gate can only return `HUMAN_RELEASE_REVIEW`; it never changes Prompt/Flag state. See
 [`STEP6_PRODUCTIZATION.md`](STEP6_PRODUCTIZATION.md),
 [`ops/product/README.md`](ops/product/README.md), and
 [`缺少内容.md`](缺少内容.md).
@@ -82,6 +89,11 @@ The current Step 4 implementation includes:
 - authenticated, version-fenced, idempotent Incident resolution and closure with audit
 - authenticated, idempotent RCA scheduling with transactional transitions
 - immutable, tenant-scoped RCA reviewer feedback with redaction and audit
+- dedicated-scope, read-only export of one feedback record as a re-redacted,
+  human-review-required evaluation candidate without raw Evidence content
+- Ops Console candidate download plus fail-closed offline curation into a new
+  versioned dataset file, static evaluation, and fail-closed baseline/candidate
+  comparison; no automatic approval, publication, model call, or rollout
 - authenticated, version-fenced, idempotent RCA workflow cancellation
 - atomic RCA execution claims with expiring worker leases and takeover support
 - owner-checked workflow heartbeats that stop stale or expired executors

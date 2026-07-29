@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request, status
 
 from devops_agent_platform.application.queries.rca_feedback import (
+    GetRCAFeedbackEvaluationCandidateQuery,
     ListRCAFeedbackQuery,
 )
 from devops_agent_platform.application.security import AdministratorPrincipal
@@ -20,6 +21,7 @@ from devops_agent_platform.interfaces.http.header_params import (
     IdempotencyKeyHeader,
 )
 from devops_agent_platform.interfaces.http.path_params import (
+    FeedbackPath,
     TenantPath,
     WorkflowRunPath,
 )
@@ -32,6 +34,7 @@ from devops_agent_platform.interfaces.http.responses import (
 router = APIRouter(tags=["rca-feedback"])
 _READ_SCOPE = "rca_feedback:read"
 _WRITE_SCOPE = "rca_feedback:write"
+_EXPORT_SCOPE = "rca_feedback:export"
 
 AdminPrincipalDep = Annotated[
     AdministratorPrincipal,
@@ -98,3 +101,30 @@ async def list_rca_feedback(
         {"items": [item.to_dict() for item in result]},
         get_trace_id(request),
     )
+
+
+@router.get(
+    (
+        "/admin/tenants/{tenant_id}/workflow-runs/{workflow_run_id}"
+        "/feedback/{feedback_id}/evaluation-candidate"
+    ),
+    response_model=ResponseEnvelope,
+)
+async def get_rca_feedback_evaluation_candidate(
+    tenant_id: TenantPath,
+    workflow_run_id: WorkflowRunPath,
+    feedback_id: FeedbackPath,
+    request: Request,
+    principal: AdminPrincipalDep,
+    service: RCAFeedbackServiceDep,
+) -> dict:
+    """导出仍需人工策展的评测候选，不触发模型调用或自动发布。"""
+    principal.require_tenant_scope(tenant_id, _EXPORT_SCOPE)
+    result = await service.get_evaluation_candidate(
+        GetRCAFeedbackEvaluationCandidateQuery(
+            tenant_id=tenant_id,
+            workflow_run_id=workflow_run_id,
+            feedback_id=feedback_id,
+        )
+    )
+    return success_response(result.to_dict(), get_trace_id(request))
