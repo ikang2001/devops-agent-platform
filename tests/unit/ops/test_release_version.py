@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import re
 import subprocess
 import sys
 import tomllib
@@ -86,11 +87,11 @@ def test_tag_ci_runs_release_version_and_artifact_gates() -> None:
     assert "uv build --out-dir dist" in workflow
     assert '--tag "${GITHUB_REF_NAME}" --dist-dir dist' in workflow
     assert (
-        "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
         in workflow
     )
     assert (
-        "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093"
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
         in workflow
     )
     assert "needs:\n      - test\n      - image" in workflow
@@ -98,6 +99,27 @@ def test_tag_ci_runs_release_version_and_artifact_gates() -> None:
     assert workflow.count("persist-credentials: false") == 3
     assert "overwrite: true" in workflow
     assert "scripts/publish-github-release.py" in workflow
+
+
+def test_ci_actions_are_pinned_to_reviewed_immutable_commits() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+    references = re.findall(r"(?m)^\s*-?\s*uses:\s+([^\s#]+)", workflow)
+
+    expected = {
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        "anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610",
+        "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25",
+        "astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78",
+    }
+
+    assert references
+    assert all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", ref) for ref in references)
+    assert set(references) == expected
 
 
 def test_release_publisher_generates_checksums_for_validated_assets(

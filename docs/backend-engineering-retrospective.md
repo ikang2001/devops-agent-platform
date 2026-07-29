@@ -19,7 +19,7 @@
   真实 Compose RCA 验收、演练管理员认证、逐模块代码导读，以及按单条人工反馈
   导出机器可读评测候选，以及要求显式批准、隐私复核、人工改写和 Evidence
   重映射的离线策展工具，以及只允许进入人工发布评审的离线评测报告门禁。
-- 已完成验证：平台全量 `1711 passed, 9 skipped`；MiniShop 全量
+- 已完成验证：平台全量 `1712 passed, 9 skipped`；MiniShop 全量
   `37 passed`（均使用 `-W error`）；E2E 静态资产 `3 passed`；Compose 配置展开通过；三场景真实
   Docker E2E 全部通过。
 - 端到端证据：`checkout-latency`、`inventory-db-timeout`、
@@ -38,8 +38,8 @@
 | Step 2 架构设计 | 选择原生 Alertmanager Relay、兼容 Telemetry、演练专用认证和 Compose 验收 | 现有端口/适配器边界 | 1 | 无 |
 | Step 3 代码骨架 | 新增 Alertmanager Mapper、Relay、Agent Alert Client 与路由 | Relay 定向测试 6 项通过 | 1 | 无 |
 | Step 4 增量实现 | Alertmanager Relay、兼容指标/日志、分服务 Trace、Tempo Ground Truth、演练认证、代码导读和固定调查策略接线 | C0/C1 定向测试 `190 passed`；MiniShop `37 passed` | 2 | 无 |
-| Step 5 测试排错 | 修复 FastAPI 生命周期、Buildx 路径、tmpfs 权限、Tempo Trace ID、锁定环境打包和策略解析测试假设 | 平台当前 `1711 passed, 9 skipped`；MiniShop `37 passed` | 7 | 无 |
-| Step 6 整合运维 | 真实 Compose 三场景验收、锁定镜像验证、独立 Git 基线、平台受审修复、reclaim Worker、C0/C1 文档收口、反馈候选下载、离线策展、静态评测、报告门禁和版本发布守护 | `artifacts/results.json` 中 `passed: true`；反馈/策展/评测/版本定向回归与全量 pytest 通过 | 24 | 无 |
+| Step 5 测试排错 | 修复 FastAPI 生命周期、Buildx 路径、tmpfs 权限、Tempo Trace ID、锁定环境打包和策略解析测试假设 | 平台当前 `1712 passed, 9 skipped`；MiniShop `37 passed` | 7 | 无 |
+| Step 6 整合运维 | 真实 Compose 三场景验收、锁定镜像验证、独立 Git 基线、平台受审修复、reclaim Worker、C0/C1 文档收口、反馈候选下载、离线策展、静态评测、报告门禁和版本发布守护 | `artifacts/results.json` 中 `passed: true`；反馈/策展/评测/版本定向回归与全量 pytest 通过 | 25 | 无 |
 
 ## 4. 事件索引
 
@@ -85,6 +85,7 @@
 | DEV-038 | Step 6 | 犯错 | 报告门禁误拒绝 runner 的缺失响应结果 | 已解决 | 识别全组件失败的缺失响应语义并补 runner→门禁回归测试 |
 | DEV-039 | Step 6 | 犯错 | GitHub Release 审计使用不受支持字段 | 已解决 | 改用当前 `gh` 支持字段确认 v0.3.0 Release 已发布 |
 | DEV-040 | Step 6 | 踩坑 | 发布产物校验误拒绝 uv 生成的隐藏文件 | 已解决 | 忽略隐藏管理文件，继续严格校验两个非隐藏构建产物 |
+| DEV-041 | Step 6 | 技术债 | Tag CI 使用 Node.js 20 Action 且部分引用可变 | 已解决 | 升级到 Node.js 24 兼容版本并把全部第三方 Action 固定到已审查提交 |
 
 ## 5. 事件详情
 
@@ -772,6 +773,24 @@
 | 残余风险 | 其它隐藏文件不会作为发布资产校验；CI/Release 上传逻辑仍只引用显式 wheel/sdist |
 | 预防措施 | 对工具生成目录做契约测试时覆盖工具自身的隐藏元数据，不用手工目录假设代替实跑 |
 
+### DEV-041：Tag CI 使用 Node.js 20 Action 且部分引用可变
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-29 / Step 6 |
+| 模块 | `.github/workflows/ci.yml` |
+| 分类 | 技术债 |
+| 状态 | 已解决 |
+| 现象与证据 | `v0.3.2` Tag CI 成功，但 GitHub 对 checkout、setup-python 和 artifact Action 发出 Node.js 20 弃用警告；setup-uv 与 SBOM 仍使用可移动主版本引用 |
+| 影响 | 当前发布结果不受影响；未来 Runner 移除兼容层后会增加 CI 失效风险，可移动引用还会削弱供应链可复现性 |
+| 排查过程 | 从各官方 Action 仓库读取最新 Release、Tag 对应提交、`action.yml` 运行时和输入契约，并核对现有工作流实际使用的输入 |
+| 根因 | 工作流沿用旧主版本和浮动 `@v*` 引用，未把 Action 运行时与不可变来源纳入自动化守护 |
+| 解决方案 | checkout v7.0.1、setup-python v7.0.0、upload-artifact v7.0.1、download-artifact v8.0.1、sbom-action v0.24.0 固定到不可变 SHA；setup-uv 固定到 Node.js 24 的 v7.6.0，避免顺带引入 v9 缓存破坏性变化 |
+| 涉及位置 | `.github/workflows/ci.yml`、`tests/unit/ops/test_release_version.py` |
+| 验证证据 | CI YAML 解析、已审查 SHA 精确集合测试、全量回归、真实 `v0.3.3` Tag CI |
+| 残余风险 | Action 升级仍需定期人工审查 Release Notes；不可变 SHA 防漂移但不会自动获得上游安全修复 |
+| 预防措施 | 测试要求全部 `uses:` 同时满足 40 位 SHA 和已审查集合；升级时必须同步版本注释、SHA 集合与真实 Tag 门禁 |
+
 ## 6. 分类汇总
 
 ### 踩坑
@@ -845,6 +864,7 @@
 | DEBT-002 | 开发依赖和 Ruff 未精确锁定 | 已解决 | 根平台与 MiniShop 各自提交 `uv.lock`；CI/Docker 使用 `uv 0.11.31 --locked`；Ruff 固定 `0.15.22` | 两个 lock check、隔离环境全量测试、Ruff、锁定版 Docker E2E 均通过 |
 | DEBT-003 | Git Release 与根平台包/API/部署版本漂移 | 已解决 | `pyproject.toml` 作为唯一版本源；锁文件、FastAPI、Kubernetes 示例统一为 `0.3.1`，Tag CI 校验版本与 wheel/sdist | 版本定向测试、真实 `uv build`、Tag 工作流和全量门禁 |
 | DEBT-004 | GitHub Release 页面没有可下载的 Python 包和独立校验和 | 已解决 | Tag CI 暂存已校验的 wheel/sdist；测试、镜像、SBOM 和漏洞门禁全部通过后，以最小写权限发布包与 `SHA256SUMS`；同名不同内容失败关闭 | 发布器单测、工作流守护测试，以及 `v0.3.2` Tag 的真实发布 CI |
+| DEBT-005 | CI Action 运行时弃用且供应链引用可变 | 已解决 | Node.js Action 升级到已审查的 Node.js 24 版本；全部第三方 Action 使用不可变提交 SHA，setup-uv 保留兼容的 v7.6.0 | 已审查 SHA 集合测试、全量回归与 `v0.3.3` Tag 的真实 CI |
 
 ## 10. 最终复盘
 
@@ -868,7 +888,7 @@
 
 ### 验证与已知限制
 
-- 已完成验证：平台 `1711 passed, 9 skipped`，MiniShop `37 passed`，
+- 已完成验证：平台 `1712 passed, 9 skipped`，MiniShop `37 passed`，
   E2E 资产 `3 passed`，Ruff check 和 Compose config 通过。
 - 已完成真实链路：三份 Manifest 均在重建后的 Docker 环境得到
   `SUCCEEDED` Workflow 与四类 Evidence，结果文件 `passed: true`。
