@@ -645,6 +645,21 @@ After intentionally changing a dependency constraint, regenerate both locks
 with `.\scripts\update-lockfiles.ps1`; pass `-Upgrade` only for an intentional
 dependency refresh. CI rejects stale lock files through `uv sync --locked`.
 
+`pyproject.toml` is the root platform release-version source of truth. The
+installed package exposes the same value as `devops_agent_platform.__version__`;
+FastAPI/OpenAPI, `uv.lock`, and the Kubernetes example image tags are guarded
+against that value by tests. MiniShop and `故障排除/step3` remain independent
+projects with their own versions. Before publishing an annotated Tag, run:
+
+```powershell
+uv build --out-dir dist
+uv run python scripts/check-release-version.py `
+  --tag v0.3.1 --dist-dir dist
+```
+
+Tag pushes also run this check in CI. GitHub Release pages are published from
+the immutable annotated Tag only after the tag workflow succeeds.
+
 The test suite verifies that Alembic has one linear Head and compiles the full
 `base -> head` chain with the PostgreSQL dialect in offline mode. SQLite is used
 for fast unit-level persistence tests, but it is not the production migration

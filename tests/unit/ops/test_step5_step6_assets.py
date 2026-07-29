@@ -1,3 +1,4 @@
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,11 @@ def load_yaml(path: Path) -> dict[str, Any]:
     value = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(value, dict), path
     return value
+
+
+def project_version() -> str:
+    with (ROOT / "pyproject.toml").open("rb") as stream:
+        return tomllib.load(stream)["project"]["version"]
 
 
 def test_step5_container_image_is_non_root_and_uses_real_app_entrypoint() -> None:
@@ -75,6 +81,9 @@ def test_step5_kubernetes_manifests_keep_security_and_release_gates() -> None:
     deployment = load_yaml(K8S_ROOT / "deployment.yaml")
     pod_spec = deployment["spec"]["template"]["spec"]
     container = pod_spec["containers"][0]
+    expected_image = (
+        f"registry.example.com/devops-agent-platform:{project_version()}"
+    )
     assert pod_spec["securityContext"]["runAsNonRoot"] is True
     assert pod_spec["automountServiceAccountToken"] is False
     assert container["securityContext"]["readOnlyRootFilesystem"] is True
@@ -83,8 +92,13 @@ def test_step5_kubernetes_manifests_keep_security_and_release_gates() -> None:
     assert container["readinessProbe"]["httpGet"]["path"] == "/readyz"
     assert container["livenessProbe"]["httpGet"]["path"] == "/healthz"
     assert container["resources"]["requests"]["cpu"]
+    assert container["image"] == expected_image
 
     migration = load_yaml(K8S_ROOT / "migration-job.yaml")
+    assert (
+        migration["spec"]["template"]["spec"]["containers"][0]["image"]
+        == expected_image
+    )
     assert migration["spec"]["template"]["spec"]["containers"][0]["command"] == [
         "python",
         "-m",

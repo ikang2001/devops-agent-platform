@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from devops_agent_platform import __version__
 from devops_agent_platform.bootstrap import app as app_module
 from devops_agent_platform.bootstrap.app import create_app
 from devops_agent_platform.bootstrap.dependencies import (
@@ -44,6 +45,12 @@ class FakeRuntime:
     async def check_readiness(self) -> ReadinessSnapshot:
         """返回不访问外部依赖的正常就绪快照。"""
         return self.readiness_snapshot
+
+
+def test_openapi_version_uses_installed_package_metadata() -> None:
+    app = create_app(runtime_enabled=False)
+
+    assert app.version == __version__
 
 
 def test_production_cannot_disable_runtime_and_fall_back_to_skeleton() -> None:

@@ -35,6 +35,7 @@ def test_project_lock_contains_project_and_pinned_ruff(
         if "version" in package
     }
     assert project_name in packages
+    assert packages[project_name] == pyproject["project"]["version"]
     assert packages["ruff"] == RUFF_VERSION
 
 

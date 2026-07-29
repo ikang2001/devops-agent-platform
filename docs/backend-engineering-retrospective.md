@@ -19,7 +19,7 @@
   真实 Compose RCA 验收、演练管理员认证、逐模块代码导读，以及按单条人工反馈
   导出机器可读评测候选，以及要求显式批准、隐私复核、人工改写和 Evidence
   重映射的离线策展工具，以及只允许进入人工发布评审的离线评测报告门禁。
-- 已完成验证：平台全量 `1699 passed, 9 skipped`；MiniShop 全量
+- 已完成验证：平台全量 `1704 passed, 9 skipped`；MiniShop 全量
   `37 passed`（均使用 `-W error`）；E2E 静态资产 `3 passed`；Compose 配置展开通过；三场景真实
   Docker E2E 全部通过。
 - 端到端证据：`checkout-latency`、`inventory-db-timeout`、
@@ -38,8 +38,8 @@
 | Step 2 架构设计 | 选择原生 Alertmanager Relay、兼容 Telemetry、演练专用认证和 Compose 验收 | 现有端口/适配器边界 | 1 | 无 |
 | Step 3 代码骨架 | 新增 Alertmanager Mapper、Relay、Agent Alert Client 与路由 | Relay 定向测试 6 项通过 | 1 | 无 |
 | Step 4 增量实现 | Alertmanager Relay、兼容指标/日志、分服务 Trace、Tempo Ground Truth、演练认证、代码导读和固定调查策略接线 | C0/C1 定向测试 `190 passed`；MiniShop `37 passed` | 2 | 无 |
-| Step 5 测试排错 | 修复 FastAPI 生命周期、Buildx 路径、tmpfs 权限、Tempo Trace ID、锁定环境打包和策略解析测试假设 | 平台当前 `1699 passed, 9 skipped`；MiniShop `37 passed` | 7 | 无 |
-| Step 6 整合运维 | 真实 Compose 三场景验收、锁定镜像验证、独立 Git 基线、平台受审修复、reclaim Worker、C0/C1 文档收口、反馈候选下载、离线策展、静态评测与报告门禁 | `artifacts/results.json` 中 `passed: true`；反馈/策展/评测门禁定向回归与全量 pytest 通过 | 22 | 无 |
+| Step 5 测试排错 | 修复 FastAPI 生命周期、Buildx 路径、tmpfs 权限、Tempo Trace ID、锁定环境打包和策略解析测试假设 | 平台当前 `1704 passed, 9 skipped`；MiniShop `37 passed` | 7 | 无 |
+| Step 6 整合运维 | 真实 Compose 三场景验收、锁定镜像验证、独立 Git 基线、平台受审修复、reclaim Worker、C0/C1 文档收口、反馈候选下载、离线策展、静态评测、报告门禁和版本发布守护 | `artifacts/results.json` 中 `passed: true`；反馈/策展/评测/版本定向回归与全量 pytest 通过 | 24 | 无 |
 
 ## 4. 事件索引
 
@@ -83,6 +83,8 @@
 | DEV-036 | Step 6 | 犯错 | 最终审计再次使用未转义复合正则 | 已解决 | 改用 `Select-String -SimpleMatch` 完成审计 |
 | DEV-037 | Step 6 | 犯错 | 评测门禁文档改写破坏治理术语守护 | 已解决 | 恢复 `Feature Flags` 明确表述并重跑产品资产组合回归 |
 | DEV-038 | Step 6 | 犯错 | 报告门禁误拒绝 runner 的缺失响应结果 | 已解决 | 识别全组件失败的缺失响应语义并补 runner→门禁回归测试 |
+| DEV-039 | Step 6 | 犯错 | GitHub Release 审计使用不受支持字段 | 已解决 | 改用当前 `gh` 支持字段确认 v0.3.0 Release 已发布 |
+| DEV-040 | Step 6 | 踩坑 | 发布产物校验误拒绝 uv 生成的隐藏文件 | 已解决 | 忽略隐藏管理文件，继续严格校验两个非隐藏构建产物 |
 
 ## 5. 事件详情
 
@@ -734,6 +736,42 @@
 | 残余风险 | 报告没有单独的 `response_present` 字段，只能从 runner 的全失败结果识别；该结果始终失败，不会放宽晋级门禁 |
 | 预防措施 | 对比工具必须复用或逐分支覆盖上游报告生成器的完整输出契约，包括缺失样本路径 |
 
+### DEV-039：GitHub Release 审计使用不受支持字段
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-29 / Step 6 |
+| 模块 | GitHub Release 发布后审计 |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | `gh release view` 拒绝 `isLatest` 字段；同批次的 `gh release create` 已成功完成 |
+| 影响 | 只读审计非零退出；Tag 和已发布 Release 未受影响 |
+| 排查过程 | 用 `gh release view` 返回的可用字段清单修正查询，并先列出 Release 防止重复创建 |
+| 根因 | 混用了 `gh release list` 与 `gh release view` 的 JSON 字段集合 |
+| 解决方案 | 使用 `tagName/name/isDraft/isPrerelease/publishedAt/url/targetCommitish` 重新审计 |
+| 涉及位置 | GitHub Release `v0.3.0` |
+| 验证证据 | Release 非草稿、非预发布，页面为 `releases/tag/v0.3.0` |
+| 残余风险 | 无仓库运行时风险 |
+| 预防措施 | 调用 `gh --json` 前按当前子命令支持字段构造查询，不跨子命令复用字段 |
+
+### DEV-040：发布产物校验误拒绝 uv 生成的隐藏文件
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-07-29 / Step 6 |
+| 模块 | `scripts/check-release-version.py` |
+| 分类 | 踩坑 |
+| 状态 | 已解决 |
+| 现象与证据 | `uv build --out-dir <新目录>` 成功生成 `0.3.1` wheel/sdist，同时自动创建 `.gitignore`；首版校验器报告 `unexpected=['.gitignore']` |
+| 影响 | 正确构建被版本门禁误拒绝；没有错误产物被接受或发布 |
+| 排查过程 | 核对构建成功行和校验器实际文件集合，确认唯一额外项为 uv 的隐藏管理文件 |
+| 根因 | 校验器把输出目录全部文件都当成发布产物，没有区分隐藏管理文件 |
+| 解决方案 | 只对非隐藏文件执行精确集合校验；仍要求且只允许匹配版本的 wheel 和 sdist |
+| 涉及位置 | `scripts/check-release-version.py`、`tests/unit/ops/test_release_version.py` |
+| 验证证据 | 测试夹具加入 `.gitignore`；真实 `uv build` 后重新运行门禁 |
+| 残余风险 | 其它隐藏文件不会作为发布资产校验；CI/Release 上传逻辑仍只引用显式 wheel/sdist |
+| 预防措施 | 对工具生成目录做契约测试时覆盖工具自身的隐藏元数据，不用手工目录假设代替实跑 |
+
 ## 6. 分类汇总
 
 ### 踩坑
@@ -805,6 +843,7 @@
 |---|---|---|---|---|
 | DEBT-001 | 项目没有独立 Git HEAD | 已解决 | 在项目根目录初始化独立 `main` 仓库，提交前排除 `.env`、虚拟环境、缓存和临时输出 | `git rev-parse --show-toplevel` 指向当前项目；基线提交后工作区干净 |
 | DEBT-002 | 开发依赖和 Ruff 未精确锁定 | 已解决 | 根平台与 MiniShop 各自提交 `uv.lock`；CI/Docker 使用 `uv 0.11.31 --locked`；Ruff 固定 `0.15.22` | 两个 lock check、隔离环境全量测试、Ruff、锁定版 Docker E2E 均通过 |
+| DEBT-003 | Git Release 与根平台包/API/部署版本漂移 | 已解决 | `pyproject.toml` 作为唯一版本源；锁文件、FastAPI、Kubernetes 示例统一为 `0.3.1`，Tag CI 校验版本与 wheel/sdist | 版本定向测试、真实 `uv build`、Tag 工作流和全量门禁 |
 
 ## 10. 最终复盘
 
@@ -828,7 +867,7 @@
 
 ### 验证与已知限制
 
-- 已完成验证：平台 `1699 passed, 9 skipped`，MiniShop `37 passed`，
+- 已完成验证：平台 `1704 passed, 9 skipped`，MiniShop `37 passed`，
   E2E 资产 `3 passed`，Ruff check 和 Compose config 通过。
 - 已完成真实链路：三份 Manifest 均在重建后的 Docker 环境得到
   `SUCCEEDED` Workflow 与四类 Evidence，结果文件 `passed: true`。

@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from devops_agent_platform import __version__
 from devops_agent_platform.bootstrap.dependencies import (
     build_skeleton_alert_service,
     build_skeleton_rca_service,
@@ -206,7 +207,7 @@ def create_app(
 
     app = FastAPI(
         title="DevOps Intelligent Troubleshooting Agent Platform",
-        version="0.1.0",
+        version=__version__,
         lifespan=lifespan if runtime_enabled else None,
     )
     app.state.runtime = None
