@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import json
 import re
 import subprocess
 import sys
@@ -96,9 +97,36 @@ def test_tag_ci_runs_release_version_and_artifact_gates() -> None:
     )
     assert "needs:\n      - test\n      - image" in workflow
     assert workflow.count("contents: write") == 1
-    assert workflow.count("persist-credentials: false") == 3
+    assert workflow.count("persist-credentials: false") == workflow.count(
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    )
     assert "overwrite: true" in workflow
     assert "scripts/publish-github-release.py" in workflow
+    assert workflow.count(
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+    ) == 2
+    assert "name: image-sbom-${{ github.sha }}" in workflow
+    assert "--sbom-path \"release-metadata/sbom.spdx.json\"" in workflow
+
+
+def test_ci_runs_compatibility_and_supply_chain_gates() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "python-311-compatibility:" in workflow
+    assert 'python-version: "3.11"' in workflow
+    assert 'uv run pytest -q -m "not live"' in workflow
+    assert "alembic-upgrade-py311.sql" in workflow
+    assert "security:" in workflow
+    assert workflow.count("pip-audit==2.10.1") == 2
+    assert "scanners: secret" in workflow
+    assert (
+        "needs:\n      - test\n      - python-311-compatibility\n"
+        "      - security"
+    ) in workflow
+    assert "name: image-sbom-${{ github.sha }}" in workflow
+    assert "retention-days: 90" in workflow
 
 
 def test_ci_actions_are_pinned_to_reviewed_immutable_commits() -> None:
@@ -149,6 +177,82 @@ def test_release_publisher_generates_checksums_for_validated_assets(
     repeated = publisher.prepare_release_assets(f"v{version}", tmp_path)
 
     assert [path.name for path in repeated] == [path.name for path in prepared]
+
+
+def test_release_publisher_includes_validated_image_sbom(tmp_path: Path) -> None:
+    publisher = load_publisher()
+    version = project_version()
+    artifacts = [
+        tmp_path / f"devops_agent_platform-{version}-py3-none-any.whl",
+        tmp_path / f"devops_agent_platform-{version}.tar.gz",
+    ]
+    for index, path in enumerate(artifacts):
+        path.write_bytes(f"artifact-{index}".encode())
+    metadata_dir = tmp_path / "release-metadata"
+    metadata_dir.mkdir()
+    sbom_path = metadata_dir / "sbom.spdx.json"
+    sbom_path.write_text(
+        json.dumps(
+            {
+                "spdxVersion": "SPDX-2.3",
+                "SPDXID": "SPDXRef-DOCUMENT",
+                "packages": [{"name": "devops-agent-platform"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    prepared = publisher.prepare_release_assets(
+        f"v{version}",
+        tmp_path,
+        sbom_path=sbom_path,
+    )
+
+    assert {path.name for path in prepared} == {
+        artifacts[0].name,
+        artifacts[1].name,
+        "sbom.spdx.json",
+        "SHA256SUMS",
+    }
+    digest = hashlib.sha256(sbom_path.read_bytes()).hexdigest()
+    checksums = (tmp_path / "SHA256SUMS").read_text(encoding="utf-8")
+    assert f"{digest}  sbom.spdx.json\n" in checksums
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        [],
+        {"spdxVersion": "SPDX-3.0", "SPDXID": "SPDXRef-DOCUMENT"},
+        {
+            "spdxVersion": "SPDX-2.3",
+            "SPDXID": "SPDXRef-DOCUMENT",
+            "packages": [],
+        },
+    ],
+)
+def test_release_publisher_rejects_invalid_image_sbom(
+    tmp_path: Path,
+    document: object,
+) -> None:
+    publisher = load_publisher()
+    version = project_version()
+    for name in (
+        f"devops_agent_platform-{version}-py3-none-any.whl",
+        f"devops_agent_platform-{version}.tar.gz",
+    ):
+        (tmp_path / name).touch()
+    metadata_dir = tmp_path / "release-metadata"
+    metadata_dir.mkdir()
+    sbom_path = metadata_dir / "sbom.spdx.json"
+    sbom_path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="image SBOM"):
+        publisher.prepare_release_assets(
+            f"v{version}",
+            tmp_path,
+            sbom_path=sbom_path,
+        )
 
 
 class FakeReleaseClient:

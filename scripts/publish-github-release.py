@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,7 @@ from typing import Protocol
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR_PATH = PROJECT_ROOT / "scripts" / "check-release-version.py"
 CHECKSUMS_NAME = "SHA256SUMS"
+SBOM_NAME = "sbom.spdx.json"
 RELEASE_TITLE = "DevOps Controlled RCA Platform"
 
 
@@ -98,12 +100,20 @@ class GitHubCliReleaseClient:
         )
 
 
-def prepare_release_assets(tag: str, dist_dir: Path) -> list[Path]:
+def prepare_release_assets(
+    tag: str,
+    dist_dir: Path,
+    *,
+    sbom_path: Path | None = None,
+) -> list[Path]:
     checksums_path = dist_dir / CHECKSUMS_NAME
     checksums_path.unlink(missing_ok=True)
     validator = _load_validator()
     result = validator.validate_release(tag, dist_dir=dist_dir)
     artifacts = [dist_dir / name for name in result["artifacts"]]
+    if sbom_path is not None:
+        _validate_sbom(sbom_path)
+        artifacts.append(sbom_path)
     checksums = [f"{_sha256(path)}  {path.name}" for path in artifacts]
     checksums_path.write_text("\n".join(checksums) + "\n", encoding="utf-8")
     return [*artifacts, checksums_path]
@@ -150,6 +160,27 @@ def _require_matching_asset(local: Path, remote: Path) -> None:
         )
 
 
+def _validate_sbom(path: Path) -> None:
+    if path.name != SBOM_NAME:
+        raise ValueError(f"image SBOM must be named {SBOM_NAME}")
+    try:
+        with path.open(encoding="utf-8") as stream:
+            document = json.load(stream)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"could not read image SBOM from {path}") from exc
+
+    if not isinstance(document, dict):
+        raise ValueError("image SBOM must be an SPDX JSON object")
+    spdx_version = document.get("spdxVersion")
+    if not isinstance(spdx_version, str) or not spdx_version.startswith("SPDX-2."):
+        raise ValueError("image SBOM must declare an SPDX 2.x version")
+    if document.get("SPDXID") != "SPDXRef-DOCUMENT":
+        raise ValueError("image SBOM must declare SPDXRef-DOCUMENT")
+    packages = document.get("packages")
+    if not isinstance(packages, list) or not packages:
+        raise ValueError("image SBOM must contain at least one package")
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -164,11 +195,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--tag", required=True)
     parser.add_argument("--dist-dir", required=True, type=Path)
+    parser.add_argument("--sbom-path", type=Path)
     parser.add_argument("--repository", required=True)
     args = parser.parse_args(argv)
 
     try:
-        assets = prepare_release_assets(args.tag, args.dist_dir)
+        assets = prepare_release_assets(
+            args.tag,
+            args.dist_dir,
+            sbom_path=args.sbom_path,
+        )
         client = GitHubCliReleaseClient(args.repository)
         uploaded = publish_release_assets(client, args.tag, assets)
     except subprocess.CalledProcessError as exc:

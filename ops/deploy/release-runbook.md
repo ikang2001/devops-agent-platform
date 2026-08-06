@@ -62,6 +62,8 @@ scan gates.
 
 ## Post-Release Evidence
 
+- GitHub Release assets include the wheel, source distribution, image
+  `sbom.spdx.json`, and `SHA256SUMS`; the checksum file covers all three payloads.
 - `/readyz` snapshot.
 - Grafana dashboard screenshot or link.
 - k6 summary for the release capacity tier.
