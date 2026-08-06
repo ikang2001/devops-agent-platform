@@ -654,7 +654,7 @@ projects with their own versions. Before publishing an annotated Tag, run:
 ```powershell
 uv build --out-dir dist
 uv run python scripts/check-release-version.py `
-  --tag v0.3.3 --dist-dir dist
+  --tag v0.3.4 --dist-dir dist
 ```
 
 Tag pushes also run this check in CI. After tests, the container build, SBOM
