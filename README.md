@@ -1,531 +1,174 @@
-# DevOps Controlled RCA Pipeline Platform
+# DevOps 智能排障 Agent 平台
 
-This repository is a **production-oriented incident and RCA job orchestration
-backend**, not a free-form autonomous troubleshooting agent and not a general
-automated remediation engine.
+> 生产导向的 Incident / 受控 RCA 作业编排平台。
+> 它不是自由式自主 Agent，也不是通用自动修复引擎。
 
-Honest product name for interviews and design reviews:
+平台把告警接入、Incident 管理、只读证据采集、RCA 报告、人工反馈、工单草稿和审批式修复计划串成一条可审计链路。核心工程能力包括 Outbox、幂等、租约、Owner/Attempt Fence、审批门禁、低基数监控和敏感信息脱敏。
 
-> Controlled observability collection pipeline + reliable workflow backend
-> (Outbox, leases, idempotency, approval gates), with optional LLM report
-> packaging and human-reviewed remediation plans.
+默认 RCA 使用服务端发布的固定只读计划：
 
-The default RCA path is a **fixed server-published read-only plan**:
-metrics → logs → traces → runbooks. LLM output is a structured candidate for
-human review and cannot confirm a root cause. Alert ingestion does not
-auto-start RCA unless an explicit operator action (or a future policy switch)
-does so.
+```text
+Metrics → Logs → Traces → Runbooks → Evidence → RCA Report
+```
 
-Deployments may select one of three server-published static plans. The two
-trace-free variants omit Tempo but remain fixed metrics → logs → runbooks
-workflows; they are not adaptive tool selection. Read-only step-failure
-continuation is separately opt-in and defaults to fail-fast. A partial report
-must cite at least one collected Evidence item, carries the failed step IDs,
-is confidence-capped at `0.4`, and cannot be `CONFIRMED`.
+LLM 只负责生成供人工复核的结构化候选报告，不能把根因标记为 `CONFIRMED`。告警接入也不会自动启动 RCA，必须由授权操作员显式触发，或由未来单独接线的策略开关触发。
 
-## Step 4 Status
+## 快速导航
 
-The Step 4 engineering implementation and repeatable acceptance harness are
-complete. Automated local acceptance covers the full test suite, Ruff, the
-linear PostgreSQL migration chain, monitoring asset contracts, Prometheus rule
-validation, input-boundary property tests, production Skeleton isolation, and
-source guards against raw exception logging. Real PostgreSQL, Kafka, OIDC,
-observability, LLM, ticketing, load, and fault-injection sign-off must still be
-executed in the target environment; see
-[`STEP4_ACCEPTANCE.md`](STEP4_ACCEPTANCE.md) and
-[`ops/acceptance/README.md`](ops/acceptance/README.md).
-
-## Step 5 And Step 6 Status
-
-Step 5 productionization **examples** are present: a multi-stage non-root
-`Dockerfile`, production rehearsal Compose stack, Kubernetes skeleton manifests,
-CI quality and supply-chain gates, and release, rollback, capacity, backup, and
-restore runbooks. These are deployable starting points, not a signed production
-topology. See [`STEP5_PRODUCTION.md`](STEP5_PRODUCTION.md) and
-[`ops/deploy/README.md`](ops/deploy/README.md).
-
-Step 6 mixes **implemented product surfaces** with **governance blueprints**:
-
-| Status | Capability |
+| 内容 | 入口 |
 |---|---|
-| Implemented in runtime | Same-origin Ops Console shell, immutable RCA feedback API, candidate download/export, opt-in Jira/ServiceNow adapters, approval-first remediation plan API, MiniShop allowlisted remediation sandbox |
-| Implemented offline | Explicit candidate curator, static YAML evaluation runner, fail-closed baseline/candidate report gate, MiniShop three-scenario E2E gate |
-| Example / not wired into runtime | Prompt Registry YAML, Feature Flag YAML, evaluation fixture YAML, Alertmanager multi-channel example, RAG governance markdown |
+| 当前完成度与禁止话术 | [缺少内容.md](缺少内容.md) |
+| Step 4 验收 | [STEP4_ACCEPTANCE.md](STEP4_ACCEPTANCE.md) |
+| Step 5 部署与生产化资产 | [STEP5_PRODUCTION.md](STEP5_PRODUCTION.md) |
+| Step 6 产品化边界 | [STEP6_PRODUCTIZATION.md](STEP6_PRODUCTIZATION.md) |
+| 最小改造总计划 | [docs/remediation-roadmap-master-plan.md](docs/remediation-roadmap-master-plan.md) |
+| MiniShop 端到端 RCA 导读 | [docs/minishop-e2e-rca-code-tour.md](docs/minishop-e2e-rca-code-tour.md) |
+| 部署说明 | [ops/deploy/README.md](ops/deploy/README.md) |
+| 运维 Runbook | [ops/runbooks](ops/runbooks) |
 
-Do not describe Prompt Registry, Feature Flags, RAG, or the feedback→evaluation
-loop as a running product system. Feedback is persisted, and an administrator
-with `rca_feedback:export` can project one explicitly selected feedback record
-through a read-only endpoint into a machine-readable candidate marked
-`review_required: true`. A separate offline CLI requires an explicit human
-approval/privacy review, new public IDs and rewritten text before it creates a
-non-overwriting next-version dataset file. Automatic anonymization, online
-approval/publication, scheduled real-variant generation/evaluation, and
-flag-gated prompt rollout are not implemented in `src/`. The offline report
-gate can only return `HUMAN_RELEASE_REVIEW`; it never changes Prompt/Flag state. See
-[`STEP6_PRODUCTIZATION.md`](STEP6_PRODUCTIZATION.md),
-[`ops/product/README.md`](ops/product/README.md), and
-[`缺少内容.md`](缺少内容.md).
+## 项目定位与诚实边界
 
-The remaining boundary is external acceptance plus the incomplete product loop
-above. Real vendor credentials, notification endpoints, OIDC, and staging
-infrastructure are intentionally absent from the repository. The platform
-remediation path has PostgreSQL plan state, tenant policy, ETags, idempotency,
-evidence gates, human approval, a fixed HTTP controller adapter, an action
-catalog, maintenance windows, and a default-off kill switch. The repository
-still has no Kubernetes, cloud, SSH, shell, or arbitrary-command production
-write adapter, so it must not be described as a general automated remediation
-engine.
+面试、设计评审和项目介绍建议使用下面这句话：
 
-The current Step 4 implementation includes:
+> 这是一个生产导向的 Incident / RCA 作业编排后端：通过固定只读调查计划收集可追溯 Evidence，使用 Outbox、租约、幂等和审批机制保证关键流程可靠，并支持可选 LLM 报告封装和人工审核修复计划。
 
-- `GET /healthz`, `GET /readyz`, and `GET /metrics`
-- production startup guard that rejects Skeleton runtime fallback
-- bounded, concurrency-safe business API rate limiting with fixed-cardinality logs
-- property-based C0/DEL and sensitive-value boundary tests
-- structured JSON logs with request trace IDs and bounded access logging
-- redacted HTTP error envelopes for application exception messages
-- PostgreSQL alert ingestion with idempotency and incident correlation
-- tenant-scoped Incident read and cursor-paginated list APIs
-- authenticated, version-fenced, idempotent Incident resolution and closure with audit
-- authenticated, idempotent RCA scheduling with transactional transitions
-- immutable, tenant-scoped RCA reviewer feedback with redaction and audit
-- dedicated-scope, read-only export of one feedback record as a re-redacted,
-  human-review-required evaluation candidate without raw Evidence content
-- Ops Console candidate download plus fail-closed offline curation into a new
-  versioned dataset file, static evaluation, and fail-closed baseline/candidate
-  comparison; no automatic approval, publication, model call, or rollout
-- authenticated, version-fenced, idempotent RCA workflow cancellation
-- atomic RCA execution claims with expiring worker leases and takeover support
-- owner-checked workflow heartbeats that stop stale or expired executors
-- fenced workflow completion for successful and failed RCA attempts
-- versioned `rca.requested` consumer contracts and canceled-duplicate dispatch
-- manual-commit Kafka polling with rewind-on-retry and reliable dead letters
-- redacted retry and dead-letter reason summaries for raw message processors
-- redacted background Worker health and Outbox retry/failure error summaries
-- cooperative RCA consumer runner with backoff, health, and Runtime supervision
-- opt-in production RCA consumer assembly with strict configuration validation
-- low-cardinality RCA consumer metrics, alerts, and failure runbooks
-- bounded Kafka consumer Lag aggregation without partition labels
-- Agent execution coordination with heartbeat cancellation and fenced completion
-- configurable fixed read-only Agent plans with tool version, permission, risk, and timeout gates
-- opt-in partial read-only collection with zero-evidence failure and confidence guardrails
-- optional structured LLM RCA reports with timeout, circuit breaker, and fallback
-- low-cardinality LLM success, fallback, circuit, and latency metrics
-- transactional Outbox persistence, leasing, Kafka publication, and retries
-- graceful application lifecycle and Outbox Worker shutdown
-- opt-in audit retention Worker with bounded RCA audit cleanup batches
-- low-cardinality audit retention metrics, alerts, runbook, and dashboard panels
-- opt-in remediation lease reclaim Worker with bounded polling and fenced failure closure
-- low-cardinality remediation reclaim health, metrics, alerts, and failure runbook
-- bounded Prometheus Metrics, Loki Logs, and Tempo Traces read-only adapters
-- tenant-scoped, versioned, bounded read-only Runbook retrieval
-- authenticated Runbook draft and publication workflow with aggregate ETags
-- RCA-derived, idempotent local Ticket Draft creation and read APIs
-- version-fenced, idempotent human approval or rejection of Ticket Drafts
-- idempotent external Ticket submission request recording through Outbox
-- tenant-scoped Ticket submission status query API with bounded results
-- bounded Ticket submission requested-message handling behind a ticketing port
-- ticket submission raw-message ACK, retry, and dead-letter classification
-- manual-commit Ticket submission Kafka adapter with rewind-on-retry
-- opt-in Ticket submission consumer assembly requiring a ticketing gateway
-- cooperative Ticket submission consumer runner with backoff and Runtime health
-- bounded HTTP JSON TicketingGateway adapter with idempotency and trace headers
-- opt-in bounded Jira Cloud and ServiceNow direct TicketingGateway adapters
-- low-cardinality HTTP JSON TicketingGateway metrics, alerts, and dashboard panels
-- low-cardinality Ticket submission consumer metrics, Lag aggregation, alerts, runbook, and dashboard panels
-- idempotent Runbook draft and atomic publication management services
-- tenant-scoped Remediation Plan API with evidence gates, action catalog,
-  ETags, idempotency, approval separation, maintenance window, and kill switch
-- bounded HTTP RemediationExecutor adapter that only sends structured
-  pre-registered action keys to a fixed controller origin
-- Prometheus recording rules, alerts, and a provisioned Grafana dashboard
-- opt-in live PostgreSQL, Kafka, and external HTTP adapter acceptance tests
-- k6 latency/capacity thresholds and deployment-neutral fault recovery probes
-- same-origin Ops Console for Incident, RCA, feedback, ticket, and remediation workflows
-- allowlisted MiniShop SQLite remediation planning, approval, execution, rollback, and audit
+可以说明平台已经具备：
 
-## Architecture Boundary
+- 固定、受权限控制的只读 RCA 调查计划；
+- 可选的部分采集降级和置信度护栏；
+- PostgreSQL、Kafka、Prometheus、Loki、Tempo 的端口与适配器；
+- 工单提交、人工反馈、审批式修复计划和 MiniShop 演练闭环；
+- 可本地验证的测试、迁移、镜像、SBOM 和安全扫描门禁。
 
-- `interfaces`: HTTP DTOs, routers, middleware, exception handlers.
-- `application`: use-case commands and orchestration services.
-- `domain`: pure domain models, enums, and application exceptions.
-- `ports`: outbound contracts consumed by application services.
-- `infrastructure`: config, database models/repositories, logging context,
-  observability, notification, ticketing, and remediation adapters.
-- `agent`: deterministic Agent workflow planning and execution coordination.
-- `tools`: tool definition, registry, permission, read-only execution, and risk gates.
+不能宣称：
 
-## Current Business Boundary
+- 已承载真实生产流量；
+- Agent 会自由选择工具并进行自适应多轮推理；
+- Prompt Registry、Feature Flag、RAG 或反馈评测闭环已经在线自动运行；
+- 平台能够自动接管、重试任意外部写操作；
+- 本地 Compose、Mock 或单元测试等同于 staging / production 签字。
 
-`POST /api/v1/alerts` uses the real PostgreSQL transaction path when the normal
-runtime is enabled. Production requires HMAC-SHA256 Webhook authentication:
-send the Unix timestamp in `X-DevOps-Agent-Timestamp` and the lowercase
-`sha256=<hex>` signature in `X-DevOps-Agent-Signature`, calculated over
-`<timestamp>.<raw-request-body>`. A bounded timestamp window reduces replay
-risk, while `external_event_id` preserves idempotency for legitimate retries.
-Webhook shared secrets are rejected at Settings and authenticator construction
-time if they are too short, surrounded by whitespace, or contain control
-characters, including ASCII DEL, that could contaminate request headers or
-audit logs.
-Its application command validates identity fields and timezone-aware timestamps
-independently of the HTTP DTO. Alert summaries are normalized to a single
-redacted line before Alert storage or Incident title
-derivation. Administrators with `incidents:rca` may start analysis through
-`POST /api/v1/admin/tenants/{tenant_id}/incidents/{incident_id}/rca`. The route
-requires an `Idempotency-Key`, derives `operator_id` exclusively from the
-authenticated administrator, and no longer accepts tenant or operator identity
-in a request body. It atomically marks the incident as analyzing, creates a
-pending `WorkflowRun`, and appends an `rca.requested` Outbox event. The HTTP
-transaction never calls an Agent or another external service directly.
-All HTTP write routes share the same `Idempotency-Key` header boundary:
-bounded length and no whitespace or ASCII control characters, including DEL,
-before any application service can hash or persist the retry key.
-Tenant, incident, workflow, operator, and Runbook path identity segments share
-the same no-whitespace/no-control-character HTTP boundary before authorization
-or application commands run.
-Administrators with `rca:read` may retrieve a single workflow result from
-`GET /api/v1/admin/tenants/{tenant_id}/workflow-runs/{workflow_run_id}/result`;
-the response includes a strong ETag for the WorkflowRun version. Administrators
-with `rca:cancel` may cancel a `PENDING` or `RUNNING` workflow through
-`POST /api/v1/admin/tenants/{tenant_id}/workflow-runs/{workflow_run_id}/cancellation`.
-The cancellation route requires both `If-Match` and `Idempotency-Key`, redacts
-the reason before storage, emits a content-free `rca.canceled` Outbox audit
-event, and releases the active workflow slot so a later RCA can be scheduled.
-If an old `rca.requested` message is delivered after cancellation, the Consumer
-observes the terminal `CANCELED` workflow and acknowledges it without starting
-Agent execution.
-Administrators with `incidents:read` may retrieve a tenant-scoped Incident from
-`GET /api/v1/admin/tenants/{tenant_id}/incidents/{incident_id}`. The response
-returns the current strong ETag plus redacted title, resolution, and closure
-details, but omits idempotency hashes, request fingerprints, and internal
-resolution or closure traces.
-The matching collection endpoint,
-`GET /api/v1/admin/tenants/{tenant_id}/incidents`, accepts repeated `status`
-filters, a maximum `limit` of 100, and an opaque `cursor`. It uses descending
-`(updated_at, incident_id)` keyset pagination and returns `next_cursor` only
-when another page exists; it never uses an unbounded query or offset scan.
-Incident cursors are URL-safe, bounded, and rejected if the outer query value
-or decoded payload contains ASCII control characters.
-Administrators with `incidents:resolve` may resolve an `OPEN` or `ANALYZING`
-Incident through
-`POST /api/v1/admin/tenants/{tenant_id}/incidents/{incident_id}/resolution`.
-The mutation requires a quoted positive `If-Match` version and an
-`Idempotency-Key`. Resolution reason text is normalized and redacted before it
-is stored or hashed; the Incident update and content-free `incident.resolved`
-Outbox audit event commit in one transaction. Same-request retries recover the
-stored result, while stale versions, reused keys, cross-tenant access, and
-second terminal transitions fail closed. Resolution and closure also reject
-incidents that still have a `PENDING` or `RUNNING` RCA workflow, preventing
-manual terminal facts from racing with automated Evidence or Report writes.
-Administrators with `incidents:close` may close only a `RESOLVED` Incident
-through
-`POST /api/v1/admin/tenants/{tenant_id}/incidents/{incident_id}/closure`.
-Closure has its own `If-Match`, `Idempotency-Key`, redacted reason, and
-content-free `incident.closed` Outbox audit event. This keeps technical
-recovery (`RESOLVED`) separate from administrative completion (`CLOSED`).
+仓库中的 Prompt Registry、Feature Flag 和 RAG 资产属于 `Example Or Blueprint Only / Not Loaded By Runtime`，中文含义是“仅示例或治理蓝图，运行时未接线”。
 
-Skeleton-mode tests still return HTTP 501 without external dependencies. The
-production RCA Consumer remains disabled by default. When explicitly enabled,
-the default policy requires Kafka, Prometheus, Loki, and Tempo; trace-free fixed
-policies require Kafka, Prometheus, and Loki only. `build_runtime()` assembles
-the Kafka consumer, dead-letter producer, lease-aware coordinator, selected
-fixed Agent workflow, SQL-backed permission checker, bounded tool executor, and
-only the observability resource shutdown hooks required by that plan. The application
-and SQLAlchemy layers provide atomic `PENDING` to `RUNNING`
-claims, reject duplicate execution while a lease is active, and allow takeover
-after lease expiry. Active owners can renew leases through an atomic heartbeat;
-wrong, expired, or stale owners receive a hard lease-loss signal. These
-services also fence terminal updates by both worker identity and execution
-attempt, so late results cannot overwrite a newer takeover. Explicit Worker IDs
-for all background workers are validated and preserved exactly; default Worker
-IDs and dead-letter publisher client IDs are derived with deterministic hash
-suffixes when needed, instead of silently truncating long identities. Worker
-runners, message handlers, workflow execution commands, and the Outbox dispatcher also reject
-whitespace- or control-character-contaminated identities at construction time, so direct tests or
-alternate containers cannot bypass the deployment Settings guard. These
-checks share a domain-level worker identity validator to keep every boundary on
-the same rule. These capabilities
-now include parsing the published `rca.requested` v1 envelope and translating it
-into an atomic workflow claim. A bounded Kafka `run_once()` adapter can ACK
-handled or unrelated shared-topic events, rewind retryable records, and publish
-non-retryable records to a dead-letter Topic before committing their source
-offset. Enabled Consumers reject dead-letter Topics that match the shared source
-Topic, so invalid messages cannot be routed back into the business event stream.
-When both RCA and Ticket submission Consumers are enabled on that shared Topic,
-their Consumer group IDs must stay distinct so one business consumer cannot ACK
-the other stream's events as unrelated messages. Their dead-letter Topics must
-also stay distinct, keeping replay, retention, and runbook ownership separate
-for each business stream. Settings validation also rejects malformed Kafka
-Topic names, client IDs, and Consumer group IDs before runtime assembly reaches
-the Kafka adapters. Kafka security protocol and SASL credentials are validated
-as one configuration unit, so authentication mistakes fail before any Producer
-or Consumer opens network resources.
-A long-running runner adds backoff, health snapshots, and cooperative
-shutdown. Raw message processors keep retry and dead-letter reasons single-line,
-bounded, and redacted before those summaries can reach health snapshots, logs,
-or dead-letter metadata. The RCA Consumer runner also sanitizes retry and system
-error summaries before exposing them through health. RCA Consumer, Ticket
-Submission Consumer, and Outbox Worker cycle-failure logs contain only fixed
-event text plus validated worker identity and failure-count fields; raw
-exceptions and tracebacks are excluded. Their health snapshots retain bounded,
-redacted error summaries for diagnosis. Outbox backlog refresh failures use the
-same fixed-log boundary while reusing the last successful snapshot as stale
-degradation data. `ApplicationRuntime`
-supervises the configured RCA Consumer and reports it through readiness;
-startup failures and shutdown both close Kafka,
-observability, optional LLM, and database resources in dependency order. Kafka
-Consumer, business-event Producer, and dead-letter Producer startup rollback
-failures emit fixed warning messages without attaching third-party exception
-text or tracebacks that could expose broker or SASL details; the original
-startup failure remains the application exception cause. The outer
-`ApplicationRuntime` applies the same boundary to database readiness failures,
-unexpected Worker exits, and reverse-order resource cleanup. Cleanup logs
-contain only fixed stage names, all resources still receive a close attempt,
-and normal shutdown re-raises the first original failure after recording every
-failed stage. HTTP access logs likewise retain only the trace ID, method,
-bounded route template, status, and duration for failed requests; they never
-attach the application exception or traceback. HTTP metric-observer failures
-and partial `/metrics` refresh failures use fixed category messages while
-preserving the original business response or scrape availability.
-RCA Consumer alerting covers stopped, stalled, no-success, repeated failures,
-dead-letter growth, Lag-unavailable, and high-Lag states; the matching Runbook
-documents reason-code triage and replay checks without requiring raw message
-export. The operations dashboard exposes dedicated RCA dead-letter growth and
-retry-rate panels alongside Consumer state, throughput, and Lag panels.
-A controlled `AgentWorkflowPort` adapter provides a fixed
-metrics/logs/traces plan, explicit tool versions, full-plan permission
-preflight, LOW/MEDIUM risk gates, per-tool timeouts, cancellation propagation,
-and bounded JSON inputs and outputs. Tool results are recursively sanitized
-before Evidence persistence, and public Evidence `source`/`summary` fields are
-kept control-character-free and redacted again before they can feed RCA result
-APIs, reports, or ticket drafts.
-The RCA result query view also sanitizes historical Evidence summaries, tool
-invocation summaries, and report text before serializing responses; Evidence and
-Tool Invocation domain records also reject control-character-contaminated public
-fields before storage, while still
-excluding raw Evidence content and tool payloads.
-Ticket Drafts keep multiline descriptions and rejection reasons, but reject
-control-character-contaminated single-line identifiers, titles, evidence
-references, recommendations, and audit identities before storage; repository
-reads also reject contaminated lookup keys and map historical dirty draft rows
-to persistence-integrity errors.
-Alerts and Incidents also reject control-character-contaminated summaries,
-titles, service identifiers, and lifecycle audit fields at the domain boundary,
-while repositories map historical dirty rows to persistence-integrity errors.
-WorkflowRun identities, trace fields, leases, and cancellation audit facts now
-share the same control-character boundary across application commands, the
-domain model, and repository reads, including historical dirty-row mapping.
-Ticket submission request and result fields apply the same boundary to external
-ticket identifiers, URLs, failure reasons, worker completion identity, and
-bounded status-query lookups, while repository reads map historical dirty rows
-to persistence-integrity errors.
-The
-post-claim coordinator now runs Agent and heartbeat tasks together, cancels
-execution when the lease is lost, records Agent errors and timeouts as failed
-runs, redacts Agent error summaries before returning them to the message
-pipeline, and only allows Kafka acknowledgement after terminal state
-persistence.
-Outbox event metadata now rejects control-character-contaminated identifiers,
-aggregate keys, event types, and trace IDs before persistence. The dispatcher
-also stores only single-line retry/failure summaries and maps historical dirty
-Outbox rows to persistence-integrity errors before they can be published.
-Kafka publisher and consumer configuration now applies the same single-line
-boundary to broker addresses, client IDs, Consumer group IDs, SASL identity
-fields, dead-letter source coordinates, reason codes, reason summaries, and
-header names. Raw dead-letter key/value/header bytes are still preserved as
-binary payloads, so bad source messages remain replayable without letting their
-metadata contaminate logs, Kafka headers, dashboards, or runbooks.
-The `rca.requested` and `ticket_submission.requested` message contracts repeat
-that boundary on the consuming side: dirty envelope or payload identifiers are
-dead-lettered, and only clean foreign `event_type` values on the shared Topic
-are acknowledged as unrelated events.
-A version-pinned handler registry and bounded `ToolExecutor` now provide exact
-handler routing, contract-drift checks, concurrency limits, timeout
-cancellation, and JSON input/output limits. A fail-closed
-`ToolPermissionChecker` validates tenant/operator identity, grant expiry, and
-all required permission tags while distinguishing source outages from denials.
-The SQLAlchemy permission provider stores tenant-scoped grants and normalized
-permission tags, excludes revoked grants, and bounds each read. The permission
-administration service supports version-fenced set/replace/revoke operations,
-persistent idempotency, immutable grant history, and transactional audit events
-through Outbox. Permission management commands, queries, runtime grant
-snapshots, and SQLAlchemy permission adapters reject control-character
-contaminated tenant, operator, requester, idempotency, and trace fields before
-they can influence authorization checks or audit writes, including ASCII DEL
-and contaminated permission tags. Enabling the Consumer
-registers the production-bounded
-`metrics.query@v1` implementation: it
-resolves the incident service inside the tenant boundary, executes only fixed
-Prometheus golden-signal templates, limits range-query responses, and returns
-statistical summaries instead of unbounded raw samples. The matching
-`logs.query@v1` implementation resolves the same trusted target, executes only
-fixed Loki LogQL templates, enforces tenant headers and result limits, and
-returns label-whitelisted, redacted, UTF-8-safe truncated log entries. The
-`traces.query@v1` implementation searches only fixed error and slow-span
-TraceQL templates, returns bounded Trace summaries without Span attributes,
-and exposes incomplete-search hints instead of presenting sampled results as
-exhaustive. Prometheus, Loki, and Tempo HTTP clients reject control-character
-contaminated fixed endpoint URLs, Bearer tokens, tenant IDs, trace IDs, and
-final query strings before network I/O; enabling the RCA consumer applies the
-same endpoint and token boundary at Settings load time. Tool grants still fail
-closed, so operators must receive the required tenant-scoped read tags before a
-workflow can query these systems.
-The default v2 plan also retrieves only published service-specific or
-tenant-generic Runbooks from the relational catalog. Retrieval is bounded,
-deterministically ordered, and never executes Runbook steps.
-Administrators with `runbooks:write` may create or update a reviewed draft and
-publish that exact version through conditional, idempotent HTTP mutations.
-Draft title, summary, and step text are redacted before storage and before
-content hashes are computed, so an accidental credential paste does not become
-searchable Runbook content.
-Runbook revisions belong to the logical `(tenant_id, runbook_key)` aggregate,
-so every draft or publication request must carry the latest quoted revision in
-`If-Match`. Publication archives the previous active version in the same
-transaction and emits an Outbox audit event without copying Runbook content
-into the event payload.
-Audit retention is available as an opt-in background Worker. It purges expired
-RCA Evidence and Tool Invocation rows in bounded batches, marks the owning
-`workflow_runs.audit_purged_at` watermark in the same transaction, and does not
-remove RCA reports, ticket drafts, or external submission records. Its metrics,
-alerts, Runbook, and dashboard panels focus on Worker liveness, successful
-cycle progress, repeated failures, and total cleaned workflow runs without
-using tenant, workflow, or worker identifiers as labels.
-Remediation execution and rollback use owner/attempt-fenced leases. An opt-in
-Runtime-supervised reclaim Worker scans expired `EXECUTING` and `ROLLING_BACK`
-plans in bounded batches and closes them as `FAILED` or `ROLLBACK_FAILED`.
-It has cooperative shutdown, capped error backoff, readiness, low-cardinality
-metrics, alerts, and a Runbook. It never retries, resumes, or takes over the
-external write; an operator must reassess the incident and approve a new plan.
-Administrators with `ticket_drafts:write` may generate one local Ticket Draft
-from a successful workflow while `ticket_drafts:read` controls later access.
-The API accepts no ticket content: title, priority, evidence references, and
-recommendations are derived from the persisted incident and RCA report. Draft
-creation sanitizes report title, summary, and recommendations again before
-storage, so older reports or alternate generators cannot copy obvious
-credentials into approval material. Draft
-creation and its content-free Outbox audit event commit atomically. This stage
-does not submit tickets to Jira, ServiceNow, or any other external system.
-Administrators with `ticket_drafts:approve` may move version `1` exactly once
-to `APPROVED` or `REJECTED` by sending a strong `If-Match` condition and an
-idempotency key. Rejection reasons are sanitized before they remain in the
-business database; audit events contain only their SHA-256 digest. Approval
-records the approving administrator and decision trace, but does not itself
-submit an external ticket or authorize remediation commands.
-Administrators with `ticket_drafts:submit` may register an approved draft as
-an external submission request for a normalized target such as `jira` or
-`servicenow`. This operation requires the approved draft ETag, an idempotency
-key, and tenant access. It writes a local `TicketSubmission` plus a
-`ticket_submission.requested` Outbox event in the same transaction, but still
-does not synchronously call the external ticketing system. The Outbox payload
-contains identifiers and routing metadata only; ticket description and
-recommendation body remain in the database for the future worker to load under
-controlled permissions. The local submission state machine now also supports
-idempotent terminal result recording: successful external creation moves the
-submission to `SUBMITTED` with a target ticket id, while provider failure moves
-it to `FAILED`. Result events include only stable identifiers and failure
-digests, not raw provider error text. Administrators with
-`ticket_drafts:read` can query a bounded, tenant-scoped list of submission
-statuses for the workflow without sending idempotency or conditional headers;
-this read path returns persisted local state only and does not contact external
-ticketing providers. Provider failure text is sanitized again by the result
-recording service before it is stored in the business record for privileged
-audit workflows, while the default API response returns only a SHA-256 digest
-so external error text is not copied to clients.
-The `ticket_submission.requested` message handler is available as an
-application-level Worker core: it validates the Outbox envelope, loads the
-approved draft and requested submission, calls a `TicketingGatewayPort`, and
-records `SUBMITTED` or `FAILED` through the same idempotent result service.
-Runtime still does not enable a real Jira or ServiceNow consumer by default;
-the concrete adapter remains opt-in deployment work. A raw record processor now
-mirrors the RCA consumer boundary for this stream: it limits message size,
-rejects invalid JSON or unsupported envelopes to dead letter, acknowledges
-unrelated shared-topic events, and retries persistence, runtime, or unexpected
-external failures without performing Kafka offset operations itself. The Kafka
-adapter adds manual offset commit, rewind-on-retry, and dead-letter-before-commit
-semantics for this stream. A cooperative consumer runner wraps that boundary
-with start/close lifecycle, single-instance protection, classified backoff, and
-health counters. The Application Runtime can supervise an injected runner,
-expose its readiness component, and stop it before closing shared resources,
-but the default runtime still does not connect to a live queue. Enabling the
-Ticket submission consumer requires explicit `Settings` configuration and an
-injected `TicketingGatewayPort`; missing gateway configuration fails at startup
-rather than letting the worker repeatedly retry the first message. A generic
-HTTP JSON `TicketingGatewayPort` adapter is available for controlled internal
-ticketing middleware: it sends idempotency and trace headers, bounds response
-size, sanitizes HTTP failures and business failure reasons, rejects malformed
-or half-success responses, and normalizes valid responses into
-`TicketingSubmitOutcome`. Ticket submission requests allow multiline ticket
-descriptions but keep tenant, submission, draft, target, title, priority,
-evidence, recommendation, idempotency, and trace fields single-line and
-control-character-free before they can become HTTP headers or provider routing
-metadata. The HTTP JSON adapter and deployment Settings apply the same boundary
-to the fixed endpoint URL and Bearer token, while provider business failure
-text is converted to a redacted single-line reason. The message handler redacts
-failure reasons again before result recording so custom gateway implementations
-inherit the same storage boundary. Deployments may now
-opt in to this adapter with `DEVOPS_AGENT_TICKETING_HTTP_JSON_ENABLED=true`,
-but it still requires the Ticket submission consumer to be enabled and a fixed
-HTTP(S) endpoint to be configured. When a custom gateway is injected directly,
-the runtime does not own or close that external lifecycle. The Ticket submission
-consumer runner sanitizes retry and system error summaries before they reach
-health snapshots. The metrics endpoint
-now exports low-cardinality Ticket submission Consumer health, processing
-totals, recent activity timestamps, consecutive failure counts, and bounded
-Kafka Lag summaries without partition labels. Alerting rules detect stopped,
-stalled, repeatedly failing, no-success, dead-letter growth, Lag-unavailable,
-and high-Lag states without using tenant, trace, target system, partition, or
-message identifiers as labels. The provisioned Grafana dashboard includes
-matching panels for enablement, running state, consecutive failures, recent
-success age, dead-letter growth, retry rate, processing rate, state trends, Lag
-trend, and Lag collection coverage.
-The HTTP JSON TicketingGateway also records fixed low-cardinality call outcomes
-(`SUCCESS`, `BUSINESS_FAILURE`, `GATEWAY_ERROR`, `CANCELLED`) and latency
-histograms. These metrics separate external provider instability from Kafka
-consumer health without adding tenant, trace, ticket, or target-system labels.
-Recording rules, alerts, a Runbook, and Grafana panels expose gateway error
-ratio, business failure ratio, call rate, and P95 latency.
-Jira Cloud and ServiceNow now also have opt-in direct adapters. The runtime
-routes the normalized `jira` and `servicenow` targets to their vendor APIs and
-may retain the HTTP JSON gateway as a fallback for other target names. Both
-adapters use bounded non-redirecting HTTP requests, secret-backed Basic
-authentication, stable correlation fields, sanitized provider failures, and
-the same low-cardinality gateway metrics. Production startup rejects non-HTTPS
-vendor base URLs. Jira sends an issue property and ServiceNow sends
-`correlation_id` for downstream duplicate detection; because neither vendor
-guarantees atomic create idempotency, production instances should enforce
-uniqueness with a Jira automation rule or ServiceNow business rule keyed by
-the supplied idempotency value.
-LLM report generation is separately disabled by default. When enabled, operators
-can configure an ordered provider chain instead of one hard-coded model vendor.
-The recommended default is OpenAI first, DashScope second, and the deterministic
-RCA generator as the final fallback. Missing provider credentials are skipped,
-so the same artifact can run in different company environments with only
-secret-manager values changed. Only bounded Evidence summaries are sent through
-the selected provider adapter. The OpenAI provider uses the strict
-OpenAI-compatible Responses API; `chat_completions` is also supported for
-vendors that expose OpenAI-compatible Chat Completions. LLM request identities, prompt and
-generator versions, model names, fixed endpoint URLs, and API keys are rejected
-if they contain control-character contamination, including ASCII DEL, before
-they can become HTTP headers, model routing metadata, prompt JSON, or audit
-identifiers. The
-generator redacts Evidence summary
-and source fields again at the LLM boundary, so a missed upstream sanitizer does
-not copy obvious credentials into the model request. Model response title,
-summary, and recommendation text are redacted again before `RCAReport`
-persistence; control-contaminated model text is rejected and uses the
-deterministic fallback because structured JSON still remains untrusted external
-output. Historical incident, RCA, and ticket-draft display text escapes any
-remaining ASCII DEL as the visible `\u007f` sequence instead of returning an
-invisible response character. The `RCAReport` persistence mapper revalidates
-every new write and applies this compatibility only to legacy title, summary,
-and recommendation fields during reads. Contaminated tenant, workflow,
-Evidence, or generator identity fields remain persistence-integrity failures
-instead of being silently rewritten.
-Timeout, provider failure, refusal, invalid output, or fabricated Evidence
-references move to the next configured provider. If all providers fail, the
-report generator falls back to the deterministic `UNDETERMINED` report.
+## 当前完成状态
 
-Provider failover order is configuration-only:
+| 阶段 | 当前状态 | 仍需补齐 |
+|---|---|---|
+| Step 4 工程主链路 | 已实现并可重复本地验证 | 真实 PostgreSQL、Kafka、OIDC、观测源、LLM、工单系统的目标环境签字 |
+| Step 5 生产化资产 | 已提供 Docker、Compose、Kubernetes 骨架、CI、安全门禁和运维手册 | 真实拓扑、容量压测、故障注入、备份恢复演练证据 |
+| Step 6 产品面 | 已实现 Ops Console、反馈 API、离线评测门禁、工单和修复计划能力 | 在线多审核人策展、自动匿名化、真实 Web 产品和运行时 Prompt/Flag/RAG |
+
+完整真相源见 [缺少内容.md](缺少内容.md)。若其他文档与它冲突，以该文件为准。
+
+## 系统架构
+
+```mermaid
+flowchart LR
+    A[Alertmanager / Webhook] --> B[FastAPI 接入层]
+    B --> C[(PostgreSQL)]
+    B --> D[Transactional Outbox]
+    D --> E[Kafka / Redpanda]
+    E --> F[RCA Consumer]
+    F --> G[受控 Agent Workflow]
+    G --> H[Prometheus]
+    G --> I[Loki]
+    G --> J[Tempo]
+    G --> K[Runbook Catalog]
+    H --> L[Evidence]
+    I --> L
+    J --> L
+    K --> L
+    L --> M[RCA Report]
+    M --> N[人工反馈 / 工单草稿 / 修复计划]
+    N --> O[审批与受控执行]
+```
+
+代码按职责分层：
+
+- `interfaces`：HTTP DTO、路由、中间件和异常响应；
+- `application`：用例命令、查询和业务编排服务；
+- `domain`：纯领域模型、枚举、状态机和领域异常；
+- `ports`：应用层依赖的出站契约；
+- `infrastructure`：数据库、Kafka、OIDC、观测、LLM、工单和修复适配器；
+- `agent`：固定调查计划、工作流执行和报告生成；
+- `tools`：工具定义、版本注册、权限、风险和只读执行门禁；
+- `ops`：部署、监控、Runbook、评测、MiniShop E2E 和修复沙箱资产。
+
+## 核心业务流程
+
+### 1. 告警到 Incident
+
+1. Alertmanager 通过 `POST /api/v1/alerts` 发送告警。
+2. 生产路径要求 HMAC-SHA256 Webhook 鉴权和时间窗口校验。
+3. `external_event_id` 提供重试幂等；摘要在入库前完成归一化和脱敏。
+4. PostgreSQL 事务内完成告警持久化、Incident 关联和 Outbox 事件写入。
+
+### 2. Incident 到 RCA
+
+1. 具有 `incidents:rca` 权限的操作员显式创建 RCA。
+2. 事务内把 Incident 置为分析中、创建 `WorkflowRun` 并写入 `rca.requested` Outbox。
+3. Kafka Consumer 领取任务；执行 Claim 带 Worker、Attempt 和过期租约。
+4. Agent 按固定计划调用只读工具，并将有界、脱敏后的结果保存为 Evidence。
+5. 工作流完成使用 Worker/Attempt Fence，迟到结果不能覆盖新接管者。
+6. 报告使用确定性生成器或可选 LLM，最终仍受 Evidence 引用和结论状态约束。
+
+### 3. RCA 后续操作
+
+- 人工反馈：持久化、审计和只读评测候选导出，不会自动训练或发布模型；
+- 工单草稿：从 Incident 和 RCA 报告派生，审批后通过 Outbox 异步请求外部工单；
+- 修复计划：先校验证据、动作目录和维护窗口，再执行人工审批；
+- 外部修复：只允许预注册动作键和固定控制器地址，不接受任意 Shell、SSH、Kubernetes 或云命令。
+
+## 可靠性与安全机制
+
+### 工作流可靠性
+
+- Transactional Outbox 避免数据库提交成功但消息丢失；
+- 幂等键、请求指纹和 ETag 防止重复写和并发覆盖；
+- RCA、Outbox、审计清理和 Remediation Worker 都有有界批次与协作式停止；
+- RCA 执行使用 Claim、Lease、Heartbeat 和 Owner/Attempt Fence；
+- Remediation 执行与回滚使用独立 Attempt 和 Lease，过期任务只收口失败，不自动重放外部写；
+- Kafka 使用手工提交、可重试回退和 Dead Letter 先写后提交语义。
+
+### 输入与隐私边界
+
+- 租户、Incident、Workflow、操作员和 Worker 标识禁止空白与 ASCII 控制字符；
+- `Idempotency-Key`、OIDC Claim、Kafka 元数据和外部 URL 均在进入业务层前校验；
+- 日志、Evidence、报告、工单和故障原因在存储或输出前重复脱敏；
+- 默认 API 不返回原始 Evidence Payload、请求指纹、幂等哈希或第三方原始错误；
+- 指标标签保持低基数，不使用租户、Trace、Workflow、Ticket 或分区 ID。
+
+### 权限与认证
+
+- 管理接口使用可插拔 Bearer Authenticator；未配置时默认失败关闭；
+- OIDC 采用非对称 JWT 校验，检查 issuer、audience、时间声明和 JWKS；
+- 工具权限按租户和操作员校验，授权来源不可用与明确拒绝使用不同错误语义；
+- Webhook 生产路径使用 HMAC-SHA256，固定演练 Token 在 `prod` / `production` 环境会被拒绝。
+
+## RCA 调查策略
+
+部署可以选择三种服务端固定计划：
+
+| 策略 | 调查步骤 | 适用环境 |
+|---|---|---|
+| `fixed_default` | Metrics → Logs → Traces → Runbooks | Prometheus、Loki、Tempo 均可用 |
+| `fixed_no_traces` | Metrics → Logs → Runbooks | 没有 Tempo |
+| `fixed_metrics_logs_runbooks` | Metrics → Logs → Runbooks | 显式强调无 Trace 的固定流程 |
+
+这些策略是部署时选择的静态计划，不是运行时自适应工具选择。
+
+`continue_on_step_failure` 默认关闭。显式开启后，只读步骤失败可以继续采集其他证据，但仍满足以下护栏：
+
+- 零 Evidence 时整体失败，不生成假报告；
+- 报告摘要列出失败步骤；
+- 部分报告置信度最高为 `0.4`；
+- 结论不能为 `CONFIRMED`。
+
+## LLM 报告能力
+
+LLM 报告默认关闭。开启后可以配置有序 Provider 链，推荐 OpenAI → DashScope → 确定性生成器。缺少凭据的 Provider 会跳过，超时、拒绝、非法结构、伪造 Evidence 引用或敏感输出会进入下一个 Provider，全部失败后回退到 `UNDETERMINED` 确定性报告。
+
+示例配置：
 
 ```text
 DEVOPS_AGENT_LLM_REPORT_ENABLED=true
@@ -541,115 +184,81 @@ DEVOPS_AGENT_LLM_DASHSCOPE_MODEL=qwen3.7-plus
 DEVOPS_AGENT_LLM_DASHSCOPE_API_KEY=inject-from-secret-manager
 ```
 
-Provider names supported in `DEVOPS_AGENT_LLM_PROVIDER_ORDER` are
-`openai`, `dashscope`, `openai_compatible`, and `custom`. The built-in base URL
-defaults are `https://api.openai.com` for OpenAI and
-`https://dashscope.aliyuncs.com/compatible-mode` for DashScope. For DashScope,
-an explicit base URL may be either
-`https://dashscope.aliyuncs.com/compatible-mode` or
-`https://dashscope.aliyuncs.com/compatible-mode/v1`; the adapter avoids
-duplicating `/v1`.
+支持的 Provider 名称为 `openai`、`dashscope`、`openai_compatible` 和 `custom`。旧版单 Provider 环境变量仍保留兼容，但新部署建议使用有序 Provider 配置。
 
-Generic model gateways can be added to the same chain:
+## MiniShop 端到端故障演练
+
+仓库内置 MiniShop 电商下单故障演练靶场，用于跑通真实的本地告警到 RCA 路径：
 
 ```text
-DEVOPS_AGENT_LLM_PROVIDER_ORDER=openai,dashscope,openai_compatible
-DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_API_STYLE=chat_completions
-DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_BASE_URL=https://model-gateway.example.com
-DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_MODEL=company-approved-model
-DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_API_KEY=inject-from-secret-manager
+MiniShop → Prometheus / Loki / Tempo → Alertmanager → 平台 → Kafka → RCA → Ground Truth 评测
 ```
 
-The legacy single-provider variables
-`DEVOPS_AGENT_LLM_PROVIDER`, `DEVOPS_AGENT_LLM_API_STYLE`,
-`DEVOPS_AGENT_LLM_BASE_URL`, `DEVOPS_AGENT_LLM_MODEL`, and
-`DEVOPS_AGENT_LLM_API_KEY` are still supported as a compatibility path.
-Administrative HTTP routes now require a pluggable Bearer authenticator,
-explicit tenant access, and operation-specific scopes. Administrators with
-`tool_permissions:read` may retrieve the current permission snapshot and ETag
-from
-`GET /api/v1/admin/tenants/{tenant_id}/operators/{operator_id}/tool-permissions`;
-inactive or never-created grants return an empty permission set plus the latest
-state version. Mutating the same resource still requires
-`tool_permissions:write`, `Idempotency-Key`, and a quoted `If-Match` version.
-No authenticator is configured by default, so these routes fail closed. When
-administrator OIDC is explicitly enabled, the runtime uses asymmetric JWT
-verification with strict issuer/audience/time claims, bounded asynchronous JWKS
-reads, single-flight cache refresh, key-rotation retry, and unknown-key refresh
-throttling. OIDC issuer and JWKS endpoints must be fixed HTTPS URLs without
-query strings, fragments, credentials, or control characters; audiences, claim
-names, Bearer tokens, JWT header `kid`, and JWKS `kid` values are also kept
-control-character-free, including ASCII DEL, before they can affect
-authentication or key refresh. Verified administrator claim values for subject,
-scope, and tenant identities are also rejected if they contain whitespace or
-ASCII control characters before they can become audit or authorization facts.
+三个机器可读场景覆盖典型的下单故障，并通过 Manifest 与 Ground Truth 校验 RCA 报告。
 
-## MiniShop End-to-End RCA Rehearsal
-
-The repository includes a self-contained MiniShop fault lab that exercises the
-real alert-to-RCA path through Prometheus, Alertmanager, PostgreSQL,
-Redpanda/Kafka, Loki, Tempo, the four read-only Agent tools, and a deterministic
-LLM contract stub.
-
-Run all three Ground Truth scenarios from PowerShell:
+在 PowerShell 中执行：
 
 ```powershell
 .\ops\minishop-e2e\run-e2e.ps1
 ```
 
-The runner rebuilds an isolated Compose stack, grants local rehearsal-only
-permissions, publishes the scenario Runbooks, injects each fault, waits for an
-Incident and RCA Workflow, evaluates the report against its Manifest, writes
-`ops/minishop-e2e/artifacts/results.json`, and removes the stack. Use
-`-KeepStack` only when the running containers are needed for diagnosis.
+Runner 会重建隔离 Compose 栈、发布演练 Runbook、注入故障、等待 Incident/RCA、评测结果并写入：
 
-The fixed administrator token used by this stack is disabled by default,
-mutually exclusive with OIDC, and rejected in `prod` or `production`. It is not
-a production authentication option.
+```text
+ops/minishop-e2e/artifacts/results.json
+```
 
-See [`docs/minishop-e2e-rca-code-tour.md`](docs/minishop-e2e-rca-code-tour.md)
-for the complete source-level walkthrough and
-[`ops/minishop-e2e/artifacts/results.json`](ops/minishop-e2e/artifacts/results.json)
-for the latest machine-readable local acceptance result.
+仅在排查容器现场时使用 `-KeepStack`。演练固定管理员 Token 默认关闭、与 OIDC 互斥，并且不是生产认证方案。
 
-## Local Development
+## 本地开发
 
-Install the pinned package manager and synchronize the committed lock:
+### 环境要求
 
-```bash
+- Python 3.11 或 3.12；
+- `uv==0.11.31`；
+- 需要运行完整演练时安装 Docker Desktop 或 Podman。
+
+安装锁定的包管理器并同步依赖：
+
+```powershell
 python -m pip install uv==0.11.31
 uv sync --locked --extra dev
 ```
 
-Run tests:
+运行平台测试：
 
-```bash
-uv run pytest
+```powershell
+uv run pytest -q -m "not live"
+uv run ruff check .
 ```
 
-Run the API locally:
+运行 MiniShop 测试：
 
-```bash
+```powershell
+Set-Location '.\MiniShop 电商下单故障演练靶场'
+uv sync --locked --extra dev
+uv run pytest -q
+```
+
+启动本地 API：
+
+```powershell
 uv run uvicorn main:app --reload
 ```
 
-Apply database migrations before accepting traffic:
+执行数据库迁移：
 
-```bash
+```powershell
 uv run alembic upgrade head
 ```
 
-`uv.lock` is the reproducible platform dependency baseline. The MiniShop
-project owns a separate lock because it has an independent package boundary.
-After intentionally changing a dependency constraint, regenerate both locks
-with `.\scripts\update-lockfiles.ps1`; pass `-Upgrade` only for an intentional
-dependency refresh. CI rejects stale lock files through `uv sync --locked`.
+`uv.lock` 是平台可复现依赖基线，MiniShop 拥有独立锁文件。修改依赖约束后使用 `.\scripts\update-lockfiles.ps1` 更新锁文件；只有明确升级依赖时才传入 `-Upgrade`。CI 使用 `uv sync --locked` 拒绝过期锁文件。
 
-`pyproject.toml` is the root platform release-version source of truth. The
-installed package exposes the same value as `devops_agent_platform.__version__`;
-FastAPI/OpenAPI, `uv.lock`, and the Kubernetes example image tags are guarded
-against that value by tests. MiniShop and `故障排除/step3` remain independent
-projects with their own versions. Before publishing an annotated Tag, run:
+## 发布与供应链门禁
+
+`pyproject.toml` 是平台版本号唯一真相源。安装包中的 `devops_agent_platform.__version__`、FastAPI/OpenAPI、根 `uv.lock` 和 Kubernetes 示例镜像 Tag 都由测试约束为同一版本。
+
+发布 Annotated Tag 前执行：
 
 ```powershell
 uv build --out-dir dist
@@ -657,44 +266,70 @@ uv run python scripts/check-release-version.py `
   --tag v0.3.4 --dist-dir dist
 ```
 
-Tag pushes also run this check in CI. After tests, the container build, SBOM
-generation, and both vulnerability gates succeed, the workflow publishes the
-validated wheel, sdist, and `SHA256SUMS` to the immutable Tag's GitHub Release.
-The release step is retry-safe: matching assets are retained, missing assets
-are uploaded, and a same-name asset with different content fails closed. Only
-that final job receives `contents: write`; all preceding jobs remain read-only.
-Every third-party Action is pinned to a reviewed immutable commit. The current
-checkout, Python setup, uv setup, artifact transfer, and SBOM Actions use their
-Node.js 24 releases; the adjacent version comment makes controlled upgrades
-auditable without restoring mutable `@v*` references.
+Tag 流水线依次执行：
 
-The test suite verifies that Alembic has one linear Head and compiles the full
-`base -> head` chain with the PostgreSQL dialect in offline mode. SQLite is used
-for fast unit-level persistence tests, but it is not the production migration
-dialect and cannot execute every historical PostgreSQL `ALTER` operation.
+1. Python 3.12 主测试、Ruff、MiniShop 测试和 Alembic 离线迁移；
+2. Python 3.11 兼容性测试和 Alembic 离线迁移；
+3. 平台与 MiniShop 锁定生产依赖的 `pip-audit --strict` 审计；
+4. Trivy 仓库密钥扫描；
+5. 非 Root 镜像构建、SPDX SBOM 生成和高危漏洞门禁；
+6. 发布 wheel、sdist、`sbom.spdx.json` 和覆盖全部载荷的 `SHA256SUMS`。
 
-Use `.env.example` as the deployment configuration inventory. Keep the RCA
-Consumer disabled until observability tenant routing, Kafka dead-letter
-retention, and operator tool grants have been validated in the target
-environment. All bearer tokens and LLM API keys must come from the deployment
-secret manager.
+发布器支持安全重试：远端同名同内容资产直接保留，缺失资产补传，同名不同内容立即失败。只有最终 Release Job 拥有 `contents: write`，前置 Job 全部只读。所有第三方 GitHub Action 均固定到经过审查的完整 40 位 Commit SHA。
 
-## Monitoring Assets
+## v0.3.4 相比 v0.3.3 的完善
 
-- Prometheus example: `ops/prometheus/prometheus.example.yml`
-- Recording and alerting rules: `ops/prometheus/rules/`
-- Alertmanager routing and templates: `ops/alertmanager/`
-- Incident response Runbooks: `ops/runbooks/`
-- Grafana provisioning: `ops/grafana/provisioning/`
-- Grafana dashboard: `ops/grafana/dashboards/devops-agent-operations.json`
+`v0.3.4` 不改变业务 API 或 Remediation 状态机语义，重点完善发布兼容性和供应链证据：
 
-Validate Prometheus rules in an environment containing Prometheus:
+- 新增 Python 3.11 独立兼容性 Job，覆盖非 Live 全量测试和 Alembic 离线迁移；
+- 新增安全 Job，分别审计平台与 MiniShop 的锁定生产依赖；
+- 新增 Trivy 文件系统密钥扫描，并把安全门禁加入镜像构建前置依赖；
+- 镜像 SBOM 作为 CI Artifact 保留，并在 Tag 发布时作为正式 GitHub Release 资产下载；
+- 发布器在任何 GitHub API 写操作前校验 SPDX 2.x 文档结构、文档 ID 和非空 Package 清单；
+- wheel、sdist 和镜像 SBOM 统一进入 `SHA256SUMS`；
+- Release 同名资产继续保持内容一致性校验和幂等补传；
+- Kubernetes Deployment、Migration Job、项目版本和锁文件统一到 `0.3.4`；
+- 增加 CI、Action SHA、SBOM、版本和发布资产契约测试；
+- 更新发布 Runbook，要求验收 wheel、sdist、SBOM 和校验和文件。
 
-```bash
+这些改动提升了版本可追溯性，但不等于目标环境已经完成生产验收。真实部署仍必须补齐 OIDC、Kafka、观测源、LLM、工单系统、外部修复控制器、容量和故障注入证据。
+
+## 部署与监控资产
+
+- Docker：`Dockerfile`、`.dockerignore`；
+- 本地生产化演练：`ops/deploy/docker-compose.yml`；
+- Kubernetes 骨架：`ops/deploy/kubernetes/`；
+- 环境变量清单：`.env.example`、`ops/deploy/env.production.example`；
+- 发布与回滚：`ops/deploy/release-runbook.md`；
+- 容量与 SLO：`ops/deploy/capacity-and-slo.md`；
+- 备份恢复：`ops/deploy/backup-restore.md`；
+- Prometheus 规则：`ops/prometheus/rules/`；
+- Alertmanager：`ops/alertmanager/`；
+- Grafana：`ops/grafana/`；
+- 故障 Runbook：`ops/runbooks/`。
+
+在安装 Prometheus 的环境中校验规则：
+
+```powershell
 promtool check rules ops/prometheus/rules/*.yml
 ```
 
-Alertmanager Slack webhook URLs must be mounted as secrets at:
+Alertmanager Slack Webhook 必须以 Secret 文件挂载：
 
-- `/run/secrets/alertmanager-slack-critical-url`
-- `/run/secrets/alertmanager-slack-warning-url`
+- `/run/secrets/alertmanager-slack-critical-url`；
+- `/run/secrets/alertmanager-slack-warning-url`。
+
+## 上线前必须完成
+
+以下内容不能通过本地 Mock 或文档替代：
+
+1. 真实 PostgreSQL、Kafka、OIDC、Prometheus、Loki、Tempo、LLM 和 Ticketing 的 staging/sandbox 验收；
+2. HTTPS OIDC issuer、JWKS、audience、Token 和证书链验证；
+3. 1x、2x 和峰值流量下的 k6 压测报告；
+4. 故障注入后的恢复时间、重复/丢失、Consumer Lag、Outbox Backlog、CPU 和内存证据；
+5. 外部修复控制器的白名单、审批、超时、回滚和租约过期演练；
+6. 组织级数据集存储、匿名化、多审核人签字和模型发布流程。
+
+在这些证据完成前，项目的准确定位仍是：
+
+> 生产导向的 Incident / 受控 RCA 作业编排平台，而不是已生产上线的自适应智能排障 Agent。
