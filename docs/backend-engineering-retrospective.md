@@ -10,7 +10,7 @@
 | 技术栈与环境 | Python 3.12、FastAPI、PostgreSQL、Kafka/Redpanda、Prometheus、Loki、Tempo、Docker Compose |
 | 开始时间 | 2026-07-18 |
 | 完成时间 | 持续迭代，最近更新 2026-08-17 |
-| 当前结论 | 三场景 Docker RCA 闭环、A/B/C0/C1 路线、反馈治理和 AIOps Benchmark 基础评分闭环均已完成本地验证 |
+| 当前结论 | 四场景 Docker RCA 闭环、Change Event 五步调查、A/B/C0/C1 路线、反馈治理和 AIOps Benchmark 基础评分闭环均已完成本地验证 |
 | 相关版本/提交 | 独立 Git 仓库 `main` 基线，提交信息见本仓库 `git log` |
 
 ## 2. 结果摘要
@@ -19,12 +19,11 @@
   真实 Compose RCA 验收、演练管理员认证、逐模块代码导读，以及按单条人工反馈
   导出机器可读评测候选，以及要求显式批准、隐私复核、人工改写和 Evidence
   重映射的离线策展工具，以及只允许进入人工发布评审的离线评测报告门禁。
-- 已完成验证：平台全量 `1741 passed, 9 deselected`；MiniShop 全量
-  `40 passed`；E2E 静态资产 `3 passed`；Compose 配置展开通过；三场景真实
-  Docker E2E 全部通过。
-- 端到端证据：`checkout-latency`、`inventory-db-timeout`、
-  `payment-error` 均为 `SUCCEEDED`，且具备 METRIC、LOG、TRACE、RUNBOOK
-  四类 Evidence。
+- 已完成验证：Change Event/RCA 定向测试、MiniShop 场景测试、Alembic 离线迁移、
+  PostgreSQL 真实迁移和 Compose 配置均通过；全量门禁结果见本文末尾最新记录。
+- 端到端证据：`checkout-latency`、`inventory-db-timeout`、`payment-error`、
+  `deployment-regression` 均为 `SUCCEEDED`，且具备 CHANGE、METRIC、LOG、TRACE、
+  RUNBOOK 五类 Evidence。
 - 遗留风险：真实生产控制器、外部凭据和目标环境验收不在仓库中；本地测试已在 `-W error` 下通过。
 - 工程基线：根平台与 MiniShop 分别提交 `uv.lock`，CI 和镜像均使用
   `uv 0.11.31` 的 locked 模式，Ruff 固定为 `0.15.22`；项目已建立独立
@@ -39,7 +38,7 @@
 | Step 3 代码骨架 | 新增 Alertmanager Mapper、Relay、Agent Alert Client 与路由 | Relay 定向测试 6 项通过 | 1 | 无 |
 | Step 4 增量实现 | Alertmanager Relay、兼容指标/日志、分服务 Trace、Tempo Ground Truth、演练认证、代码导读和固定调查策略接线 | C0/C1 定向测试 `190 passed`；MiniShop `37 passed` | 2 | 无 |
 | Step 5 测试排错 | 修复 FastAPI 生命周期、Buildx 路径、tmpfs 权限、Tempo Trace ID、锁定环境打包和策略解析测试假设 | 平台当前 `1741 passed, 9 deselected`；MiniShop `40 passed` | 7 | 无 |
-| Step 6 整合运维 | 真实 Compose 三场景验收、锁定镜像验证、独立 Git 基线、平台受审修复、reclaim Worker、C0/C1 文档收口、反馈候选下载、离线策展、静态评测、报告门禁和版本发布守护 | `artifacts/results.json` 中 `passed: true`；反馈/策展/评测/版本定向回归与全量 pytest 通过 | 25 | 无 |
+| Step 6 整合运维 | 真实 Compose 四场景验收、Change Event 五步调查、锁定镜像验证、独立 Git 基线、平台受审修复、reclaim Worker、C0/C1 文档收口、反馈候选下载、离线策展、静态评测、报告门禁和版本发布守护 | `artifacts/results.json` 中 `passed: true`；反馈/策展/评测/版本定向回归与全量 pytest 通过 | 29 | 无 |
 
 ## 4. 事件索引
 
@@ -845,6 +844,125 @@
 | 残余风险 | 无；首次被终止的运行不能作为验证证据，最终只引用完整重跑结果 |
 | 预防措施 | 长测试使用长命令超时和短会话 yield，不再把两者设为同一数值 |
 
+### DEV-045：Change Stub 插入位置破坏告警仓储接口
+
+| 字段 | 内容 |
+|---|---|
+| 阶段/模块 | P0-1 Change Event / Stub Unit of Work 接线 |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | 定向 Ruff 报告 `F811`：`StubChangeEventRepository.get_by_external_event_id` 被重复定义，第二个返回类型却是 `Alert` |
+| 影响 | 真实 SQLAlchemy 适配器不受影响，但 skeleton 模式下告警查询方法被错误挂到 Change Stub，接口契约失真 |
+| 排查过程 | 复读 `stub/repositories.py` 的类边界，发现新增类插入在 `StubAlertRepository.save` 与原有查询方法之间 |
+| 根因 | 组合补丁只匹配了前一个方法的结束位置，没有把原类的完整方法组作为插入边界 |
+| 解决方案 | 把告警查询方法移回 `StubAlertRepository`，Change Stub 只保留 Change Event 端口方法，并重新整理导入与格式 |
+| 验证证据 | 变更事件定向 Ruff 通过；领域、仓储、UoW、迁移测试 `45 passed` |
+| 残余风险 | 后续给聚合 Stub 文件增加新类时仍可能误命中相邻类边界 |
+| 预防措施 | 对包含多个相似仓储类的文件，补丁后立即复读新增类前后至少一个完整类，并先跑 Ruff 再跑行为测试 |
+
+### P0-1 Change Event 应用接入阶段摘要
+
+- 完成 DTO → Command → Application Service → UoW → Repository → Outbox 的真实接线。
+- 幂等请求哈希只覆盖脱敏、规范化后的业务字段，排除 `trace_id` 和接入时间；同键异载荷明确冲突。
+- Change Event 与 `change_event.received` Outbox 在同一事务提交，不直接调用 Kafka。
+- 本阶段除 DEV-045 外未观察到新增踩坑、错误或难点；定向验证为 `57 passed`，Ruff 通过。
+
+### DEV-046：Change 工具注册测试误读 Registry 返回契约
+
+| 字段 | 内容 |
+|---|---|
+| 阶段/模块 | P0-1 `changes.query@v1` / Handler 注册测试 |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | 测试把 `ToolHandlerRegistry.get()` 的返回值直接与 Handler 比较，失败输出显示实际返回 `ToolHandlerRegistration` |
+| 影响 | 仅测试断言错误，生产注册代码未受影响 |
+| 排查过程 | 对照既有 Metrics/Logs Handler 测试和 `ToolHandlerRegistry` 契约，确认注册对象同时包含 definition 与 handler |
+| 根因 | 新测试凭名称猜测返回语义，没有先复用同类测试写法 |
+| 解决方案 | 改为分别断言 `registration.definition` 和 `registration.handler` |
+| 验证证据 | Change Handler 及相关定向测试通过 |
+| 残余风险 | 无 |
+| 预防措施 | 新增适配器/注册器测试前先检索同类断言，不根据方法名推断返回类型 |
+
+### DEV-047：Change 注册块切断 Tempo 条件装配
+
+| 字段 | 内容 |
+|---|---|
+| 阶段/模块 | P0-1 RCA Runtime 工具装配 |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | `fixed_no_traces` 回归抛出 `UnboundLocalError: tempo`；默认策略工具数量也仍按旧四步断言失败 |
+| 影响 | 无 Trace 的合法固定策略无法启动 RCA Consumer；默认策略测试未同步 Change 第五步 |
+| 排查过程 | 复读 `rca_runtime.py` 的完整 Trace 条件块，确认 Change 补丁插入在 `TempoSearchClient` 创建与资源/工具注册之间 |
+| 根因 | 对相邻条件分支做局部插入时没有保留原 Trace 分支的完整语义边界 |
+| 解决方案 | 恢复 Tempo 创建、资源登记、工具注册为一个完整条件块；Change 使用独立条件块，并更新默认/无 Trace Runtime 断言 |
+| 验证证据 | RCA Runtime、Controlled Workflow、策略、迁移等定向回归 `108 passed` |
+| 残余风险 | 后续继续增加 Topology/History 工具时仍可能触碰同一装配列表 |
+| 预防措施 | 每次修改工具装配后同时回归默认策略与至少一个缺省资源策略，断言计划、Registry、Handler 和资源数量 |
+
+### DEV-048：Evidence 枚举与既有数据库约束发生漂移
+
+| 字段 | 内容 |
+|---|---|
+| 阶段/模块 | P0-1 CHANGE Evidence / Schema 兼容 |
+| 分类 | 难点 |
+| 状态 | 已解决 |
+| 现象与证据 | `0013` 迁移允许 `INCIDENT_HISTORY`，但领域枚举把该值误放在 `RunbookChangeAction`，ORM 动态约束与历史 DDL 不一致 |
+| 影响 | 历史事故 Evidence 无法由领域模型构造，未来自动生成迁移也会产生错误差异 |
+| 排查过程 | 交叉搜索 `INCIDENT_HISTORY`、`valid_evidence_type` 和全部调用点，确认错误值没有业务调用依赖 |
+| 根因 | 枚举成员添加到了相邻枚举类，且迁移测试只检查 DDL 可生成，没有检查领域值集合一致性 |
+| 解决方案 | 将 `INCIDENT_HISTORY` 移入 `EvidenceType`，同时加入 `CHANGE`；新增 `0030` 显式替换 PostgreSQL Check Constraint 并保留回滚值集合 |
+| 验证证据 | Evidence 领域/仓储、迁移升降级和 RCA 定向回归 `108 passed` |
+| 残余风险 | 迁移回滚前若已有 CHANGE 行，数据库会拒绝恢复旧约束，Runbook 必须先确认/清理该类行 |
+| 预防措施 | Evidence 类型变更同时校验领域枚举、ORM 约束、迁移约束和真实 Evidence 构造测试 |
+
+### DEV-049：Alembic 命名约定二次格式化约束名
+
+| 字段 | 内容 |
+|---|---|
+| 阶段/模块 | P0-1 CHANGE Evidence / PostgreSQL 真实迁移 |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | Docker `migrate` 容器执行 `0030` 时尝试删除 `ck_evidence_ck_evidence_valid_evidence_type`，PostgreSQL 报告约束不存在 |
+| 影响 | 离线 SQL 可生成，但真实 PostgreSQL 无法升级到 Head，整个 E2E 栈被迁移门禁阻断 |
+| 排查过程 | 对照 `0013` 的真实约束名与 Alembic naming convention，确认字符串名被再次套用 `ck_%(table_name)s_%(constraint_name)s` |
+| 根因 | 迁移直接把已格式化名称传给 `drop_constraint/create_check_constraint`，没有使用 `op.f()` 标记名称已完成格式化 |
+| 解决方案 | 升级和降级两条路径都使用 `op.f("ck_evidence_valid_evidence_type")` |
+| 验证证据 | Alembic 离线升降级 `3 passed`；真实 PostgreSQL `migrate` 容器退出码 `0`；随后四场景 E2E 能启动 |
+| 残余风险 | 带现有 CHANGE 数据降级仍会被旧值集合拒绝，这是预期的数据保护行为 |
+| 预防措施 | 命名约定开启时，迁移操作历史约束统一使用 `op.f()`；离线编译后必须至少跑一次真实 PostgreSQL 升级 |
+
+### DEV-050：历史部署 Change 污染后续支付错误归因
+
+| 字段 | 内容 |
+|---|---|
+| 阶段/模块 | MiniShop 四场景 / 确定性 LLM Stub |
+| 分类 | 难点 |
+| 状态 | 已解决 |
+| 现象与证据 | 首轮四场景中前三项通过，`payment-error` 却被报告为 `deployment_regression`；Change、Metric、Log、Trace 都存在，但运行时错误码实际是 `PAYMENT_GATEWAY_ERROR` |
+| 影响 | 暴露“变更发生过 + 任意错误信号”不足以证明发布回归，Ground Truth 负向边界未真正守住 |
+| 排查过程 | 确认 `changes.query@v1` 固定前 30/后 10 分钟窗口正确返回历史部署；问题在 Stub 把任意 Metric 与 Log/Trace 当作部署佐证 |
+| 根因 | 确定性 Stub 只检查 Evidence 类型集合，没有检查变更相对 Incident 的时间相关性，也没有隔离同服务场景顺序 |
+| 解决方案 | Stub 只把 Incident 前一分钟内的成功 v1→v2 发布视为候选；E2E 把部署回归安排在最后，普通场景先验证空/无关 Change 不误归因；Change 单独仍返回 `UNDETERMINED` |
+| 验证证据 | 新增历史部署负向单测；最终 `payment-error` 与 `deployment-regression` 分别命中正确根因，四场景结果 `passed: true` |
+| 残余风险 | Stub 只是确定性工程验收器，不代表 Real LLM 在复杂多变更窗口中的准确率 |
+| 预防措施 | 发布归因测试必须同时包含“仅 Change”“相关 Change + 运行时证据”“历史 Change + 其他故障”三类样本 |
+
+### DEV-051：同服务相邻场景误捞刚关闭的 Incident
+
+| 字段 | 内容 |
+|---|---|
+| 阶段/模块 | MiniShop E2E Runner / Incident 选择 |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | 调整执行顺序后 Runner 在写结果前失败：`start RCA returned HTTP 409`；Agent 日志显示对刚关闭的 payment Incident 发起 RCA，真实 deployment Incident 数秒后才创建 |
+| 影响 | 同为 `payment-service` 的相邻场景发生告警创建竞态，Runner 把旧 CLOSED Incident 当成本轮目标 |
+| 排查过程 | 保留 Compose 栈，交叉检查运行器、HTTP 访问日志和 Incident 列表，确认原条件只有“同服务 + 宽松时间窗” |
+| 根因 | `_wait_for_incident` 没有使用 Manifest 已提供的告警标题，也没有约束 Incident 必须为 OPEN |
+| 解决方案 | Incident 选择收紧为同服务、标题与 `alert_mapping.summary` 精确相等、状态为 OPEN、创建时间位于本轮窗口 |
+| 验证证据 | 干净 PostgreSQL/Redpanda 栈最终退出码 `0`；四场景依次完成并生成 `passed: true` 结果文件 |
+| 残余风险 | 若未来同一标题并行运行多个场景，还需要把外部事件 ID 或运行 ID 暴露到管理查询契约 |
+| 预防措施 | E2E 选择业务对象时使用最强可用业务键，不能只依赖服务名和宽松时间范围 |
+
 ## 6. 分类汇总
 
 ### 踩坑
@@ -874,6 +992,11 @@
 - DEV-038：下游报告校验要覆盖上游生成器的缺失响应哨兵语义。
 - DEV-043：无根因夹具必须同步清空因果链和影响面。
 - DEV-044：长测试要区分工具 yield 与命令硬超时。
+- DEV-045：向聚合 Stub 文件插入新类后必须复读相邻类边界。
+- DEV-046：注册器测试应复用既有契约，不能凭方法名猜返回类型。
+- DEV-047：工具 Runtime 新增条件块后必须回归默认与降级策略。
+- DEV-049：启用 Alembic 命名约定后，历史约束名必须通过 `op.f()` 标记。
+- DEV-051：同服务 E2E 场景不能只按服务名和宽松时间窗选择 Incident。
 
 ### 主要难点
 
@@ -886,6 +1009,8 @@
 - DEV-012：并发前端增量必须先统一资源目录、路由和打包契约。
 - DEV-020：修复动作的风险、回滚和效果必须由部署控制目录提供。
 - DEV-026：两个各自有 limit 的 stale 查询不能直接串行处理，否则单轮真实写入量会变成配置的两倍。
+- DEV-048：领域枚举、ORM 动态约束与历史迁移必须保持同一值集合。
+- DEV-050：Change 时间相关不等于因果，必须覆盖历史变更污染的负向样本。
 
 ## 7. 可复用解决经验
 
@@ -939,20 +1064,21 @@
 
 ### 下次直接复用的经验
 
-- 端到端 RCA 验收至少同时检查：Incident、Workflow、Invocation、四类 Evidence、报告引用和 Ground Truth。
+- 端到端 RCA 验收至少同时检查：Incident、Workflow、Invocation、五类 Evidence、报告引用和 Ground Truth。
 - 本地固定 Token 必须默认关闭、与 OIDC 互斥、生产硬拒绝，不能用“仅演示”代替安全边界。
 - 非 root 可观测栈使用 tmpfs 时，把 UID/GID 验证纳入 Compose 资产测试和启动验收。
 
 ### 验证与已知限制
 
-- 已完成验证：平台 `1741 passed, 9 deselected`，MiniShop `40 passed`，
-  E2E 资产 `3 passed`，Ruff check 和 Compose config 通过。
-- Benchmark 基础验证：定向测试 `22 passed`，三场景 contract fixture 经真实 CLI
-  得到 `3/3`，中文报告包含非生产免责声明，`results.json` 未复制 Ground Truth。
+- 已完成验证：平台 `1804 passed, 9 deselected`，MiniShop `43 passed`，
+  E2E 资产定向 `7 passed`，全仓 Ruff check 和 Compose config 通过。
+- Benchmark 基础验证：四场景 contract fixture 经真实 CLI 得到 `4/4`，中文报告包含
+  非生产免责声明，`results.json` 未复制 Ground Truth。
 - 打包与锁定验证：平台/MiniShop `uv lock --check` 均通过，真实 wheel 包含
   `devops_agent_platform/evaluation`。
-- 已完成真实链路：三份 Manifest 均在重建后的 Docker 环境得到
-  `SUCCEEDED` Workflow 与四类 Evidence，结果文件 `passed: true`。
+- 已完成真实本地链路：四份 Manifest 均在重建后的 Docker 环境得到
+  `SUCCEEDED` Workflow 与 CHANGE、METRIC、LOG、TRACE、RUNBOOK 五类 Evidence，
+  结果文件 `passed: true`；这不是目标环境或 Real LLM 验收。
 - 已完成工程基线：独立 Git `main` 仓库、两个 `uv.lock`、锁定 CI 与锁定
   Docker 安装路径均已验证。
 - 已知限制：仓库没有真实生产控制器凭据、Kubernetes/SSH/cloud/shell 写适配器或外部供应商验收环境。

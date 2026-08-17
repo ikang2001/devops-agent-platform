@@ -1,4 +1,7 @@
 from devops_agent_platform.infrastructure.database.mappers.alert import AlertMapper
+from devops_agent_platform.infrastructure.database.mappers.change_event import (
+    ChangeEventMapper,
+)
 from devops_agent_platform.infrastructure.database.mappers.evidence import (
     EvidenceMapper,
 )
@@ -26,6 +29,7 @@ from devops_agent_platform.infrastructure.database.mappers.workflow_run import (
 
 __all__ = [
     "AlertMapper",
+    "ChangeEventMapper",
     "EvidenceMapper",
     "IncidentMapper",
     "OutboxEventMapper",

@@ -9,6 +9,7 @@ from devops_agent_platform.infrastructure.adapters.stub.outbox import (
 )
 from devops_agent_platform.infrastructure.adapters.stub.repositories import (
     StubAlertRepository,
+    StubChangeEventRepository,
     StubIncidentRepository,
     StubTicketSubmissionRepository,
     StubWorkflowRunRepository,
@@ -20,6 +21,7 @@ class StubUnitOfWork:
 
     def __init__(self) -> None:
         self.alerts = StubAlertRepository()
+        self.change_events = StubChangeEventRepository()
         self.incidents = StubIncidentRepository()
         self.workflow_runs = StubWorkflowRunRepository()
         self.ticket_submissions = StubTicketSubmissionRepository()

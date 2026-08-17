@@ -10,6 +10,7 @@ from devops_agent_platform.domain.exceptions import ConflictError
 from devops_agent_platform.ports.locks import IncidentCorrelationLockPort
 
 from .alert_repository import SQLAlchemyAlertRepository
+from .change_event_repository import SQLAlchemyChangeEventRepository
 from .evidence_repository import SQLAlchemyEvidenceRepository
 from .incident_lock import PostgreSQLIncidentCorrelationLock
 from .incident_repository import SQLAlchemyIncidentRepository
@@ -47,6 +48,7 @@ class SQLAlchemyUnitOfWork:
         )
         self._session: AsyncSession | None = None
         self._alerts: SQLAlchemyAlertRepository | None = None
+        self._change_events: SQLAlchemyChangeEventRepository | None = None
         self._incidents: SQLAlchemyIncidentRepository | None = None
         self._incident_correlation_lock: IncidentCorrelationLockPort | None = None
         self._outbox: SQLAlchemyOutboxRepository | None = None
@@ -71,6 +73,14 @@ class SQLAlchemyUnitOfWork:
         if self._alerts is None:
             raise RuntimeError("Unit of work repositories are not initialized")
         return self._alerts
+
+    @property
+    def change_events(self) -> SQLAlchemyChangeEventRepository:
+        """返回当前事务共享的变更事件仓储。"""
+        self._require_active_session()
+        if self._change_events is None:
+            raise RuntimeError("Unit of work repositories are not initialized")
+        return self._change_events
 
     @property
     def incidents(self) -> SQLAlchemyIncidentRepository:
@@ -167,6 +177,7 @@ class SQLAlchemyUnitOfWork:
 
         self._session = self._session_factory()
         self._alerts = SQLAlchemyAlertRepository(self._session)
+        self._change_events = SQLAlchemyChangeEventRepository(self._session)
         self._incidents = SQLAlchemyIncidentRepository(self._session)
         self._outbox = SQLAlchemyOutboxRepository(self._session)
         self._workflow_runs = SQLAlchemyWorkflowRunRepository(self._session)
@@ -272,6 +283,7 @@ class SQLAlchemyUnitOfWork:
     def _clear_state(self) -> None:
         """清除请求级对象引用，防止 Session 被意外复用。"""
         self._alerts = None
+        self._change_events = None
         self._incidents = None
         self._incident_correlation_lock = None
         self._outbox = None

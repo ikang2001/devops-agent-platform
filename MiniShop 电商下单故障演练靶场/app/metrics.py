@@ -31,6 +31,10 @@ PAYMENT_ERROR_TOTAL = Counter(
     "minishop_payment_error_total",
     "Payment service injected errors",
 )
+PAYMENT_DEPLOYMENT_REGRESSION_TOTAL = Counter(
+    "minishop_payment_deployment_regression_total",
+    "Payment service errors caused by the deployment regression fault",
+)
 INVENTORY_DB_TIMEOUT_TOTAL = Counter(
     "minishop_inventory_db_timeout_total",
     "Inventory service injected database timeouts",

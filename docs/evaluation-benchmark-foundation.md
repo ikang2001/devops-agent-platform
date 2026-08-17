@@ -2,31 +2,31 @@
 
 ## 为什么建设
 
-原项目已经有三份 MiniShop Scenario Manifest、Ground Truth 和真实 Compose E2E，
+当前仓库已有四份 MiniShop Scenario Manifest、Ground Truth 和真实 Compose E2E，
 但评分主要围绕单次报告文本与必要 Evidence 是否出现，无法稳定比较根因服务、根因
 类型、因果链、影响面、Tool 选择、Unsupported Claim 和成本。
 
-本轮先建设确定性评分基础，为后续 Change Event、Topology、Historical Incident RAG
-和 Bounded Dynamic Investigation 提供统一测量轨道。
+本轮先建设确定性评分基础，并已把 Change Event 发布回归场景接入同一测量轨道；
+Topology、Historical Incident RAG 和 Bounded Dynamic Investigation 仍属于后续阶段。
 
 ## 目标与非目标
 
 已实现目标：
 
-- 原地扩展现有三份 Manifest，不复制第二份 Ground Truth；
+- 原地扩展现有三份 Manifest，并新增一份发布回归 Manifest，不复制第二份 Ground Truth；
 - 定义严格的结构化 `RCAPrediction`；
 - Ground Truth 与 Prediction 分路径加载；
 - 提供无 LLM 依赖的纯计算 Scorer；
 - 自动生成 `results.json` 和中文 `evaluation-report.md`；
-- 用三个场景的 deterministic contract fixture 验证完整评分命令。
+- 用四个场景的 deterministic contract fixture 验证完整评分命令。
 
 本轮非目标：
 
 - 不修改生产 `RCAReport` 数据库表；
 - 不从自然语言报告猜测结构化根因；
 - 不运行真实 LLM；
-- 不声称三场景 fixture 是真实准确率；
-- 不提前实现 Change、Topology、RAG 或 Dynamic Investigation。
+- 不声称四场景 fixture 是真实准确率；
+- 不提前实现 Topology、RAG 或 Dynamic Investigation。
 
 ## 数据流与隔离
 
@@ -58,6 +58,10 @@ Ground Truth、Forbidden Claims 和 Expected Tools 只由 Runner/Scorer 读取�
 
 Evidence 类型采用平台现有枚举语义 `METRIC`，没有另造文档示例中的 `METRICS`，
 避免运行时和 Benchmark 出现两种同义值。
+
+当前四场景中，`deployment-regression` 要求 `CHANGE + METRIC + LOG + TRACE`，并把
+“仅凭部署记录直接确认根因”列为禁止声明；另外三个场景把 `CHANGE` 设为可选 Evidence，
+用于验证固定五步计划在无相关变更或存在无关变更时不会误归因。
 
 ## 已支持指标
 
@@ -113,10 +117,13 @@ uv run --project '.\MiniShop 电商下单故障演练靶场' pytest -q `
   '.\MiniShop 电商下单故障演练靶场\tests\test_scenario_manifest.py'
 ```
 
+本地 Compose E2E 已验证四个场景都能完成 Incident → Workflow → Evidence → RCA Report，
+但这是隔离的本地确定性 Stub 验收，不是 Real LLM 准确率，也不是 staging/production 签字。
+
 ## 已实现与未实现边界
 
 当前完成的是 Benchmark Phase 1 和 Phase 2 的基础部分：统一 Ground Truth 扩展、
-结构化 Prediction 合同、Scorer、三个现有场景接入和自动报告。
+结构化 Prediction 合同、Scorer、四个现有场景接入和自动报告。
 
 仍未完成生产 RCA Adapter、12 场景、Real LLM Runner、消融、Bad Case、Load/Chaos
 以及真实容量和成本数据。只有这些真实运行后，才允许把 A/B/C/D/E 数字写入 README
@@ -126,7 +133,7 @@ uv run --project '.\MiniShop 电商下单故障演练靶场' pytest -q `
 
 可以说：
 
-> 为 MiniShop 三类故障建立了隔离 Ground Truth 与结构化 RCA 评分基础，使用确定性
+> 为 MiniShop 四类故障建立了隔离 Ground Truth 与结构化 RCA 评分基础，使用确定性
 > Scorer 评估根因、Evidence、因果链、影响面、工具选择和幻觉风险，并自动生成
 > 机器可读结果与中文报告。
 

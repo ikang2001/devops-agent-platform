@@ -8,6 +8,10 @@ class IdentifierGeneratorPort(Protocol):
         """生成新的告警标识。"""
         ...
 
+    def new_change_event_id(self) -> str:
+        """生成新的变更事件标识。"""
+        ...
+
     def new_incident_id(self) -> str:
         """生成新的事故标识。"""
         ...

@@ -27,6 +27,9 @@ from devops_agent_platform.application.services.audit_retention_worker import (
     AuditRetentionWorkerHealth,
     AuditRetentionWorkerRunner,
 )
+from devops_agent_platform.application.services.change_event_service import (
+    ChangeEventApplicationService,
+)
 from devops_agent_platform.application.services.incident_query_service import (
     IncidentQueryService,
 )
@@ -211,6 +214,7 @@ class ApplicationRuntime:
     alert_service: AlertApplicationService
     rca_service: RCAApplicationService
     shutdown_timeout_seconds: float
+    change_event_service: ChangeEventApplicationService | None = None
     rca_query_service: RCAExecutionQueryService | None = None
     rca_feedback_service: RCAFeedbackApplicationService | None = None
     remediation_service: RemediationApplicationService | None = None
@@ -734,6 +738,10 @@ def build_runtime(
         incident_policy=IncidentCreationPolicy(),
         identifier_generator=identifier_generator,
     )
+    change_event_service = ChangeEventApplicationService(
+        unit_of_work_factory=unit_of_work_factory,
+        identifier_generator=identifier_generator,
+    )
     rca_service = RCAApplicationService(
         unit_of_work_factory=unit_of_work_factory,
         identifier_generator=identifier_generator,
@@ -1027,6 +1035,7 @@ def build_runtime(
         engine=engine,
         session_factory=session_factory,
         alert_service=alert_service,
+        change_event_service=change_event_service,
         rca_service=rca_service,
         rca_query_service=rca_query_service,
         rca_cancellation_service=rca_cancellation_service,

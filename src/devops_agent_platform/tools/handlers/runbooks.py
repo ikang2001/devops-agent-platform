@@ -84,6 +84,10 @@ class RunbookRetrievalHandler:
             target.service_name,
             request["max_results"],
         )
+        titles = ", ".join(runbook.title[:256] for runbook in search_result.items)
+        summary = f"Retrieved published runbooks for service {target.service_name}"
+        if titles:
+            summary += f"; titles={titles[:1024]}"
         response: dict[str, Any] = {
             "source": "runbook_catalog",
             "target": {
@@ -91,9 +95,7 @@ class RunbookRetrievalHandler:
                 "incident_id": target.incident_id,
                 "service_name": target.service_name,
             },
-            "summary": (
-                f"Retrieved published runbooks for service {target.service_name}"
-            ),
+            "summary": summary,
             "runbooks": [],
             "requested_max_results": request["max_results"],
             "possibly_truncated": search_result.possibly_truncated,

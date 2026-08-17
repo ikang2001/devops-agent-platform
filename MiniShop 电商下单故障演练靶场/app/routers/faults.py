@@ -29,6 +29,23 @@ async def enable_payment_error(request: Optional[FaultControlRequest] = None):
     return {"fault": record}
 
 
+@router.post("/faults/deployment-regression")
+async def enable_deployment_regression(
+    request: Optional[FaultControlRequest] = None,
+):
+    payload = request or FaultControlRequest()
+    record = fault_state.enable(
+        service_name="payment-service",
+        fault_type="deployment_regression",
+        error_rate=payload.error_rate,
+        delay_ms=0,
+        duration_seconds=payload.duration_seconds,
+        created_by=payload.created_by,
+    )
+    set_fault_enabled(record.service_name, record.fault_type, True)
+    return {"fault": record}
+
+
 @router.post("/faults/inventory-db-timeout")
 async def enable_inventory_db_timeout(request: Optional[FaultControlRequest] = None):
     payload = request or FaultControlRequest()

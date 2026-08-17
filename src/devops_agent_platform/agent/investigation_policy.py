@@ -33,12 +33,14 @@ def build_plan_for_policy(policy: InvestigationPolicy | str) -> RCAWorkflowPlan:
 
     if policy is InvestigationPolicy.FIXED_NO_TRACES:
         return _build_metrics_logs_runbooks_plan(
-            "observability-rca.no-traces"
+            "observability-rca.no-traces",
+            include_changes=True,
         )
 
     if policy is InvestigationPolicy.FIXED_METRICS_LOGS_RUNBOOKS:
         return _build_metrics_logs_runbooks_plan(
-            "observability-rca.metrics-logs-runbooks"
+            "observability-rca.metrics-logs-runbooks",
+            include_changes=False,
         )
 
     raise AppValidationError(f"unsupported investigation policy: {policy}")
@@ -57,11 +59,27 @@ def parse_investigation_policy(value: str) -> InvestigationPolicy:
         ) from exc
 
 
-def _build_metrics_logs_runbooks_plan(plan_id: str) -> RCAWorkflowPlan:
+def _build_metrics_logs_runbooks_plan(
+    plan_id: str,
+    *,
+    include_changes: bool,
+) -> RCAWorkflowPlan:
     """构造无 Trace 固定计划；不同 plan_id 保留部署意图审计。"""
+    change_steps = (
+        (
+            RCAWorkflowStep(
+                step_id="collect.changes",
+                tool_name="changes.query",
+                tool_version="v1",
+                payload={"max_results": 20},
+            ),
+        )
+        if include_changes
+        else ()
+    )
     return RCAWorkflowPlan(
         plan_id=plan_id,
-        version="v1",
+        version="v2" if include_changes else "v1",
         steps=(
             RCAWorkflowStep(
                 step_id="collect.metrics",
@@ -69,6 +87,7 @@ def _build_metrics_logs_runbooks_plan(plan_id: str) -> RCAWorkflowPlan:
                 tool_version="v1",
                 payload={"window_minutes": 15, "max_series": 200},
             ),
+            *change_steps,
             RCAWorkflowStep(
                 step_id="collect.logs",
                 tool_name="logs.query",

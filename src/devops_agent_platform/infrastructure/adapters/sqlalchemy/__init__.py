@@ -1,5 +1,6 @@
 from .alert_repository import SQLAlchemyAlertRepository
 from .audit_retention_store import SQLAlchemyAuditRetentionStore
+from .change_event_repository import SQLAlchemyChangeEventRepository
 from .evidence_repository import SQLAlchemyEvidenceRepository
 from .incident_lock import PostgreSQLIncidentCorrelationLock
 from .incident_repository import SQLAlchemyIncidentRepository
@@ -25,6 +26,7 @@ from .workflow_run_repository import SQLAlchemyWorkflowRunRepository
 
 __all__ = [
     "SQLAlchemyAlertRepository",
+    "SQLAlchemyChangeEventRepository",
     "SQLAlchemyAuditRetentionStore",
     "SQLAlchemyEvidenceRepository",
     "SQLAlchemyIncidentRepository",

@@ -120,6 +120,7 @@
       "TRACE"
     ],
     "optional_evidence_types": [
+      "CHANGE",
       "HTTP",
       "RUNBOOK"
     ],

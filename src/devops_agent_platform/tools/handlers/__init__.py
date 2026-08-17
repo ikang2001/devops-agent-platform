@@ -1,3 +1,8 @@
+from .change_events import (
+    ChangeEventsQueryHandler,
+    ChangeEventsQueryHandlerConfig,
+    register_change_events_query_tool,
+)
 from .logs import (
     LokiLogsQueryHandler,
     LokiLogsQueryHandlerConfig,
@@ -20,6 +25,8 @@ from .traces import (
 )
 
 __all__ = [
+    "ChangeEventsQueryHandler",
+    "ChangeEventsQueryHandlerConfig",
     "LokiLogsQueryHandler",
     "LokiLogsQueryHandlerConfig",
     "PrometheusMetricsQueryHandler",
@@ -29,6 +36,7 @@ __all__ = [
     "TempoTracesQueryHandler",
     "TempoTracesQueryHandlerConfig",
     "register_tempo_traces_tool",
+    "register_change_events_query_tool",
     "register_prometheus_metrics_tool",
     "register_loki_logs_tool",
     "register_runbook_retrieval_tool",

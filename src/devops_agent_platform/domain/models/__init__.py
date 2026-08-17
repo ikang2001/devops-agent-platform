@@ -1,4 +1,5 @@
 from devops_agent_platform.domain.models.alert import Alert
+from devops_agent_platform.domain.models.change_event import ChangeEvent
 from devops_agent_platform.domain.models.evidence import Evidence
 from devops_agent_platform.domain.models.incident import Incident
 from devops_agent_platform.domain.models.rca_feedback import RCAFeedback
@@ -11,6 +12,7 @@ from devops_agent_platform.domain.models.workflow_run import WorkflowRun
 
 __all__ = [
     "Alert",
+    "ChangeEvent",
     "Evidence",
     "Incident",
     "RCAFeedback",

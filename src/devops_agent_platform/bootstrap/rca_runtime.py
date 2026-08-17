@@ -62,11 +62,13 @@ from devops_agent_platform.ports.rca_report import (
 from devops_agent_platform.tools.executor import ToolExecutor
 from devops_agent_platform.tools.handler_registry import ToolHandlerRegistry
 from devops_agent_platform.tools.handlers import (
+    ChangeEventsQueryHandler,
     LokiLogsQueryHandler,
     PrometheusMetricsQueryHandler,
     PrometheusMetricsQueryHandlerConfig,
     RunbookRetrievalHandler,
     TempoTracesQueryHandler,
+    register_change_events_query_tool,
     register_loki_logs_tool,
     register_prometheus_metrics_tool,
     register_runbook_retrieval_tool,
@@ -132,12 +134,8 @@ def build_rca_consumer_runtime(
         sasl_password=kafka_password,
         poll_timeout_ms=settings.rca_consumer_poll_timeout_ms,
         lag_query_timeout_ms=settings.rca_consumer_lag_timeout_ms,
-        max_lag_partitions=(
-            settings.rca_consumer_max_lag_partitions
-        ),
-        lag_sample_interval_seconds=(
-            settings.rca_consumer_lag_sample_interval_seconds
-        ),
+        max_lag_partitions=(settings.rca_consumer_max_lag_partitions),
+        lag_sample_interval_seconds=(settings.rca_consumer_lag_sample_interval_seconds),
     )
     dead_letter_config = KafkaPublisherConfig(
         bootstrap_servers=settings.kafka_servers,
@@ -151,9 +149,8 @@ def build_rca_consumer_runtime(
         sasl_username=settings.kafka_sasl_username,
         sasl_password=kafka_password,
     )
-    worker_id = (
-        settings.rca_consumer_worker_id
-        or derive_worker_id(settings.rca_consumer_client_id)
+    worker_id = settings.rca_consumer_worker_id or derive_worker_id(
+        settings.rca_consumer_client_id
     )
     llm_gateway = None
     llm_generator_config: LLMRCAReportGeneratorConfig | None = None
@@ -176,6 +173,11 @@ def build_rca_consumer_runtime(
 
     target_resolver = SQLAlchemyObservabilityTargetResolver(session_factory)
     runbook_search = SQLAlchemyRunbookSearch(session_factory)
+
+    def unit_of_work_factory() -> SQLAlchemyUnitOfWork:
+        """为只读工具、抢占、心跳和完成分别创建短事务。"""
+        return SQLAlchemyUnitOfWork(session_factory)
+
     handler_registry = ToolHandlerRegistry()
     definitions = [
         register_prometheus_metrics_tool(
@@ -191,9 +193,7 @@ def build_rca_consumer_runtime(
                     latency_bucket_metric=(
                         settings.metrics_query_latency_bucket_metric
                     ),
-                    availability_metric=(
-                        settings.metrics_query_availability_metric
-                    ),
+                    availability_metric=(settings.metrics_query_availability_metric),
                 ),
             ),
         ),
@@ -214,6 +214,13 @@ def build_rca_consumer_runtime(
             register_tempo_traces_tool(
                 handler_registry,
                 TempoTracesQueryHandler(target_resolver, tempo),
+            )
+        )
+    if "changes.query" in plan_tool_names:
+        definitions.append(
+            register_change_events_query_tool(
+                handler_registry,
+                ChangeEventsQueryHandler(unit_of_work_factory),
             )
         )
     definitions.append(
@@ -247,16 +254,10 @@ def build_rca_consumer_runtime(
         report_generator=report_generator,
     )
 
-    def unit_of_work_factory() -> SQLAlchemyUnitOfWork:
-        """为抢占、心跳和完成分别创建短事务。"""
-        return SQLAlchemyUnitOfWork(session_factory)
-
     execution_service = WorkflowExecutionApplicationService(
         unit_of_work_factory=unit_of_work_factory,
         config=WorkflowClaimConfig(
-            lease_duration=timedelta(
-                seconds=settings.rca_consumer_lease_seconds
-            )
+            lease_duration=timedelta(seconds=settings.rca_consumer_lease_seconds)
         ),
     )
     coordinator = RCAExecutionCoordinator(
@@ -279,9 +280,7 @@ def build_rca_consumer_runtime(
     consumer = RCAKafkaConsumer(
         config=consumer_config,
         processor=RCARequestedRecordProcessor(handler),
-        dead_letter_publisher=KafkaDeadLetterPublisher(
-            dead_letter_config
-        ),
+        dead_letter_publisher=KafkaDeadLetterPublisher(dead_letter_config),
     )
     return RCAConsumerRuntimeBundle(
         worker=RCAConsumerRunner(

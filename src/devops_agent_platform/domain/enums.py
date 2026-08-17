@@ -18,6 +18,28 @@ class AlertSeverity(StrEnum):
         }[self]
 
 
+class ChangeType(StrEnum):
+    """变更事件来源系统统一使用的变更类型。"""
+
+    DEPLOYMENT = "DEPLOYMENT"
+    CONFIG = "CONFIG"
+    FEATURE_FLAG = "FEATURE_FLAG"
+    DEPENDENCY = "DEPENDENCY"
+    SCHEMA = "SCHEMA"
+    INFRASTRUCTURE = "INFRASTRUCTURE"
+    MANUAL_OPERATION = "MANUAL_OPERATION"
+
+
+class ChangeEventStatus(StrEnum):
+    """变更事件自身的执行生命周期状态。"""
+
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    CANCELED = "CANCELED"
+
+
 class IncidentStatus(StrEnum):
     """生产事故生命周期状态。"""
 
@@ -139,7 +161,9 @@ class EvidenceType(StrEnum):
     LOG = "LOG"
     TRACE = "TRACE"
     DEPLOYMENT = "DEPLOYMENT"
+    CHANGE = "CHANGE"
     RUNBOOK = "RUNBOOK"
+    INCIDENT_HISTORY = "INCIDENT_HISTORY"
 
 
 class RunbookStatus(StrEnum):
@@ -155,7 +179,6 @@ class RunbookChangeAction(StrEnum):
 
     SAVE_DRAFT = "SAVE_DRAFT"
     PUBLISH = "PUBLISH"
-    INCIDENT_HISTORY = "INCIDENT_HISTORY"
 
 
 class RCAConclusionStatus(StrEnum):

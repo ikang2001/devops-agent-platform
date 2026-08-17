@@ -11,11 +11,7 @@ from devops_agent_platform.evaluation.runner import main, run_benchmark
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCENARIO_ROOT = PROJECT_ROOT / "MiniShop 电商下单故障演练靶场" / "scenarios"
 FIXTURE_INPUT = (
-    PROJECT_ROOT
-    / "ops"
-    / "evaluation"
-    / "fixtures"
-    / "minishop-v1-predictions.json"
+    PROJECT_ROOT / "ops" / "evaluation" / "fixtures" / "minishop-v1-predictions.json"
 )
 
 
@@ -131,15 +127,16 @@ def test_runner_writes_machine_and_human_readable_artifacts(tmp_path: Path) -> N
     assert "不等同于真实生产环境或真实 LLM 验收" in report
 
 
-def test_repository_contract_fixture_scores_all_three_scenarios(
+def test_repository_contract_fixture_scores_all_four_scenarios(
     tmp_path: Path,
 ) -> None:
     result = run_benchmark(SCENARIO_ROOT, FIXTURE_INPUT, tmp_path / "artifacts")
 
-    assert result["summary"]["total_runs"] == 3
-    assert result["summary"]["passed_runs"] == 3
+    assert result["summary"]["total_runs"] == 4
+    assert result["summary"]["passed_runs"] == 4
     assert {item["scenario_id"] for item in result["runs"]} == {
         "checkout-latency",
+        "deployment-regression",
         "inventory-db-timeout",
         "payment-error",
     }

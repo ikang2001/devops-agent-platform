@@ -27,6 +27,7 @@ def test_default_catalog_contains_complete_ground_truth_for_all_faults():
 
     assert {scenario.scenario_id for scenario in catalog.scenarios} == {
         "checkout-latency",
+        "deployment-regression",
         "inventory-db-timeout",
         "payment-error",
     }
@@ -50,9 +51,7 @@ def test_every_ground_truth_requires_its_tempo_signal():
     catalog = load_scenario_catalog()
 
     for scenario in catalog.scenarios:
-        tempo_signals = [
-            signal for signal in scenario.expected_signals if signal.source == "tempo"
-        ]
+        tempo_signals = [signal for signal in scenario.expected_signals if signal.source == "tempo"]
         assert len(tempo_signals) == 1
         assert tempo_signals[0].evidence_id in scenario.ground_truth.required_evidence
         assert "resource.service.name" in tempo_signals[0].locator
@@ -60,7 +59,12 @@ def test_every_ground_truth_requires_its_tempo_signal():
 
 @pytest.mark.parametrize(
     "scenario_id",
-    ["checkout-latency", "inventory-db-timeout", "payment-error"],
+    [
+        "checkout-latency",
+        "deployment-regression",
+        "inventory-db-timeout",
+        "payment-error",
+    ],
 )
 def test_manifest_actions_execute_against_minishop(scenario_id: str):
     scenario = load_scenario(SCENARIO_DIRECTORY / f"{scenario_id}.json")
@@ -97,6 +101,20 @@ def test_catalog_rejects_duplicate_scenario_ids():
 
     with pytest.raises(ValidationError, match="scenario_id values must be unique"):
         ScenarioCatalog(scenarios=[scenario, scenario])
+
+
+def test_deployment_regression_requires_change_and_corroborating_evidence():
+    scenario = load_scenario(SCENARIO_DIRECTORY / "deployment-regression.json")
+
+    assert scenario.ground_truth.root_cause.root_cause_type == ("deployment_regression")
+    assert scenario.ground_truth.root_cause.root_cause_resource == ("payment-service:v2")
+    assert set(scenario.ground_truth.required_evidence_types) == {
+        "CHANGE",
+        "LOG",
+        "METRIC",
+        "TRACE",
+    }
+    assert "changes.query@v1" in scenario.ground_truth.expected_tool_types
 
 
 def test_directory_loader_applies_catalog_uniqueness_validation(tmp_path: Path):

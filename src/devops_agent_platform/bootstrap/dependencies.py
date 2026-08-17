@@ -11,6 +11,9 @@ from devops_agent_platform.application.security import AdministratorPrincipal
 from devops_agent_platform.application.services.alert_service import (
     AlertApplicationService,
 )
+from devops_agent_platform.application.services.change_event_service import (
+    ChangeEventApplicationService,
+)
 from devops_agent_platform.application.services.incident_query_service import (
     IncidentQueryService,
 )
@@ -106,6 +109,16 @@ def get_alert_application_service(request: Request) -> AlertApplicationService:
     return service
 
 
+def get_change_event_application_service(
+    request: Request,
+) -> ChangeEventApplicationService:
+    """从应用生命周期容器获取变更事件接入服务。"""
+    service = getattr(request.app.state, "change_event_application_service", None)
+    if service is None:
+        raise RuntimeUnavailableError("Change event service is unavailable")
+    return service
+
+
 def get_application_runtime(request: Request) -> ApplicationRuntime:
     """获取已启动的应用运行时，供就绪检查等进程级接口使用。"""
     runtime = getattr(request.app.state, "runtime", None)
@@ -119,6 +132,14 @@ def build_skeleton_alert_service() -> AlertApplicationService:
     return AlertApplicationService(
         unit_of_work_factory=StubUnitOfWork,
         incident_policy=IncidentCreationPolicy(),
+        identifier_generator=UUIDIdentifierGenerator(),
+    )
+
+
+def build_skeleton_change_event_service() -> ChangeEventApplicationService:
+    """构建显式返回 501 的无外部依赖变更接入服务。"""
+    return ChangeEventApplicationService(
+        unit_of_work_factory=StubUnitOfWork,
         identifier_generator=UUIDIdentifierGenerator(),
     )
 
@@ -163,9 +184,7 @@ def get_remediation_service(
     """从应用生命周期容器获取受控自动修复服务。"""
     service = getattr(request.app.state, "remediation_service", None)
     if service is None:
-        raise RuntimeUnavailableError(
-            "Remediation controller is not configured"
-        )
+        raise RuntimeUnavailableError("Remediation controller is not configured")
     return service
 
 

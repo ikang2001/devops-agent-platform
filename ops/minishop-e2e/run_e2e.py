@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import math
 import os
@@ -21,12 +23,19 @@ from app.scenario_manifest import (
 )
 
 TERMINAL_WORKFLOW_STATES = {"SUCCEEDED", "FAILED", "CANCELED"}
-REQUIRED_PLATFORM_EVIDENCE = {"METRIC", "LOG", "TRACE", "RUNBOOK"}
+REQUIRED_PLATFORM_EVIDENCE = {"CHANGE", "METRIC", "LOG", "TRACE", "RUNBOOK"}
 EXPECTED_SCENARIOS = {
     "checkout-latency",
+    "deployment-regression",
     "inventory-db-timeout",
     "payment-error",
 }
+SCENARIO_EXECUTION_ORDER = (
+    "checkout-latency",
+    "inventory-db-timeout",
+    "payment-error",
+    "deployment-regression",
+)
 
 
 class E2EFailure(RuntimeError):
@@ -48,6 +57,10 @@ class E2EConfig:
     admin_id: str = os.getenv("E2E_ADMIN_ID", "demo-admin")
     admin_token: str = os.getenv(
         "E2E_ADMIN_TOKEN", "minishop-e2e-admin-token-change-me-123456"
+    )
+    webhook_secret: str = os.getenv(
+        "E2E_WEBHOOK_SECRET",
+        "minishop-e2e-webhook-secret-change-me-123456",
     )
     timeout_seconds: float = float(os.getenv("E2E_TIMEOUT_SECONDS", "180"))
     artifacts_path: Path = Path(
@@ -99,12 +112,14 @@ class SignalEvaluator:
         started_at: datetime,
         trigger_status: int,
         expected_trigger_status: int,
+        platform_evidence: list[dict[str, Any]],
     ) -> SignalResult:
         evaluators: dict[str, Callable[[], bool]] = {
             "http": lambda: trigger_status == expected_trigger_status,
             "prometheus": lambda: self._prometheus(signal.locator),
             "loki": lambda: self._loki(signal.locator, started_at),
             "tempo": lambda: self._tempo(signal.locator, started_at),
+            "change": lambda: self._change(platform_evidence),
         }
         passed = wait_for(
             f"signal {signal.evidence_id}",
@@ -117,6 +132,15 @@ class SignalEvaluator:
             source=signal.source,
             passed=passed,
             assertion=signal.assertion,
+        )
+
+    @staticmethod
+    def _change(platform_evidence: list[dict[str, Any]]) -> bool:
+        return any(
+            item.get("evidence_type") == "CHANGE"
+            and item.get("tool_name") == "changes.query"
+            and "v1->v2" in str(item.get("summary", "")).replace(" ", "")
+            for item in platform_evidence
         )
 
     def _prometheus(self, query: str) -> bool:
@@ -180,7 +204,13 @@ class MiniShopE2ERunner:
             raise E2EFailure(f"unexpected scenario catalog: {sorted(scenario_ids)}")
         self._grant_tool_permissions()
         self._publish_runbooks(catalog.scenarios)
-        results = [self._run_scenario(scenario) for scenario in catalog.scenarios]
+        scenarios_by_id = {
+            scenario.scenario_id: scenario for scenario in catalog.scenarios
+        }
+        results = [
+            self._run_scenario(scenarios_by_id[scenario_id])
+            for scenario_id in SCENARIO_EXECUTION_ORDER
+        ]
         report = {
             "schema_version": "1.0",
             "run_id": self.run_id,
@@ -240,6 +270,7 @@ class MiniShopE2ERunner:
             json={
                 "permission_tags": [
                     "logs:read",
+                    "changes:read",
                     "metrics:read",
                     "runbooks:read",
                     "tenant:observe",
@@ -284,17 +315,21 @@ class MiniShopE2ERunner:
         trigger_status = 0
         try:
             self._invoke_minishop(scenario.cleanup)
+            if scenario.scenario_id == "deployment-regression":
+                self._record_change_event(started_at)
             self._invoke_minishop(scenario.injection)
             trigger_status = self._generate_fault_traffic(scenario)
             incident = self._wait_for_incident(scenario, started_at)
             workflow_run_id = self._start_rca(incident["incident_id"], scenario)
             result = self._wait_for_workflow(workflow_run_id)
-            return self._evaluate_scenario(
+            evaluation = self._evaluate_scenario(
                 scenario,
                 result,
                 started_at=started_at,
                 trigger_status=trigger_status,
             )
+            self._settle_incident(incident["incident_id"])
+            return evaluation
         finally:
             self._invoke_minishop(scenario.cleanup)
 
@@ -322,6 +357,44 @@ class MiniShopE2ERunner:
                 )
         return status
 
+    def _record_change_event(self, started_at: datetime) -> None:
+        """在故障开启前通过与生产入口相同的 HMAC 契约记录部署。"""
+        payload = {
+            "tenant_id": self.config.tenant_id,
+            "source": "minishop-scenario-runner",
+            "external_event_id": f"deploy-payment-v2-{self.run_id}",
+            "service_name": "payment-service",
+            "resource_type": "deployment",
+            "resource_id": "payment-service",
+            "change_type": "DEPLOYMENT",
+            "status": "SUCCEEDED",
+            "version_before": "v1",
+            "version_after": "v2",
+            "operator_id": "scenario-runner",
+            "summary": "payment-service deployed from v1 to v2",
+            "metadata": {"environment": "minishop-e2e"},
+            "started_at": started_at.isoformat(),
+            "completed_at": started_at.isoformat(),
+        }
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        timestamp = str(int(time.time()))
+        signature = hmac.new(
+            self.config.webhook_secret.encode(),
+            timestamp.encode() + b"." + body,
+            hashlib.sha256,
+        ).hexdigest()
+        response = self.http.request(
+            "POST",
+            f"{self.config.agent_url}/api/v1/change-events",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-DevOps-Agent-Timestamp": timestamp,
+                "X-DevOps-Agent-Signature": f"sha256={signature}",
+            },
+        )
+        self._require_platform_success(response, "record deployment change")
+
     def _wait_for_incident(
         self, scenario: ScenarioManifest, started_at: datetime
     ) -> dict[str, Any]:
@@ -335,10 +408,11 @@ class MiniShopE2ERunner:
             data = self._require_platform_success(response, "list incidents")
             for incident in data["items"]:
                 created_at = datetime.fromisoformat(incident["created_at"])
-                if incident[
-                    "service_name"
-                ] == scenario.service_name and created_at >= started_at - timedelta(
-                    seconds=10
+                if (
+                    incident["service_name"] == scenario.service_name
+                    and incident["title"] == scenario.alert_mapping.summary
+                    and incident["status"] == "OPEN"
+                    and created_at >= started_at - timedelta(seconds=10)
                 ):
                     return incident
             return None
@@ -402,6 +476,7 @@ class MiniShopE2ERunner:
                 started_at=started_at,
                 trigger_status=trigger_status,
                 expected_trigger_status=scenario.trigger.expected_status,
+                platform_evidence=result["evidence"],
             )
             for signal in scenario.expected_signals
         ]
@@ -456,6 +531,38 @@ class MiniShopE2ERunner:
                 "confidence": report.get("confidence"),
             },
         }
+
+    def _settle_incident(self, incident_id: str) -> None:
+        """关闭已评测事故，防止同服务后续场景被关联到旧事故。"""
+        base = self._admin_url(f"incidents/{incident_id}")
+        current = self.http.request("GET", base, headers=self._auth_headers())
+        self._require_platform_success(current, "read incident before resolution")
+        etag = current.headers.get("ETag")
+        if etag is None:
+            raise E2EFailure("incident response did not include ETag")
+        resolved = self.http.request(
+            "POST",
+            f"{base}/resolution",
+            headers=self._write_headers(
+                f"resolve-{incident_id}-{self.run_id}",
+                etag,
+            ),
+            json={"reason": "MiniShop scenario evidence evaluated"},
+        )
+        self._require_platform_success(resolved, "resolve scenario incident")
+        resolved_etag = resolved.headers.get("ETag")
+        if resolved_etag is None:
+            raise E2EFailure("incident resolution did not include ETag")
+        closed = self.http.request(
+            "POST",
+            f"{base}/closure",
+            headers=self._write_headers(
+                f"close-{incident_id}-{self.run_id}",
+                resolved_etag,
+            ),
+            json={"reason": "MiniShop scenario completed"},
+        )
+        self._require_platform_success(closed, "close scenario incident")
 
     def _invoke_minishop(self, action: Any) -> dict[str, Any]:
         response = self.http.request(

@@ -19,12 +19,16 @@ SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / "scenarios"
 SUPPORTED_FAULTS = {
     "checkout-service": frozenset({"latency"}),
     "inventory-service": frozenset({"db_timeout"}),
-    "payment-service": frozenset({"payment_error"}),
+    "payment-service": frozenset({"deployment_regression", "payment_error"}),
 }
 FAULT_ENDPOINTS = {
     ("checkout-service", "latency"): "/faults/checkout-latency",
     ("inventory-service", "db_timeout"): "/faults/inventory-db-timeout",
     ("payment-service", "payment_error"): "/faults/payment-error",
+    (
+        "payment-service",
+        "deployment_regression",
+    ): "/faults/deployment-regression",
 }
 ALERT_SEVERITY_MAP = {"P1": "CRITICAL", "P2": "WARNING", "P3": "INFO"}
 
@@ -59,7 +63,7 @@ def _safe_project_path(value: str) -> str:
 ApiPath = Annotated[str, AfterValidator(_safe_api_path)]
 RunbookPath = Annotated[str, AfterValidator(_safe_project_path)]
 FaultService = Literal["checkout-service", "inventory-service", "payment-service"]
-EvidenceSource = Literal["http", "loki", "prometheus", "tempo"]
+EvidenceSource = Literal["change", "http", "loki", "prometheus", "tempo"]
 BenchmarkEvidenceType = Literal[
     "METRIC",
     "LOG",
@@ -71,6 +75,7 @@ BenchmarkEvidenceType = Literal[
     "HTTP",
 ]
 EVIDENCE_TYPE_BY_SOURCE: Dict[str, str] = {
+    "change": "CHANGE",
     "http": "HTTP",
     "loki": "LOG",
     "prometheus": "METRIC",
@@ -143,9 +148,7 @@ class ExpectedSignal(ManifestModel):
     def validate_evidence_type(self) -> ExpectedSignal:
         expected = EVIDENCE_TYPE_BY_SOURCE[self.source]
         if self.evidence_type != expected:
-            raise ValueError(
-                f"{self.source} signal must use evidence_type {expected}"
-            )
+            raise ValueError(f"{self.source} signal must use evidence_type {expected}")
         return self
 
 
@@ -210,13 +213,9 @@ class GroundTruth(ManifestModel):
             if len(values) != len(set(values)):
                 raise ValueError(f"{field_name} must be unique")
         if set(self.required_evidence_types) & set(self.optional_evidence_types):
-            raise ValueError(
-                "required_evidence_types and optional_evidence_types must be disjoint"
-            )
+            raise ValueError("required_evidence_types and optional_evidence_types must be disjoint")
         if set(self.expected_tool_types) & set(self.forbidden_tool_types):
-            raise ValueError(
-                "expected_tool_types and forbidden_tool_types must be disjoint"
-            )
+            raise ValueError("expected_tool_types and forbidden_tool_types must be disjoint")
         edges = [(item.from_node, item.to_node) for item in self.causal_chain]
         if len(edges) != len(set(edges)):
             raise ValueError("causal_chain edges must be unique")
@@ -262,17 +261,13 @@ class ScenarioManifest(FaultIdentity):
             names = ", ".join(sorted(unknown_evidence))
             raise ValueError(f"required_evidence references unknown signal IDs: {names}")
         signal_by_id = {
-            signal.evidence_id: signal.evidence_type
-            for signal in self.expected_signals
+            signal.evidence_id: signal.evidence_type for signal in self.expected_signals
         }
         required_types = {
-            signal_by_id[evidence_id]
-            for evidence_id in self.ground_truth.required_evidence
+            signal_by_id[evidence_id] for evidence_id in self.ground_truth.required_evidence
         }
         if required_types != set(self.ground_truth.required_evidence_types):
-            raise ValueError(
-                "required_evidence_types must match required_evidence signal types"
-            )
+            raise ValueError("required_evidence_types must match required_evidence signal types")
         if self.service_name not in self.ground_truth.affected_services:
             raise ValueError("affected_services must include the root cause service")
         return self

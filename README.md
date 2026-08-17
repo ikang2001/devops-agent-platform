@@ -8,7 +8,7 @@
 默认 RCA 使用服务端发布的固定只读计划：
 
 ```text
-Metrics → Logs → Traces → Runbooks → Evidence → RCA Report
+Metrics → Change → Logs → Traces → Runbooks → Evidence → RCA Report
 ```
 
 LLM 只负责生成供人工复核的结构化候选报告，不能把根因标记为 `CONFIRMED`。告警接入也不会自动启动 RCA，必须由授权操作员显式触发，或由未来单独接线的策略开关触发。
@@ -23,6 +23,7 @@ LLM 只负责生成供人工复核的结构化候选报告，不能把根因标�
 | Step 6 产品化边界 | [STEP6_PRODUCTIZATION.md](STEP6_PRODUCTIZATION.md) |
 | 最小改造总计划 | [docs/remediation-roadmap-master-plan.md](docs/remediation-roadmap-master-plan.md) |
 | MiniShop 端到端 RCA 导读 | [docs/minishop-e2e-rca-code-tour.md](docs/minishop-e2e-rca-code-tour.md) |
+| Change Event 到 RCA 闭环 | [docs/change-event-rca-loop.md](docs/change-event-rca-loop.md) |
 | Benchmark 基础评分闭环 | [docs/evaluation-benchmark-foundation.md](docs/evaluation-benchmark-foundation.md) |
 | 部署说明 | [ops/deploy/README.md](ops/deploy/README.md) |
 | 运维 Runbook | [ops/runbooks](ops/runbooks) |
@@ -66,16 +67,21 @@ LLM 只负责生成供人工复核的结构化候选报告，不能把根因标�
 ```mermaid
 flowchart LR
     A[Alertmanager / Webhook] --> B[FastAPI 接入层]
+    A2[CI/CD / Change Source] --> B2[Change Event HMAC 接入]
     B --> C[(PostgreSQL)]
+    B2 --> C
     B --> D[Transactional Outbox]
+    B2 --> D
     D --> E[Kafka / Redpanda]
     E --> F[RCA Consumer]
     F --> G[受控 Agent Workflow]
     G --> H[Prometheus]
+    G --> H2[Change Event Store]
     G --> I[Loki]
     G --> J[Tempo]
     G --> K[Runbook Catalog]
     H --> L[Evidence]
+    H2 --> L
     I --> L
     J --> L
     K --> L
@@ -152,9 +158,9 @@ flowchart LR
 
 | 策略 | 调查步骤 | 适用环境 |
 |---|---|---|
-| `fixed_default` | Metrics → Logs → Traces → Runbooks | Prometheus、Loki、Tempo 均可用 |
-| `fixed_no_traces` | Metrics → Logs → Runbooks | 没有 Tempo |
-| `fixed_metrics_logs_runbooks` | Metrics → Logs → Runbooks | 显式强调无 Trace 的固定流程 |
+| `fixed_default` | Metrics → Change → Logs → Traces → Runbooks | Prometheus、Change Store、Loki、Tempo 均可用 |
+| `fixed_no_traces` | Metrics → Change → Logs → Runbooks | 没有 Tempo |
+| `fixed_metrics_logs_runbooks` | Metrics → Logs → Runbooks | 显式强调无 Change/Trace 的基线流程 |
 
 这些策略是部署时选择的静态计划，不是运行时自适应工具选择。
 
@@ -195,7 +201,10 @@ DEVOPS_AGENT_LLM_DASHSCOPE_API_KEY=inject-from-secret-manager
 MiniShop → Prometheus / Loki / Tempo → Alertmanager → 平台 → Kafka → RCA → Ground Truth 评测
 ```
 
-三个机器可读场景覆盖典型的下单故障，并通过 Manifest 与 Ground Truth 校验 RCA 报告。
+四个机器可读场景覆盖典型的下单故障，并通过 Manifest 与 Ground Truth 校验 RCA 报告：
+`checkout-latency`、`inventory-db-timeout`、`payment-error` 和
+`deployment-regression`。发布回归场景要求 Change、Metric、Log、Trace 共同归因；
+其他场景允许 Change 查询为空，不能因为历史部署记录单独改变根因。
 
 在 PowerShell 中执行：
 
@@ -213,7 +222,7 @@ ops/minishop-e2e/artifacts/results.json
 
 ### Benchmark 基础评分闭环
 
-现有三个 Manifest 已扩展根因类型、Evidence 类型、有向因果边、影响服务以及期望/
+现有四个 Manifest 已扩展根因类型、Evidence 类型、有向因果边、影响服务以及期望/
 禁止工具。独立 Scorer 可以对结构化 Prediction 计算 RCA、Evidence、Claim、因果链、
 影响面和 Tool 指标，并生成 `results.json` 与中文 `evaluation-report.md`。
 

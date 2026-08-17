@@ -22,11 +22,12 @@
       "conclusion_status": "CANDIDATE",
       "confidence": 0.8,
       "evidence_ids": [
+        "fixture-payment-change",
         "fixture-payment-metric",
         "fixture-payment-log",
         "fixture-payment-trace"
       ],
-      "evidence_types": ["METRIC", "LOG", "TRACE"],
+      "evidence_types": ["CHANGE", "METRIC", "LOG", "TRACE"],
       "claims": [
         {
           "claim_type": "ROOT_CAUSE",
@@ -49,6 +50,11 @@
           "evidence_ids": ["fixture-payment-metric"]
         },
         {
+          "tool_type": "changes.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-payment-change"]
+        },
+        {
           "tool_type": "logs.query@v1",
           "status": "SUCCEEDED",
           "evidence_ids": ["fixture-payment-log"]
@@ -64,10 +70,87 @@
           "evidence_ids": []
         }
       ],
-      "investigation_steps": 4,
+      "investigation_steps": 5,
       "llm_calls": 1,
       "latency_ms": 1000,
       "total_tokens": 300,
+      "estimated_cost": 0.0
+    },
+    {
+      "scenario_id": "deployment-regression",
+      "run_id": "fixture-deployment-regression-001",
+      "root_cause": {
+        "service": "payment-service",
+        "type": "deployment_regression",
+        "resource": "payment-service:v2"
+      },
+      "conclusion_status": "CANDIDATE",
+      "confidence": 0.85,
+      "evidence_ids": [
+        "fixture-deployment-change",
+        "fixture-deployment-metric",
+        "fixture-deployment-log",
+        "fixture-deployment-trace"
+      ],
+      "evidence_types": ["CHANGE", "METRIC", "LOG", "TRACE"],
+      "claims": [
+        {
+          "claim_type": "ROOT_CAUSE",
+          "statement": "payment-service v2 introduced a corroborated deployment regression",
+          "evidence_ids": [
+            "fixture-deployment-change",
+            "fixture-deployment-metric",
+            "fixture-deployment-log"
+          ]
+        }
+      ],
+      "causal_chain": [
+        {
+          "from_node": "payment-service:v2",
+          "to_node": "payment-service",
+          "evidence_ids": [
+            "fixture-deployment-change",
+            "fixture-deployment-log"
+          ]
+        },
+        {
+          "from_node": "payment-service",
+          "to_node": "checkout-service",
+          "evidence_ids": ["fixture-deployment-trace"]
+        }
+      ],
+      "affected_services": ["payment-service", "checkout-service"],
+      "tool_calls": [
+        {
+          "tool_type": "metrics.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-deployment-metric"]
+        },
+        {
+          "tool_type": "changes.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-deployment-change"]
+        },
+        {
+          "tool_type": "logs.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-deployment-log"]
+        },
+        {
+          "tool_type": "traces.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-deployment-trace"]
+        },
+        {
+          "tool_type": "runbooks.retrieve@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": []
+        }
+      ],
+      "investigation_steps": 5,
+      "llm_calls": 1,
+      "latency_ms": 1050,
+      "total_tokens": 340,
       "estimated_cost": 0.0
     },
     {
@@ -81,11 +164,12 @@
       "conclusion_status": "CANDIDATE",
       "confidence": 0.8,
       "evidence_ids": [
+        "fixture-inventory-change",
         "fixture-inventory-metric",
         "fixture-inventory-log",
         "fixture-inventory-trace"
       ],
-      "evidence_types": ["METRIC", "LOG", "TRACE"],
+      "evidence_types": ["CHANGE", "METRIC", "LOG", "TRACE"],
       "claims": [
         {
           "claim_type": "ROOT_CAUSE",
@@ -113,6 +197,11 @@
           "evidence_ids": ["fixture-inventory-metric"]
         },
         {
+          "tool_type": "changes.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-inventory-change"]
+        },
+        {
           "tool_type": "logs.query@v1",
           "status": "SUCCEEDED",
           "evidence_ids": ["fixture-inventory-log"]
@@ -128,7 +217,7 @@
           "evidence_ids": []
         }
       ],
-      "investigation_steps": 4,
+      "investigation_steps": 5,
       "llm_calls": 1,
       "latency_ms": 1100,
       "total_tokens": 320,
@@ -145,11 +234,12 @@
       "conclusion_status": "CANDIDATE",
       "confidence": 0.8,
       "evidence_ids": [
+        "fixture-checkout-change",
         "fixture-checkout-metric",
         "fixture-checkout-log",
         "fixture-checkout-trace"
       ],
-      "evidence_types": ["METRIC", "LOG", "TRACE"],
+      "evidence_types": ["CHANGE", "METRIC", "LOG", "TRACE"],
       "claims": [
         {
           "claim_type": "ROOT_CAUSE",
@@ -172,6 +262,11 @@
           "evidence_ids": ["fixture-checkout-metric"]
         },
         {
+          "tool_type": "changes.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-checkout-change"]
+        },
+        {
           "tool_type": "logs.query@v1",
           "status": "SUCCEEDED",
           "evidence_ids": ["fixture-checkout-log"]
@@ -187,7 +282,7 @@
           "evidence_ids": []
         }
       ],
-      "investigation_steps": 4,
+      "investigation_steps": 5,
       "llm_calls": 1,
       "latency_ms": 900,
       "total_tokens": 280,

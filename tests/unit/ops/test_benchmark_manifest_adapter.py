@@ -19,6 +19,7 @@ def test_existing_minishop_manifests_form_a_scoring_catalog() -> None:
 
     assert {item.scenario_id for item in catalog} == {
         "checkout-latency",
+        "deployment-regression",
         "inventory-db-timeout",
         "payment-error",
     }

@@ -70,6 +70,7 @@ _RESERVED_PAYLOAD_FIELDS = frozenset(
 )
 _TOOL_EVIDENCE_DEFAULTS = {
     "metrics.query": (EvidenceType.METRIC, "prometheus"),
+    "changes.query": (EvidenceType.CHANGE, "change_event_store"),
     "logs.query": (EvidenceType.LOG, "loki"),
     "traces.query": (EvidenceType.TRACE, "tempo"),
 }
@@ -258,8 +259,7 @@ class ControlledAgentWorkflowConfig:
         )
         if self.partial_report_confidence_cap > self.report_confidence_cap:
             raise AppValidationError(
-                "partial_report_confidence_cap must not exceed "
-                "report_confidence_cap"
+                "partial_report_confidence_cap must not exceed report_confidence_cap"
             )
 
     @staticmethod
@@ -486,11 +486,7 @@ class ControlledAgentWorkflow:
         """保留失败步骤标记；摘要过长时优先截断原始生成内容。"""
         if not failed_step_ids or "Partial collection:" in summary:
             return summary
-        marker = (
-            " Partial collection: failed steps="
-            + ",".join(failed_step_ids)
-            + "."
-        )
+        marker = " Partial collection: failed steps=" + ",".join(failed_step_ids) + "."
         maximum_summary_length = 4096 - len(marker)
         return summary[:maximum_summary_length].rstrip() + marker
 
@@ -589,9 +585,7 @@ class ControlledAgentWorkflow:
         result: dict[str, Any],
     ) -> Evidence:
         """把单步工具输出转换为可持久化 Evidence。"""
-        evidence_type = self._evidence_type_for_tool(
-            prepared.definition.tool_name
-        )
+        evidence_type = self._evidence_type_for_tool(prepared.definition.tool_name)
         default_source = _TOOL_EVIDENCE_DEFAULTS.get(
             prepared.definition.tool_name,
             (evidence_type, prepared.definition.tool_name),
@@ -794,16 +788,22 @@ def _is_public_evidence_text(value: str, maximum: int) -> bool:
 
 
 def build_default_observability_plan() -> RCAWorkflowPlan:
-    """构造指标、日志、链路和Runbook四步固定只读RCA计划。"""
+    """构造指标、变更、日志、链路和 Runbook 固定只读计划。"""
     return RCAWorkflowPlan(
         plan_id="default.observability-rca",
-        version="v2",
+        version="v3",
         steps=(
             RCAWorkflowStep(
                 step_id="collect.metrics",
                 tool_name="metrics.query",
                 tool_version="v1",
                 payload={"window_minutes": 15, "max_series": 200},
+            ),
+            RCAWorkflowStep(
+                step_id="collect.changes",
+                tool_name="changes.query",
+                tool_version="v1",
+                payload={"max_results": 20},
             ),
             RCAWorkflowStep(
                 step_id="collect.logs",

@@ -11,14 +11,26 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from devops_agent_platform.domain.enums import AlertSeverity, IncidentStatus
+from devops_agent_platform.domain.enums import (
+    AlertSeverity,
+    ChangeEventStatus,
+    ChangeType,
+    IncidentStatus,
+)
 from devops_agent_platform.domain.models.alert import Alert
+from devops_agent_platform.domain.models.change_event import (
+    ChangeEvent,
+    build_change_metadata,
+)
 from devops_agent_platform.domain.models.incident import Incident
 from devops_agent_platform.infrastructure.adapters.sqlalchemy.unit_of_work import (
     SQLAlchemyUnitOfWork,
 )
 from devops_agent_platform.infrastructure.database.base import Base
 from devops_agent_platform.infrastructure.database.models.alert import AlertRecord
+from devops_agent_platform.infrastructure.database.models.change_event import (
+    ChangeEventRecord,
+)
 from devops_agent_platform.infrastructure.database.models.incident import IncidentRecord
 
 
@@ -97,6 +109,31 @@ def build_incident(incident_id: str = "inc_uow_001") -> Incident:
     )
 
 
+def build_change_event(change_event_id: str = "chg_uow_001") -> ChangeEvent:
+    """构造事务测试使用的有效变更事件。"""
+    started_at = datetime(2026, 6, 27, 7, 55, tzinfo=UTC)
+    return ChangeEvent(
+        change_event_id=change_event_id,
+        tenant_id="tenant_001",
+        source="argocd",
+        external_event_id="evt_change_uow_001",
+        service_name="checkout-api",
+        resource_type="deployment",
+        resource_id="checkout-api",
+        change_type=ChangeType.DEPLOYMENT,
+        status=ChangeEventStatus.SUCCEEDED,
+        version_before="v1",
+        version_after="v2",
+        operator_id="deployment-bot",
+        summary="checkout-api upgraded from v1 to v2",
+        metadata_json=build_change_metadata({"cluster": "minishop"}),
+        started_at=started_at,
+        completed_at=started_at,
+        created_at=started_at,
+        request_hash="b" * 64,
+    )
+
+
 async def get_alert_record(
     session_factory: async_sessionmaker[AsyncSession],
     alert_id: str,
@@ -115,8 +152,19 @@ async def get_incident_record(
     """使用独立 Session 查询事故记录。"""
     async with session_factory() as session:
         return await session.scalar(
-            select(IncidentRecord).where(
-                IncidentRecord.incident_id == incident_id
+            select(IncidentRecord).where(IncidentRecord.incident_id == incident_id)
+        )
+
+
+async def get_change_event_record(
+    session_factory: async_sessionmaker[AsyncSession],
+    change_event_id: str,
+) -> ChangeEventRecord | None:
+    """使用独立 Session 查询变更事件记录。"""
+    async with session_factory() as session:
+        return await session.scalar(
+            select(ChangeEventRecord).where(
+                ChangeEventRecord.change_event_id == change_event_id
             )
         )
 
@@ -126,17 +174,23 @@ async def test_explicit_commit_persists_alert_and_incident_atomically(
 ) -> None:
     alert = build_alert()
     incident = build_incident()
+    change_event = build_change_event()
     unit_of_work = SQLAlchemyUnitOfWork(session_factory)
 
     async with unit_of_work:
         await unit_of_work.alerts.save(alert)
         await unit_of_work.incidents.save(incident)
+        await unit_of_work.change_events.save(change_event)
         await unit_of_work.commit()
 
     assert TrackingAsyncSession.close_count == 1
     assert await get_alert_record(session_factory, alert.alert_id) is not None
+    assert await get_incident_record(session_factory, incident.incident_id) is not None
     assert (
-        await get_incident_record(session_factory, incident.incident_id)
+        await get_change_event_record(
+            session_factory,
+            change_event.change_event_id,
+        )
         is not None
     )
 
@@ -167,10 +221,7 @@ async def test_business_exception_rolls_back_and_propagates(
 
     assert TrackingAsyncSession.close_count == 1
     assert await get_alert_record(session_factory, alert.alert_id) is None
-    assert (
-        await get_incident_record(session_factory, incident.incident_id)
-        is None
-    )
+    assert await get_incident_record(session_factory, incident.incident_id) is None
 
 
 async def test_cleanup_failure_log_preserves_business_error_without_secrets(
@@ -185,8 +236,7 @@ async def test_cleanup_failure_log_preserves_business_error_without_secrets(
     with caplog.at_level(
         logging.ERROR,
         logger=(
-            "devops_agent_platform.infrastructure.adapters.sqlalchemy."
-            "unit_of_work"
+            "devops_agent_platform.infrastructure.adapters.sqlalchemy.unit_of_work"
         ),
     ):
         with pytest.raises(RuntimeError, match="business-secret"):
@@ -231,6 +281,9 @@ async def test_repository_access_outside_context_is_rejected(
 
     with pytest.raises(RuntimeError, match="not active"):
         _ = unit_of_work.rca_reports
+
+    with pytest.raises(RuntimeError, match="not active"):
+        _ = unit_of_work.change_events
 
 
 async def test_same_unit_of_work_cannot_be_nested(

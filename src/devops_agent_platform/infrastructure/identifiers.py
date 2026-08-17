@@ -8,6 +8,10 @@ class UUIDIdentifierGenerator:
         """生成带类型前缀的告警标识，方便日志和人工排障识别。"""
         return f"alt_{uuid4().hex}"
 
+    def new_change_event_id(self) -> str:
+        """生成带类型前缀的变更事件标识。"""
+        return f"chg_{uuid4().hex}"
+
     def new_incident_id(self) -> str:
         """生成带类型前缀的事故标识。"""
         return f"inc_{uuid4().hex}"

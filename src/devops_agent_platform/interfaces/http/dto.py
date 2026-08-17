@@ -1,8 +1,12 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from devops_agent_platform.application.commands.alerts import ReceiveAlertCommand
+from devops_agent_platform.application.commands.change_events import (
+    ReceiveChangeEventCommand,
+)
 from devops_agent_platform.application.commands.incidents import (
     CloseIncidentCommand,
     ResolveIncidentCommand,
@@ -34,6 +38,8 @@ from devops_agent_platform.application.commands.tool_permissions import (
 )
 from devops_agent_platform.domain.enums import (
     AlertSeverity,
+    ChangeEventStatus,
+    ChangeType,
     EvidenceType,
     RCAFeedbackVerdict,
     TicketDecision,
@@ -67,6 +73,49 @@ class AlertWebhookRequest(BaseModel):
             starts_at=self.starts_at,
             fingerprint=self.fingerprint,
             external_event_id=self.external_event_id,
+            trace_id=trace_id,
+        )
+
+
+class ChangeEventWebhookRequest(BaseModel):
+    """CD/配置系统接入变更事实时提交的 HTTP 请求体。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tenant_id: str = Field(min_length=1, max_length=128)
+    source: str = Field(min_length=1, max_length=128)
+    external_event_id: str = Field(min_length=1, max_length=256)
+    service_name: str = Field(min_length=1, max_length=256)
+    resource_type: str = Field(min_length=1, max_length=128)
+    resource_id: str = Field(min_length=1, max_length=256)
+    change_type: ChangeType
+    status: ChangeEventStatus
+    version_before: str | None = Field(default=None, min_length=1, max_length=256)
+    version_after: str | None = Field(default=None, min_length=1, max_length=256)
+    operator_id: str | None = Field(default=None, min_length=1, max_length=128)
+    summary: str = Field(min_length=1, max_length=4096)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    started_at: datetime
+    completed_at: datetime | None = None
+
+    def to_command(self, trace_id: str) -> ReceiveChangeEventCommand:
+        """将变更接入 DTO 转换为不依赖 HTTP 的应用命令。"""
+        return ReceiveChangeEventCommand(
+            tenant_id=self.tenant_id,
+            source=self.source,
+            external_event_id=self.external_event_id,
+            service_name=self.service_name,
+            resource_type=self.resource_type,
+            resource_id=self.resource_id,
+            change_type=self.change_type,
+            status=self.status,
+            version_before=self.version_before,
+            version_after=self.version_after,
+            operator_id=self.operator_id,
+            summary=self.summary,
+            metadata=self.metadata,
+            started_at=self.started_at,
+            completed_at=self.completed_at,
             trace_id=trace_id,
         )
 

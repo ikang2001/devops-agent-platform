@@ -19,6 +19,7 @@ def test_fixed_default_preserves_existing_plan_identity_and_steps() -> None:
     assert plan.version == existing.version
     assert [step.tool_name for step in plan.steps] == [
         "metrics.query",
+        "changes.query",
         "logs.query",
         "traces.query",
         "runbooks.retrieve",
@@ -42,11 +43,10 @@ def test_trace_free_policies_build_auditable_static_plans(
     plan = build_plan_for_policy(policy)
 
     assert plan.plan_id == plan_id
-    assert [step.tool_name for step in plan.steps] == [
-        "metrics.query",
-        "logs.query",
-        "runbooks.retrieve",
-    ]
+    expected = ["metrics.query", "logs.query", "runbooks.retrieve"]
+    if policy == "fixed_no_traces":
+        expected.insert(1, "changes.query")
+    assert [step.tool_name for step in plan.steps] == expected
     assert all(step.tool_name != "traces.query" for step in plan.steps)
 
 

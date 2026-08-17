@@ -142,7 +142,7 @@ payload 使用 `external_event_id` 作为外部幂等键；`fingerprint` 是为�
 pytest
 ```
 
-测试覆盖正常下单、三类故障注入、故障清理、指标暴露和 Agent 告警字段。
+测试覆盖正常下单、四类故障注入、故障清理、指标暴露和 Agent 告警字段。
 
 ## 7. 面试讲法
 

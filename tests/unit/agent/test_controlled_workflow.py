@@ -176,10 +176,7 @@ class StaticReportGenerator:
         type_counts = tuple(
             (
                 type_name,
-                sum(
-                    item.evidence_type.value == type_name
-                    for item in evidence
-                ),
+                sum(item.evidence_type.value == type_name for item in evidence),
             )
             for type_name in type_names
         )
@@ -526,9 +523,7 @@ async def test_continue_on_failure_returns_partial_guarded_report() -> None:
     assert result.report is not None
     assert result.report.conclusion_status is RCAConclusionStatus.UNDETERMINED
     assert result.report.confidence == 0.4
-    assert "Partial collection: failed steps=collect.metrics" in (
-        result.report.summary
-    )
+    assert "Partial collection: failed steps=collect.metrics" in (result.report.summary)
     assert events[-1] == "execute:logs.query"
 
 
@@ -674,12 +669,14 @@ def test_default_observability_plan_is_fixed_and_read_only_oriented() -> None:
 
     assert [step.tool_name for step in plan.steps] == [
         "metrics.query",
+        "changes.query",
         "logs.query",
         "traces.query",
         "runbooks.retrieve",
     ]
-    assert plan.version == "v2"
+    assert plan.version == "v3"
     assert plan.steps[0].payload["max_series"] == 200
-    assert plan.steps[1].payload["limit"] == 500
-    assert plan.steps[2].payload["limit"] == 100
-    assert plan.steps[3].payload["max_results"] == 5
+    assert plan.steps[1].payload["max_results"] == 20
+    assert plan.steps[2].payload["limit"] == 500
+    assert plan.steps[3].payload["limit"] == 100
+    assert plan.steps[4].payload["max_results"] == 5
