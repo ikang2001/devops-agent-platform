@@ -9,8 +9,8 @@
 | 项目/需求 | MiniShop 到 DevOps Agent 的端到端 RCA、场景 Manifest 与代码导读 |
 | 技术栈与环境 | Python 3.12、FastAPI、PostgreSQL、Kafka/Redpanda、Prometheus、Loki、Tempo、Docker Compose |
 | 开始时间 | 2026-07-18 |
-| 完成时间 | 2026-07-29 |
-| 当前结论 | 三场景 Docker RCA 闭环、A/B/C0/C1 路线、反馈候选下载、显式离线策展和评测报告门禁均已完成本地验证 |
+| 完成时间 | 持续迭代，最近更新 2026-08-17 |
+| 当前结论 | 三场景 Docker RCA 闭环、A/B/C0/C1 路线、反馈治理和 AIOps Benchmark 基础评分闭环均已完成本地验证 |
 | 相关版本/提交 | 独立 Git 仓库 `main` 基线，提交信息见本仓库 `git log` |
 
 ## 2. 结果摘要
@@ -19,8 +19,8 @@
   真实 Compose RCA 验收、演练管理员认证、逐模块代码导读，以及按单条人工反馈
   导出机器可读评测候选，以及要求显式批准、隐私复核、人工改写和 Evidence
   重映射的离线策展工具，以及只允许进入人工发布评审的离线评测报告门禁。
-- 已完成验证：平台全量 `1712 passed, 9 skipped`；MiniShop 全量
-  `37 passed`（均使用 `-W error`）；E2E 静态资产 `3 passed`；Compose 配置展开通过；三场景真实
+- 已完成验证：平台全量 `1741 passed, 9 deselected`；MiniShop 全量
+  `40 passed`；E2E 静态资产 `3 passed`；Compose 配置展开通过；三场景真实
   Docker E2E 全部通过。
 - 端到端证据：`checkout-latency`、`inventory-db-timeout`、
   `payment-error` 均为 `SUCCEEDED`，且具备 METRIC、LOG、TRACE、RUNBOOK
@@ -38,7 +38,7 @@
 | Step 2 架构设计 | 选择原生 Alertmanager Relay、兼容 Telemetry、演练专用认证和 Compose 验收 | 现有端口/适配器边界 | 1 | 无 |
 | Step 3 代码骨架 | 新增 Alertmanager Mapper、Relay、Agent Alert Client 与路由 | Relay 定向测试 6 项通过 | 1 | 无 |
 | Step 4 增量实现 | Alertmanager Relay、兼容指标/日志、分服务 Trace、Tempo Ground Truth、演练认证、代码导读和固定调查策略接线 | C0/C1 定向测试 `190 passed`；MiniShop `37 passed` | 2 | 无 |
-| Step 5 测试排错 | 修复 FastAPI 生命周期、Buildx 路径、tmpfs 权限、Tempo Trace ID、锁定环境打包和策略解析测试假设 | 平台当前 `1712 passed, 9 skipped`；MiniShop `37 passed` | 7 | 无 |
+| Step 5 测试排错 | 修复 FastAPI 生命周期、Buildx 路径、tmpfs 权限、Tempo Trace ID、锁定环境打包和策略解析测试假设 | 平台当前 `1741 passed, 9 deselected`；MiniShop `40 passed` | 7 | 无 |
 | Step 6 整合运维 | 真实 Compose 三场景验收、锁定镜像验证、独立 Git 基线、平台受审修复、reclaim Worker、C0/C1 文档收口、反馈候选下载、离线策展、静态评测、报告门禁和版本发布守护 | `artifacts/results.json` 中 `passed: true`；反馈/策展/评测/版本定向回归与全量 pytest 通过 | 25 | 无 |
 
 ## 4. 事件索引
@@ -86,6 +86,9 @@
 | DEV-039 | Step 6 | 犯错 | GitHub Release 审计使用不受支持字段 | 已解决 | 改用当前 `gh` 支持字段确认 v0.3.0 Release 已发布 |
 | DEV-040 | Step 6 | 踩坑 | 发布产物校验误拒绝 uv 生成的隐藏文件 | 已解决 | 忽略隐藏管理文件，继续严格校验两个非隐藏构建产物 |
 | DEV-041 | Step 6 | 技术债 | Tag CI 使用 Node.js 20 Action 且部分引用可变 | 已解决 | 升级到 Node.js 24 兼容版本并把全部第三方 Action 固定到已审查提交 |
+| DEV-042 | Benchmark Phase 1 | 踩坑 | pytest 不导入 `ops/` 中的可复用实现 | 已解决 | 可复用逻辑下沉正式 `src` 包，`ops` 只保留薄 CLI |
+| DEV-043 | Benchmark Phase 1 | 犯错 | 无根因测试夹具仍保留因果链和影响面 | 已解决 | 修正夹具，不放宽 Ground Truth 一致性约束 |
+| DEV-044 | Benchmark Phase 1 | 犯错 | 全量门禁命令误设 1 秒超时 | 已解决 | 区分工具让出时间与命令超时并完整重跑 |
 
 ## 5. 事件详情
 
@@ -791,6 +794,57 @@
 | 残余风险 | Action 升级仍需定期人工审查 Release Notes；不可变 SHA 防漂移但不会自动获得上游安全修复 |
 | 预防措施 | 测试要求全部 `uses:` 同时满足 40 位 SHA 和已审查集合；升级时必须同步版本注释、SHA 集合与真实 Tag 门禁 |
 
+### DEV-042：pytest 不导入 `ops/` 中的可复用实现
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-08-17 / Benchmark Phase 1 |
+| 模块 | `ops/evaluation`、`src/devops_agent_platform/evaluation` |
+| 分类 | 踩坑 |
+| 状态 | 已解决 |
+| 现象与证据 | 新 Scorer 测试收集时报 `ModuleNotFoundError: No module named 'ops'`；MiniShop Manifest 的 23 项独立测试正常通过 |
+| 影响 | Scorer 逻辑如果留在运维目录，只能沿用动态文件加载，降低复用性和类型检查质量 |
+| 排查过程 | 核对 `pyproject.toml` 的 `pythonpath=["src"]`，并对照现有 `ops/product` 测试使用 `importlib` 动态加载的历史方式 |
+| 根因 | 仓库明确只把正式 `src` 包加入 pytest 导入路径，`ops` 被设计为脚本与资产目录 |
+| 解决方案 | Schema、Scorer、Reporter、Runner 移入 `src/devops_agent_platform/evaluation`；`ops/evaluation/run_benchmark.py` 仅调用正式包中的 `main` |
+| 验证证据 | Benchmark 定向测试 `22 passed`；Ruff 全绿；实际 `python -m ops.evaluation.run_benchmark` 三场景运行成功 |
+| 残余风险 | 运维 CLI 仍依赖从仓库根或已安装项目执行，后续如发布独立命令需增加 project script entrypoint |
+| 预防措施 | 新增可复用业务逻辑前先检查 pytest/package 发现边界，运维目录只保留协议适配和入口 |
+
+### DEV-043：无根因测试夹具仍保留因果链和影响面
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-08-17 / Benchmark Phase 1 |
+| 模块 | `tests/unit/ops/test_benchmark_scorer.py` |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | 定向测试首次进入评分阶段得到 `15 passed, 1 failed`；Pydantic 拒绝 `root_cause=null` 但仍有 `causal_chain`/`affected_services` 的 Ground Truth |
+| 影响 | 没有影响实现或真实数据；失败发生在测试夹具构造阶段 |
+| 排查过程 | 读取完整 ValidationError，确认 Scorer 尚未执行，错误由 Ground Truth 的跨字段一致性门禁触发 |
+| 根因 | 测试只替换了根因字段，没有同步清空与根因语义绑定的因果链和影响面 |
+| 解决方案 | 修正无根因夹具，保留 Schema 对自相矛盾 Ground Truth 的失败关闭行为 |
+| 验证证据 | 修正后核心测试 `16 passed`，加入 Runner 后组合测试 `22 passed` |
+| 残余风险 | 后续新增 `false-positive-alert` Manifest 时必须同时定义无根因场景的 Evidence 与 Expected Tools 语义 |
+| 预防措施 | 提供无根因场景构造器或专用 fixture，修改核心语义字段时同步检查关联字段 |
+
+### DEV-044：全量门禁命令误设 1 秒超时
+
+| 字段 | 内容 |
+|---|---|
+| 日期/阶段 | 2026-08-17 / Benchmark Phase 1 |
+| 模块 | 全仓 Ruff、平台 pytest、MiniShop pytest |
+| 分类 | 犯错 |
+| 状态 | 已解决 |
+| 现象与证据 | 首次全量门禁在约 1.8 秒后返回退出码 124 和 `command timed out`，没有形成任何测试结论 |
+| 影响 | 首轮验证进程被提前终止；没有代码或测试资产被修改 |
+| 排查过程 | 对比工具会话的 `yield_time_ms` 与 PowerShell `timeout_ms`，确认把“尽早返回会话 ID”错误配置成了命令硬超时 |
+| 根因 | 混淆异步让出时间和子进程最大运行时间 |
+| 解决方案 | 使用 1 秒外层 yield、5 分钟命令超时，完整重跑并继续把大输出写入临时日志 |
+| 验证证据 | 全仓 Ruff 通过；平台 `1741 passed, 9 deselected`；MiniShop `40 passed` |
+| 残余风险 | 无；首次被终止的运行不能作为验证证据，最终只引用完整重跑结果 |
+| 预防措施 | 长测试使用长命令超时和短会话 yield，不再把两者设为同一数值 |
+
 ## 6. 分类汇总
 
 ### 踩坑
@@ -799,6 +853,7 @@
 - DEV-004：新增多层目录前先建父目录，补丁失败后检查部分落盘。
 - DEV-006：运行测试前确认项目开发依赖已安装到当前解释器。
 - DEV-010：Git 中文路径审计前关闭 `core.quotepath` 转义或显式按原样输出。
+- DEV-042：可复用逻辑不能假定 `ops/` 在 pytest 的正式导入路径中。
 
 ### 犯过的错误
 
@@ -817,6 +872,8 @@
 - DEV-025：向相邻 Worker 接线块插入代码后，要立刻复读完整启动顺序，避免 done callback 挂错任务。
 - DEV-037：治理文档改写要保留资产测试守护的明确产品术语。
 - DEV-038：下游报告校验要覆盖上游生成器的缺失响应哨兵语义。
+- DEV-043：无根因夹具必须同步清空因果链和影响面。
+- DEV-044：长测试要区分工具 yield 与命令硬超时。
 
 ### 主要难点
 
@@ -888,8 +945,12 @@
 
 ### 验证与已知限制
 
-- 已完成验证：平台 `1712 passed, 9 skipped`，MiniShop `37 passed`，
+- 已完成验证：平台 `1741 passed, 9 deselected`，MiniShop `40 passed`，
   E2E 资产 `3 passed`，Ruff check 和 Compose config 通过。
+- Benchmark 基础验证：定向测试 `22 passed`，三场景 contract fixture 经真实 CLI
+  得到 `3/3`，中文报告包含非生产免责声明，`results.json` 未复制 Ground Truth。
+- 打包与锁定验证：平台/MiniShop `uv lock --check` 均通过，真实 wheel 包含
+  `devops_agent_platform/evaluation`。
 - 已完成真实链路：三份 Manifest 均在重建后的 Docker 环境得到
   `SUCCEEDED` Workflow 与四类 Evidence，结果文件 `passed: true`。
 - 已完成工程基线：独立 Git `main` 仓库、两个 `uv.lock`、锁定 CI 与锁定

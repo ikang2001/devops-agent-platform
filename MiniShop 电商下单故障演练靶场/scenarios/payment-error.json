@@ -52,30 +52,35 @@
     {
       "evidence_id": "ev-payment-fault-enabled",
       "source": "prometheus",
+      "evidence_type": "METRIC",
       "locator": "minishop_fault_enabled{service_name=\"payment-service\",fault_type=\"payment_error\"}",
       "assertion": "The gauge equals 1 during the injected fault window."
     },
     {
       "evidence_id": "ev-payment-error-counter",
       "source": "prometheus",
+      "evidence_type": "METRIC",
       "locator": "increase(minishop_payment_error_total[5m])",
       "assertion": "The counter increase is greater than zero after the trigger request."
     },
     {
       "evidence_id": "ev-payment-error-log",
       "source": "loki",
+      "evidence_type": "LOG",
       "locator": "{service_name=\"payment-service\"} |= \"PAYMENT_GATEWAY_ERROR\"",
       "assertion": "An ERROR event identifies payment_error and PAYMENT_GATEWAY_ERROR for the trigger trace_id."
     },
     {
       "evidence_id": "ev-payment-error-trace",
       "source": "tempo",
+      "evidence_type": "TRACE",
       "locator": "{ resource.service.name = \"payment-service\" && span:status = error } with (most_recent=true)",
       "assertion": "The checkout trace contains an ERROR payment.pay span with error.type PAYMENT_GATEWAY_ERROR."
     },
     {
       "evidence_id": "ev-payment-http-500",
       "source": "http",
+      "evidence_type": "HTTP",
       "locator": "POST /checkout",
       "assertion": "The trigger returns HTTP 500 with error_code PAYMENT_GATEWAY_ERROR."
     }
@@ -84,6 +89,8 @@
     "root_cause": {
       "service_name": "payment-service",
       "fault_type": "payment_error",
+      "root_cause_type": "application_error",
+      "root_cause_resource": null,
       "category": "injected_payment_gateway_error",
       "summary": "The payment_error fault forces payment-service to return PAYMENT_GATEWAY_ERROR during checkout.",
       "causal_chain": [
@@ -100,10 +107,39 @@
       "ev-payment-error-log",
       "ev-payment-error-trace"
     ],
+    "required_evidence_types": [
+      "METRIC",
+      "LOG",
+      "TRACE"
+    ],
+    "optional_evidence_types": [
+      "HTTP",
+      "RUNBOOK"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "payment-service",
+        "to_node": "checkout-service"
+      }
+    ],
+    "affected_services": [
+      "payment-service",
+      "checkout-service"
+    ],
     "forbidden_claims": [
       "A named third-party payment provider is confirmed globally unavailable.",
       "Inventory or database failure caused the payment error.",
       "The customer was charged despite the failed payment."
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "logs.query@v1",
+      "traces.query@v1",
+      "runbooks.retrieve@v1"
+    ],
+    "forbidden_tool_types": [
+      "remediation.execute@v1",
+      "shell"
     ]
   }
 }

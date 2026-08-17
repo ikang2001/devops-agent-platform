@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Annotated, Dict, List, Literal
+from typing import Annotated, Dict, List, Literal, Optional
 
 from pydantic import (
     AfterValidator,
@@ -60,6 +60,22 @@ ApiPath = Annotated[str, AfterValidator(_safe_api_path)]
 RunbookPath = Annotated[str, AfterValidator(_safe_project_path)]
 FaultService = Literal["checkout-service", "inventory-service", "payment-service"]
 EvidenceSource = Literal["http", "loki", "prometheus", "tempo"]
+BenchmarkEvidenceType = Literal[
+    "METRIC",
+    "LOG",
+    "TRACE",
+    "CHANGE",
+    "TOPOLOGY",
+    "KNOWLEDGE",
+    "RUNBOOK",
+    "HTTP",
+]
+EVIDENCE_TYPE_BY_SOURCE: Dict[str, str] = {
+    "http": "HTTP",
+    "loki": "LOG",
+    "prometheus": "METRIC",
+    "tempo": "TRACE",
+}
 
 
 class ManifestModel(BaseModel):
@@ -119,11 +135,27 @@ class ExpectedSignal(ManifestModel):
         pattern=r"^ev-[a-z0-9]+(?:-[a-z0-9]+)*$",
     )
     source: EvidenceSource
+    evidence_type: BenchmarkEvidenceType
     locator: str = Field(min_length=1, max_length=1024)
     assertion: str = Field(min_length=1, max_length=1024)
 
+    @model_validator(mode="after")
+    def validate_evidence_type(self) -> ExpectedSignal:
+        expected = EVIDENCE_TYPE_BY_SOURCE[self.source]
+        if self.evidence_type != expected:
+            raise ValueError(
+                f"{self.source} signal must use evidence_type {expected}"
+            )
+        return self
+
 
 class RootCause(FaultIdentity):
+    root_cause_type: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[a-z][a-z0-9_]*$",
+    )
+    root_cause_resource: Optional[str] = Field(default=None, max_length=256)
     category: str = Field(
         min_length=1,
         max_length=128,
@@ -134,17 +166,60 @@ class RootCause(FaultIdentity):
     runbook_path: RunbookPath
 
 
+class CausalEdge(ManifestModel):
+    from_node: str = Field(min_length=1, max_length=256)
+    to_node: str = Field(min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def validate_distinct_nodes(self) -> CausalEdge:
+        if self.from_node == self.to_node:
+            raise ValueError("causal edge must connect two different nodes")
+        return self
+
+
 class GroundTruth(ManifestModel):
     root_cause: RootCause
     required_evidence: List[str] = Field(min_length=1, max_length=20)
+    required_evidence_types: List[BenchmarkEvidenceType] = Field(
+        min_length=1,
+        max_length=8,
+    )
+    optional_evidence_types: List[BenchmarkEvidenceType] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    causal_chain: List[CausalEdge] = Field(min_length=1, max_length=16)
+    affected_services: List[str] = Field(min_length=1, max_length=20)
     forbidden_claims: List[str] = Field(min_length=1, max_length=20)
+    expected_tool_types: List[str] = Field(min_length=1, max_length=20)
+    forbidden_tool_types: List[str] = Field(min_length=1, max_length=20)
 
     @model_validator(mode="after")
     def validate_unique_items(self) -> GroundTruth:
-        if len(self.required_evidence) != len(set(self.required_evidence)):
-            raise ValueError("required_evidence must contain unique IDs")
-        if len(self.forbidden_claims) != len(set(self.forbidden_claims)):
-            raise ValueError("forbidden_claims must be unique")
+        unique_fields = (
+            "required_evidence",
+            "required_evidence_types",
+            "optional_evidence_types",
+            "affected_services",
+            "forbidden_claims",
+            "expected_tool_types",
+            "forbidden_tool_types",
+        )
+        for field_name in unique_fields:
+            values = getattr(self, field_name)
+            if len(values) != len(set(values)):
+                raise ValueError(f"{field_name} must be unique")
+        if set(self.required_evidence_types) & set(self.optional_evidence_types):
+            raise ValueError(
+                "required_evidence_types and optional_evidence_types must be disjoint"
+            )
+        if set(self.expected_tool_types) & set(self.forbidden_tool_types):
+            raise ValueError(
+                "expected_tool_types and forbidden_tool_types must be disjoint"
+            )
+        edges = [(item.from_node, item.to_node) for item in self.causal_chain]
+        if len(edges) != len(set(edges)):
+            raise ValueError("causal_chain edges must be unique")
         return self
 
 
@@ -186,6 +261,20 @@ class ScenarioManifest(FaultIdentity):
         if unknown_evidence:
             names = ", ".join(sorted(unknown_evidence))
             raise ValueError(f"required_evidence references unknown signal IDs: {names}")
+        signal_by_id = {
+            signal.evidence_id: signal.evidence_type
+            for signal in self.expected_signals
+        }
+        required_types = {
+            signal_by_id[evidence_id]
+            for evidence_id in self.ground_truth.required_evidence
+        }
+        if required_types != set(self.ground_truth.required_evidence_types):
+            raise ValueError(
+                "required_evidence_types must match required_evidence signal types"
+            )
+        if self.service_name not in self.ground_truth.affected_services:
+            raise ValueError("affected_services must include the root cause service")
         return self
 
 

@@ -52,42 +52,49 @@
     {
       "evidence_id": "ev-inventory-fault-enabled",
       "source": "prometheus",
+      "evidence_type": "METRIC",
       "locator": "minishop_fault_enabled{service_name=\"inventory-service\",fault_type=\"db_timeout\"}",
       "assertion": "The gauge equals 1 during the injected fault window."
     },
     {
       "evidence_id": "ev-inventory-timeout-counter",
       "source": "prometheus",
+      "evidence_type": "METRIC",
       "locator": "increase(minishop_inventory_db_timeout_total[5m])",
       "assertion": "The timeout counter increase is greater than zero after the trigger request."
     },
     {
       "evidence_id": "ev-inventory-downstream-counter",
       "source": "prometheus",
+      "evidence_type": "METRIC",
       "locator": "increase(minishop_downstream_timeout_total{downstream_service=\"inventory-service\"}[5m])",
       "assertion": "Checkout records at least one inventory downstream failure."
     },
     {
       "evidence_id": "ev-inventory-timeout-log",
       "source": "loki",
+      "evidence_type": "LOG",
       "locator": "{service_name=\"inventory-service\"} |= \"DB_TIMEOUT\"",
       "assertion": "An ERROR event identifies db_timeout and DB_TIMEOUT for the trigger trace_id."
     },
     {
       "evidence_id": "ev-inventory-checkout-log",
       "source": "loki",
+      "evidence_type": "LOG",
       "locator": "{service_name=\"checkout-service\"} |= \"CHECKOUT_DOWNSTREAM_FAILURE\"",
       "assertion": "Checkout records inventory-service as the failed downstream on the same trace_id."
     },
     {
       "evidence_id": "ev-inventory-timeout-trace",
       "source": "tempo",
+      "evidence_type": "TRACE",
       "locator": "{ resource.service.name = \"inventory-service\" && span:status = error } with (most_recent=true)",
       "assertion": "The checkout trace contains an ERROR inventory.reserve span with error.type DB_TIMEOUT."
     },
     {
       "evidence_id": "ev-inventory-http-503",
       "source": "http",
+      "evidence_type": "HTTP",
       "locator": "POST /checkout",
       "assertion": "The trigger returns HTTP 503 with CHECKOUT_DOWNSTREAM_FAILURE and downstream inventory-service."
     }
@@ -96,6 +103,8 @@
     "root_cause": {
       "service_name": "inventory-service",
       "fault_type": "db_timeout",
+      "root_cause_type": "dependency_timeout",
+      "root_cause_resource": "postgres",
       "category": "injected_inventory_database_timeout",
       "summary": "The db_timeout fault delays inventory-service and raises DB_TIMEOUT, causing checkout to fail downstream.",
       "causal_chain": [
@@ -113,10 +122,43 @@
       "ev-inventory-checkout-log",
       "ev-inventory-timeout-trace"
     ],
+    "required_evidence_types": [
+      "METRIC",
+      "LOG",
+      "TRACE"
+    ],
+    "optional_evidence_types": [
+      "HTTP",
+      "RUNBOOK"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "postgres",
+        "to_node": "inventory-service"
+      },
+      {
+        "from_node": "inventory-service",
+        "to_node": "checkout-service"
+      }
+    ],
+    "affected_services": [
+      "inventory-service",
+      "checkout-service"
+    ],
     "forbidden_claims": [
       "Database corruption is confirmed.",
       "Database connection pool exhaustion is confirmed.",
       "payment-service caused the checkout failure."
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "logs.query@v1",
+      "traces.query@v1",
+      "runbooks.retrieve@v1"
+    ],
+    "forbidden_tool_types": [
+      "remediation.execute@v1",
+      "shell"
     ]
   }
 }

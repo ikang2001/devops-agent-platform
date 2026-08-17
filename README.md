@@ -23,6 +23,7 @@ LLM 只负责生成供人工复核的结构化候选报告，不能把根因标�
 | Step 6 产品化边界 | [STEP6_PRODUCTIZATION.md](STEP6_PRODUCTIZATION.md) |
 | 最小改造总计划 | [docs/remediation-roadmap-master-plan.md](docs/remediation-roadmap-master-plan.md) |
 | MiniShop 端到端 RCA 导读 | [docs/minishop-e2e-rca-code-tour.md](docs/minishop-e2e-rca-code-tour.md) |
+| Benchmark 基础评分闭环 | [docs/evaluation-benchmark-foundation.md](docs/evaluation-benchmark-foundation.md) |
 | 部署说明 | [ops/deploy/README.md](ops/deploy/README.md) |
 | 运维 Runbook | [ops/runbooks](ops/runbooks) |
 
@@ -209,6 +210,24 @@ ops/minishop-e2e/artifacts/results.json
 ```
 
 仅在排查容器现场时使用 `-KeepStack`。演练固定管理员 Token 默认关闭、与 OIDC 互斥，并且不是生产认证方案。
+
+### Benchmark 基础评分闭环
+
+现有三个 Manifest 已扩展根因类型、Evidence 类型、有向因果边、影响服务以及期望/
+禁止工具。独立 Scorer 可以对结构化 Prediction 计算 RCA、Evidence、Claim、因果链、
+影响面和 Tool 指标，并生成 `results.json` 与中文 `evaluation-report.md`。
+
+运行 deterministic contract fixture：
+
+```powershell
+uv run python -m ops.evaluation.run_benchmark `
+  --scenarios '.\MiniShop 电商下单故障演练靶场\scenarios' `
+  --input '.\ops\evaluation\fixtures\minishop-v1-predictions.json' `
+  --output '.\ops\evaluation\artifacts\contract-fixture-001'
+```
+
+该 fixture 只验证评分合同，不是实时 E2E 或真实 LLM 准确率。完整设计、指标和未实现
+边界见 [Benchmark 基础评分闭环](docs/evaluation-benchmark-foundation.md)。
 
 ## 本地开发
 

@@ -1,0 +1,197 @@
+{
+  "benchmark": {
+    "benchmark_version": "contract-fixture-1.0",
+    "git_commit": "9baa63c4c165bad675b43e0576ff03b2057e3d37",
+    "model_provider": "stub",
+    "model_name": "deterministic-contract-fixture",
+    "temperature": 0,
+    "prompt_version": "fixture-v1",
+    "investigation_policy": "fixed_default",
+    "scenario_version": "1.0",
+    "timestamp": "2026-08-17T12:00:00+08:00"
+  },
+  "runs": [
+    {
+      "scenario_id": "payment-error",
+      "run_id": "fixture-payment-error-001",
+      "root_cause": {
+        "service": "payment-service",
+        "type": "application_error",
+        "resource": null
+      },
+      "conclusion_status": "CANDIDATE",
+      "confidence": 0.8,
+      "evidence_ids": [
+        "fixture-payment-metric",
+        "fixture-payment-log",
+        "fixture-payment-trace"
+      ],
+      "evidence_types": ["METRIC", "LOG", "TRACE"],
+      "claims": [
+        {
+          "claim_type": "ROOT_CAUSE",
+          "statement": "payment-service returned an injected application error",
+          "evidence_ids": ["fixture-payment-log", "fixture-payment-trace"]
+        }
+      ],
+      "causal_chain": [
+        {
+          "from_node": "payment-service",
+          "to_node": "checkout-service",
+          "evidence_ids": ["fixture-payment-trace"]
+        }
+      ],
+      "affected_services": ["payment-service", "checkout-service"],
+      "tool_calls": [
+        {
+          "tool_type": "metrics.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-payment-metric"]
+        },
+        {
+          "tool_type": "logs.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-payment-log"]
+        },
+        {
+          "tool_type": "traces.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-payment-trace"]
+        },
+        {
+          "tool_type": "runbooks.retrieve@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": []
+        }
+      ],
+      "investigation_steps": 4,
+      "llm_calls": 1,
+      "latency_ms": 1000,
+      "total_tokens": 300,
+      "estimated_cost": 0.0
+    },
+    {
+      "scenario_id": "inventory-db-timeout",
+      "run_id": "fixture-inventory-db-timeout-001",
+      "root_cause": {
+        "service": "inventory-service",
+        "type": "dependency_timeout",
+        "resource": "postgres"
+      },
+      "conclusion_status": "CANDIDATE",
+      "confidence": 0.8,
+      "evidence_ids": [
+        "fixture-inventory-metric",
+        "fixture-inventory-log",
+        "fixture-inventory-trace"
+      ],
+      "evidence_types": ["METRIC", "LOG", "TRACE"],
+      "claims": [
+        {
+          "claim_type": "ROOT_CAUSE",
+          "statement": "inventory-service timed out while accessing postgres",
+          "evidence_ids": ["fixture-inventory-log", "fixture-inventory-trace"]
+        }
+      ],
+      "causal_chain": [
+        {
+          "from_node": "postgres",
+          "to_node": "inventory-service",
+          "evidence_ids": ["fixture-inventory-log"]
+        },
+        {
+          "from_node": "inventory-service",
+          "to_node": "checkout-service",
+          "evidence_ids": ["fixture-inventory-trace"]
+        }
+      ],
+      "affected_services": ["inventory-service", "checkout-service"],
+      "tool_calls": [
+        {
+          "tool_type": "metrics.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-inventory-metric"]
+        },
+        {
+          "tool_type": "logs.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-inventory-log"]
+        },
+        {
+          "tool_type": "traces.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-inventory-trace"]
+        },
+        {
+          "tool_type": "runbooks.retrieve@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": []
+        }
+      ],
+      "investigation_steps": 4,
+      "llm_calls": 1,
+      "latency_ms": 1100,
+      "total_tokens": 320,
+      "estimated_cost": 0.0
+    },
+    {
+      "scenario_id": "checkout-latency",
+      "run_id": "fixture-checkout-latency-001",
+      "root_cause": {
+        "service": "checkout-service",
+        "type": "latency",
+        "resource": "checkout-service:latency-fault"
+      },
+      "conclusion_status": "CANDIDATE",
+      "confidence": 0.8,
+      "evidence_ids": [
+        "fixture-checkout-metric",
+        "fixture-checkout-log",
+        "fixture-checkout-trace"
+      ],
+      "evidence_types": ["METRIC", "LOG", "TRACE"],
+      "claims": [
+        {
+          "claim_type": "ROOT_CAUSE",
+          "statement": "checkout-service contains the injected processing latency",
+          "evidence_ids": ["fixture-checkout-log", "fixture-checkout-trace"]
+        }
+      ],
+      "causal_chain": [
+        {
+          "from_node": "checkout-service:latency-fault",
+          "to_node": "checkout-service",
+          "evidence_ids": ["fixture-checkout-trace"]
+        }
+      ],
+      "affected_services": ["checkout-service"],
+      "tool_calls": [
+        {
+          "tool_type": "metrics.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-checkout-metric"]
+        },
+        {
+          "tool_type": "logs.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-checkout-log"]
+        },
+        {
+          "tool_type": "traces.query@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": ["fixture-checkout-trace"]
+        },
+        {
+          "tool_type": "runbooks.retrieve@v1",
+          "status": "SUCCEEDED",
+          "evidence_ids": []
+        }
+      ],
+      "investigation_steps": 4,
+      "llm_calls": 1,
+      "latency_ms": 900,
+      "total_tokens": 280,
+      "estimated_cost": 0.0
+    }
+  ]
+}
