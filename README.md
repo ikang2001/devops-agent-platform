@@ -285,6 +285,7 @@ Tag 流水线依次执行：
 - 新增安全 Job，分别审计平台与 MiniShop 的锁定生产依赖；
 - 将 `cryptography` 锁定版本升级到 `50.0.0`，修复 `PYSEC-2026-3552`；
 - 将 `uv` 与其构建依赖隔离在 Builder 环境，避免 `msgpack`、`setuptools` 进入运行时镜像；
+- Runtime 构建阶段升级 Debian 安全补丁并清理 APT 索引，修复基础镜像中可升级的高危项；
 - 新增 Trivy 文件系统密钥扫描，并把安全门禁加入镜像构建前置依赖；
 - 镜像 SBOM 作为 CI Artifact 保留，并在 Tag 发布时作为正式 GitHub Release 资产下载；
 - 发布器在任何 GitHub API 写操作前校验 SPDX 2.x 文档结构、文档 ID 和非空 Package 清单；

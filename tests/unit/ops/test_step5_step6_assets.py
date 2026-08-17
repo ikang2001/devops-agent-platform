@@ -43,6 +43,9 @@ def test_step5_container_image_is_non_root_and_uses_real_app_entrypoint() -> Non
     assert dockerfile.index('pip install "uv==${UV_VERSION}"') < dockerfile.index(
         "RUN python -m venv /opt/venv"
     )
+    assert "apt-get update" in dockerfile
+    assert "apt-get upgrade -y" in dockerfile
+    assert "rm -rf /var/lib/apt/lists/*" in dockerfile
     assert "USER 10001:10001" in dockerfile
     assert "HEALTHCHECK" in dockerfile
     assert '"main:app"' in dockerfile

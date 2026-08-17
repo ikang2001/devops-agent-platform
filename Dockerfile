@@ -32,6 +32,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:${PATH}" \
     DEVOPS_AGENT_APP_ENV=production
 
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN addgroup --system --gid 10001 devops-agent \
     && adduser --system --uid 10001 --ingroup devops-agent \
        --home /app devops-agent
