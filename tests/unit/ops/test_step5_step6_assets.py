@@ -40,6 +40,9 @@ def test_step5_container_image_is_non_root_and_uses_real_app_entrypoint() -> Non
     assert "FROM python:3.12-slim AS runtime" in dockerfile
     assert "uv export --locked --no-dev" in dockerfile
     assert "pip install --no-deps ." in dockerfile
+    assert dockerfile.index('pip install "uv==${UV_VERSION}"') < dockerfile.index(
+        "RUN python -m venv /opt/venv"
+    )
     assert "USER 10001:10001" in dockerfile
     assert "HEALTHCHECK" in dockerfile
     assert '"main:app"' in dockerfile

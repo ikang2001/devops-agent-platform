@@ -7,14 +7,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 WORKDIR /build
+ARG UV_VERSION=0.11.31
+RUN pip install --upgrade pip \
+    && pip install "uv==${UV_VERSION}"
+
+# uv 仅用于构建；先装到 Builder 全局环境，避免把它及构建依赖复制进运行时镜像。
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
-ARG UV_VERSION=0.11.31
 COPY pyproject.toml uv.lock README.md ./
-RUN pip install --upgrade pip \
-    && pip install "uv==${UV_VERSION}" \
-    && uv export --locked --no-dev --no-emit-project --no-hashes \
+RUN uv export --locked --no-dev --no-emit-project --no-hashes \
        --output-file /tmp/requirements.txt \
     && pip install --requirement /tmp/requirements.txt
 
