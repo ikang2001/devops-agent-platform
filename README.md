@@ -283,6 +283,7 @@ Tag 流水线依次执行：
 
 - 新增 Python 3.11 独立兼容性 Job，覆盖非 Live 全量测试和 Alembic 离线迁移；
 - 新增安全 Job，分别审计平台与 MiniShop 的锁定生产依赖；
+- 将 `cryptography` 锁定版本升级到 `50.0.0`，修复 `PYSEC-2026-3552`；
 - 新增 Trivy 文件系统密钥扫描，并把安全门禁加入镜像构建前置依赖；
 - 镜像 SBOM 作为 CI Artifact 保留，并在 Tag 发布时作为正式 GitHub Release 资产下载；
 - 发布器在任何 GitHub API 写操作前校验 SPDX 2.x 文档结构、文档 ID 和非空 Package 清单；

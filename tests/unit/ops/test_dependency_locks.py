@@ -6,6 +6,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 MINISHOP_ROOT = ROOT / "MiniShop 电商下单故障演练靶场"
 RUFF_VERSION = "0.15.22"
+CRYPTOGRAPHY_SECURITY_FLOOR = (50, 0, 0)
 
 
 def _read_toml(path: Path) -> dict:
@@ -50,3 +51,15 @@ def test_lock_regeneration_script_pins_the_uv_version() -> None:
     assert '$RequiredUvVersion = "0.11.31"' in script
     assert 'version: "0.11.31"' in workflow
     assert "uv sync --locked --extra dev" in workflow
+
+
+def test_platform_lock_keeps_cryptography_above_security_floor() -> None:
+    lock = _read_toml(ROOT / "uv.lock")
+    version = next(
+        package["version"]
+        for package in lock["package"]
+        if package["name"] == "cryptography"
+    )
+    release = tuple(int(part) for part in version.split("."))
+
+    assert release >= CRYPTOGRAPHY_SECURITY_FLOOR
