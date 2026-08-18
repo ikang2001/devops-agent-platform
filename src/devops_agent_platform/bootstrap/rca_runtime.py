@@ -11,6 +11,9 @@ from devops_agent_platform.agent import (
     ResilientLLMRCAReportGenerator,
     build_plan_for_policy,
 )
+from devops_agent_platform.application.services.knowledge_service import (
+    KnowledgeService,
+)
 from devops_agent_platform.application.services.rca_consumer_runner import (
     RCAConsumerRunner,
 )
@@ -23,6 +26,9 @@ from devops_agent_platform.application.services.rca_record_processor import (
 )
 from devops_agent_platform.application.services.rca_requested_handler import (
     RCARequestedMessageHandler,
+)
+from devops_agent_platform.application.services.topology_service import (
+    TopologyService,
 )
 from devops_agent_platform.application.services.workflow_execution_service import (
     WorkflowClaimConfig,
@@ -39,9 +45,11 @@ from devops_agent_platform.infrastructure.adapters.kafka import (
     RCAKafkaConsumer,
 )
 from devops_agent_platform.infrastructure.adapters.sqlalchemy import (
+    SQLAlchemyKnowledgeRetriever,
     SQLAlchemyObservabilityTargetResolver,
     SQLAlchemyRunbookSearch,
     SQLAlchemyToolPermissionProvider,
+    SQLAlchemyTopologyRepositoryStore,
     SQLAlchemyUnitOfWork,
 )
 from devops_agent_platform.infrastructure.config.settings import Settings
@@ -63,16 +71,20 @@ from devops_agent_platform.tools.executor import ToolExecutor
 from devops_agent_platform.tools.handler_registry import ToolHandlerRegistry
 from devops_agent_platform.tools.handlers import (
     ChangeEventsQueryHandler,
+    KnowledgeSearchHandler,
     LokiLogsQueryHandler,
     PrometheusMetricsQueryHandler,
     PrometheusMetricsQueryHandlerConfig,
     RunbookRetrievalHandler,
     TempoTracesQueryHandler,
+    TopologyQueryHandler,
     register_change_events_query_tool,
+    register_knowledge_search_tool,
     register_loki_logs_tool,
     register_prometheus_metrics_tool,
     register_runbook_retrieval_tool,
     register_tempo_traces_tool,
+    register_topology_query_tool,
 )
 from devops_agent_platform.tools.permission import ToolPermissionChecker
 from devops_agent_platform.tools.registry import ToolRegistry
@@ -173,6 +185,10 @@ def build_rca_consumer_runtime(
 
     target_resolver = SQLAlchemyObservabilityTargetResolver(session_factory)
     runbook_search = SQLAlchemyRunbookSearch(session_factory)
+    topology_service = TopologyService(
+        SQLAlchemyTopologyRepositoryStore(session_factory)
+    )
+    knowledge_service = KnowledgeService(SQLAlchemyKnowledgeRetriever(session_factory))
 
     def unit_of_work_factory() -> SQLAlchemyUnitOfWork:
         """为只读工具、抢占、心跳和完成分别创建短事务。"""
@@ -200,6 +216,14 @@ def build_rca_consumer_runtime(
         register_loki_logs_tool(
             handler_registry,
             LokiLogsQueryHandler(target_resolver, loki),
+        ),
+        register_topology_query_tool(
+            handler_registry,
+            TopologyQueryHandler(topology_service),
+        ),
+        register_knowledge_search_tool(
+            handler_registry,
+            KnowledgeSearchHandler(knowledge_service),
         ),
     ]
     if "traces.query" in plan_tool_names:

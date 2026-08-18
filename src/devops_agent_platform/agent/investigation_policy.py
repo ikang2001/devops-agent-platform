@@ -19,6 +19,7 @@ class InvestigationPolicy(StrEnum):
     FIXED_NO_TRACES = "fixed_no_traces"
     # 仅 metrics + logs + runbooks
     FIXED_METRICS_LOGS_RUNBOOKS = "fixed_metrics_logs_runbooks"
+    BOUNDED_DYNAMIC_V1 = "bounded_dynamic_v1"
 
 
 def build_plan_for_policy(policy: InvestigationPolicy | str) -> RCAWorkflowPlan:
@@ -42,6 +43,11 @@ def build_plan_for_policy(policy: InvestigationPolicy | str) -> RCAWorkflowPlan:
             "observability-rca.metrics-logs-runbooks",
             include_changes=False,
         )
+
+    if policy is InvestigationPolicy.BOUNDED_DYNAMIC_V1:
+        # 动态调查由 BoundedDynamicInvestigator 驱动；该计划作为审计与回放的
+        # 安全基线，仍然只允许现有只读观测工具。
+        return build_default_observability_plan()
 
     raise AppValidationError(f"unsupported investigation policy: {policy}")
 

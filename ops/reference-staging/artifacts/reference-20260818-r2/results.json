@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0",
+  "environment": "reference-staging",
+  "synthetic": true,
+  "production_acceptance": false,
+  "generated_at": "2026-08-18T08:40:38.924674+00:00",
+  "passed": true,
+  "checks": [
+    {
+      "name": "oidc-token",
+      "passed": true,
+      "latency_ms": 18.13,
+      "error": null
+    },
+    {
+      "name": "agent-readiness",
+      "passed": true,
+      "latency_ms": 12.985,
+      "error": null
+    },
+    {
+      "name": "workspace-oidc-api",
+      "passed": true,
+      "latency_ms": 59.213,
+      "error": null
+    },
+    {
+      "name": "prometheus",
+      "passed": true,
+      "latency_ms": 7.836,
+      "error": null
+    },
+    {
+      "name": "loki",
+      "passed": true,
+      "latency_ms": 8.626,
+      "error": null
+    },
+    {
+      "name": "tempo",
+      "passed": true,
+      "latency_ms": 8.298,
+      "error": null
+    },
+    {
+      "name": "llm-ticketing-provider",
+      "passed": true,
+      "latency_ms": 28.414,
+      "error": null
+    },
+    {
+      "name": "mcp-jsonrpc",
+      "passed": true,
+      "latency_ms": 7.712,
+      "error": null
+    },
+    {
+      "name": "postgresql",
+      "passed": true,
+      "latency_ms": 346.731,
+      "error": null
+    },
+    {
+      "name": "kafka-redpanda",
+      "passed": true,
+      "latency_ms": 328.543,
+      "error": null
+    }
+  ],
+  "limitations": [
+    "OIDC、LLM、Ticketing 和 MCP 是本地 reference provider。",
+    "该报告只能证明协议接线，不能作为生产容量、成本或恢复时间。"
+  ]
+}

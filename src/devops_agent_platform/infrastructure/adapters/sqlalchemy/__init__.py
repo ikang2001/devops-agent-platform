@@ -1,9 +1,14 @@
 from .alert_repository import SQLAlchemyAlertRepository
 from .audit_retention_store import SQLAlchemyAuditRetentionStore
 from .change_event_repository import SQLAlchemyChangeEventRepository
+from .dataset_release_store import SQLAlchemyDatasetReleaseStore
 from .evidence_repository import SQLAlchemyEvidenceRepository
 from .incident_lock import PostgreSQLIncidentCorrelationLock
 from .incident_repository import SQLAlchemyIncidentRepository
+from .knowledge_repository import (
+    SQLAlchemyKnowledgeRepository,
+    SQLAlchemyKnowledgeRetriever,
+)
 from .metrics_target_resolver import (
     SQLAlchemyMetricsTargetResolver,
     SQLAlchemyObservabilityTargetResolver,
@@ -21,15 +26,26 @@ from .ticket_submission_repository import SQLAlchemyTicketSubmissionRepository
 from .tool_invocation_repository import SQLAlchemyToolInvocationRepository
 from .tool_permission_admin_store import SQLAlchemyToolPermissionAdminStore
 from .tool_permission_provider import SQLAlchemyToolPermissionProvider
+from .topology_repository import (
+    SQLAlchemyTopologyRepository,
+    SQLAlchemyTopologyRepositoryStore,
+)
 from .unit_of_work import SQLAlchemyUnitOfWork
 from .workflow_run_repository import SQLAlchemyWorkflowRunRepository
+from .workspace_repository import (
+    SQLAlchemyWorkspaceAdminStore,
+    SQLAlchemyWorkspaceRepository,
+)
 
 __all__ = [
     "SQLAlchemyAlertRepository",
     "SQLAlchemyChangeEventRepository",
+    "SQLAlchemyDatasetReleaseStore",
     "SQLAlchemyAuditRetentionStore",
     "SQLAlchemyEvidenceRepository",
     "SQLAlchemyIncidentRepository",
+    "SQLAlchemyKnowledgeRepository",
+    "SQLAlchemyKnowledgeRetriever",
     "SQLAlchemyMetricsTargetResolver",
     "SQLAlchemyObservabilityTargetResolver",
     "SQLAlchemyUnitOfWork",
@@ -44,8 +60,12 @@ __all__ = [
     "SQLAlchemyOutboxMetricsReader",
     "SQLAlchemyToolPermissionAdminStore",
     "SQLAlchemyToolPermissionProvider",
+    "SQLAlchemyTopologyRepository",
+    "SQLAlchemyTopologyRepositoryStore",
     "SQLAlchemyToolInvocationRepository",
     "SQLAlchemyTicketDraftRepository",
     "SQLAlchemyTicketSubmissionRepository",
     "SQLAlchemyWorkflowRunRepository",
+    "SQLAlchemyWorkspaceRepository",
+    "SQLAlchemyWorkspaceAdminStore",
 ]

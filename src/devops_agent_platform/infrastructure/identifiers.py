@@ -40,6 +40,10 @@ class UUIDIdentifierGenerator:
         """生成带类型前缀的 Runbook 管理操作标识。"""
         return f"rop_{uuid4().hex}"
 
+    def new_workspace_operation_id(self) -> str:
+        """生成带类型前缀的 Workspace 管理操作标识。"""
+        return f"wop_{uuid4().hex}"
+
     def new_ticket_draft_id(self) -> str:
         """生成带类型前缀的本地工单草稿标识。"""
         return f"tdf_{uuid4().hex}"

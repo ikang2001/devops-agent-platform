@@ -7,7 +7,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-EXPECTED_HEAD = "20260817_0030"
+EXPECTED_HEAD = "20260818_0035"
 
 
 def test_migration_history_is_a_single_linear_chain() -> None:
@@ -16,7 +16,7 @@ def test_migration_history_is_a_single_linear_chain() -> None:
     revisions = list(script.walk_revisions())
 
     assert script.get_heads() == [EXPECTED_HEAD]
-    assert len(revisions) == 30
+    assert len(revisions) == 35
     assert revisions[-1].down_revision is None
     for revision, parent in zip(
         revisions[:-1],
@@ -75,6 +75,9 @@ def test_postgresql_migration_chain_compiles_offline() -> None:
     assert "20260817_0029 -> 20260817_0030" in result.stderr
     assert "ALTER TABLE evidence DROP CONSTRAINT" in result.stdout
     assert "'CHANGE'" in result.stdout
+    assert "CREATE TABLE topology_nodes" in result.stdout
+    assert "CREATE TABLE knowledge_documents" in result.stdout
+    assert "CREATE TABLE workspaces" in result.stdout
 
 
 def test_postgresql_change_event_downgrade_compiles_offline() -> None:

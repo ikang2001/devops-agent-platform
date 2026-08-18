@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "simulated": false,
+  "synthetic": true,
+  "production_acceptance": false,
+  "target_label": "reference-staging",
+  "generated_at": "2026-08-18T09:47:27.287587+00:00",
+  "results": [
+    {
+      "case": "worker-crash",
+      "recovery_seconds": 14.292029,
+      "lost_workflow_count": 0,
+      "duplicate_completion_count": 0,
+      "fence_rejection_count": 1,
+      "notes": "Agent container was killed after RUNNING was observed; a replacement finished with execution_attempts=2."
+    },
+    {
+      "case": "kafka-unavailable",
+      "outbox_recovery_seconds": 8.372718,
+      "lost_event_count": 0,
+      "duplicate_workflow_count": 0,
+      "notes": "Workflow Outbox remained pending while Redpanda was stopped and drained after restart."
+    },
+    {
+      "case": "postgres-unavailable",
+      "recovery_seconds": 8.314613,
+      "state_corruption_count": 0,
+      "erroneous_success_count": 0,
+      "resumed": true,
+      "notes": "PostgreSQL was stopped during alert ingestion; readiness recovered after restart."
+    },
+    {
+      "case": "observability-timeout",
+      "partial_report": true,
+      "confidence_capped": true,
+      "confirmed_count": 0,
+      "notes": "Loki was stopped while continue_on_step_failure was enabled."
+    }
+  ]
+}

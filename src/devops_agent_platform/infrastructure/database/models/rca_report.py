@@ -85,6 +85,12 @@ class RCAReportRecord(Base):
         nullable=False,
     )
     recommendations_json: Mapped[str] = mapped_column(Text, nullable=False)
+    suspected_root_node: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    causal_chain_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    affected_services_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]"
+    )
+    blast_radius_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     generator_name: Mapped[str] = mapped_column(String(128), nullable=False)
     generator_version: Mapped[str] = mapped_column(String(64), nullable=False)
     generated_at: Mapped[datetime] = mapped_column(

@@ -60,6 +60,18 @@ def build_config(**overrides) -> OIDCAuthenticatorConfig:
     return OIDCAuthenticatorConfig(**values)
 
 
+def test_oidc_ca_bundle_path_is_validated_before_client_creation() -> None:
+    with pytest.raises(AppValidationError, match="ca_bundle_path"):
+        build_config(ca_bundle_path="  ")
+
+
+def test_oidc_missing_ca_bundle_fails_closed() -> None:
+    with pytest.raises(AppValidationError, match="CA bundle"):
+        OIDCAdministratorAuthenticator(
+            build_config(ca_bundle_path="/missing/reference-oidc-ca.pem")
+        )
+
+
 def build_token(
     key: RSAKeyMaterial,
     *,
@@ -113,9 +125,7 @@ async def test_valid_token_maps_verified_claims_to_principal() -> None:
     """只有验签并通过标准Claim校验后才构造管理员主体。"""
     key = generate_key("key-1")
     responder = JWKSResponder([{"keys": [key.jwk]}])
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(responder)
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(responder)) as client:
         authenticator = OIDCAdministratorAuthenticator(
             build_config(),
             http_client=client,
@@ -124,12 +134,8 @@ async def test_valid_token_maps_verified_claims_to_principal() -> None:
         principal = await authenticator.authenticate(build_token(key))
 
     assert principal.admin_id == "admin_001"
-    assert principal.scopes == frozenset(
-        {"openid", "tool_permissions:write"}
-    )
-    assert principal.tenant_ids == frozenset(
-        {"tenant_001", "tenant_002"}
-    )
+    assert principal.scopes == frozenset({"openid", "tool_permissions:write"})
+    assert principal.tenant_ids == frozenset({"tenant_001", "tenant_002"})
     assert principal.all_tenants is False
     assert responder.calls == 1
 
@@ -138,9 +144,7 @@ async def test_fresh_jwks_cache_avoids_repeated_network_calls() -> None:
     """同一kid在缓存有效期内不重复访问身份服务。"""
     key = generate_key("key-1")
     responder = JWKSResponder([{"keys": [key.jwk]}])
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(responder)
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(responder)) as client:
         authenticator = OIDCAdministratorAuthenticator(
             build_config(),
             http_client=client,
@@ -163,18 +167,14 @@ async def test_unknown_kid_refreshes_once_and_supports_rotation() -> None:
             {"keys": [first_key.jwk, rotated_key.jwk]},
         ]
     )
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(responder)
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(responder)) as client:
         authenticator = OIDCAdministratorAuthenticator(
             build_config(),
             http_client=client,
         )
 
         await authenticator.authenticate(build_token(first_key))
-        principal = await authenticator.authenticate(
-            build_token(rotated_key)
-        )
+        principal = await authenticator.authenticate(build_token(rotated_key))
 
     assert principal.admin_id == "admin_001"
     assert responder.calls == 2
@@ -186,9 +186,7 @@ async def test_random_unknown_kids_are_globally_throttled() -> None:
     attacker_one = generate_key("random-1")
     attacker_two = generate_key("random-2")
     responder = JWKSResponder([{"keys": [trusted_key.jwk]}])
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(responder)
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(responder)) as client:
         authenticator = OIDCAdministratorAuthenticator(
             build_config(unknown_kid_cache_seconds=30),
             http_client=client,
@@ -208,9 +206,7 @@ async def test_concurrent_authentication_uses_singleflight_refresh() -> None:
     """并发首次认证共享一次JWKS刷新。"""
     key = generate_key("key-1")
     responder = JWKSResponder([{"keys": [key.jwk]}])
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(responder)
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(responder)) as client:
         authenticator = OIDCAdministratorAuthenticator(
             build_config(),
             http_client=client,
@@ -246,9 +242,7 @@ async def test_invalid_standard_or_authorization_claims_are_rejected(
     """错误标准Claim和错误自定义Claim类型统一返回认证失败。"""
     key = generate_key("key-1")
     responder = JWKSResponder([{"keys": [key.jwk]}])
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(responder)
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(responder)) as client:
         authenticator = OIDCAdministratorAuthenticator(
             build_config(),
             http_client=client,
@@ -258,9 +252,7 @@ async def test_invalid_standard_or_authorization_claims_are_rejected(
             await authenticator.authenticate(
                 build_token(
                     key,
-                    claims_overrides=_resolve_claims_overrides(
-                        claims_overrides
-                    ),
+                    claims_overrides=_resolve_claims_overrides(claims_overrides),
                 )
             )
 
@@ -279,9 +271,7 @@ async def test_wrong_signature_and_disallowed_algorithm_are_rejected() -> None:
     trusted_key = generate_key("trusted")
     attacker_key = generate_key("attacker")
     responder = JWKSResponder([{"keys": [trusted_key.jwk]}])
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(responder)
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(responder)) as client:
         authenticator = OIDCAdministratorAuthenticator(
             build_config(),
             http_client=client,
@@ -317,9 +307,7 @@ async def test_dirty_token_or_header_kid_is_rejected_without_jwks_refresh() -> N
     """脏 Token 文本或 kid 不能触发身份服务网络请求。"""
     key = generate_key("key-1")
     responder = JWKSResponder([{"keys": [key.jwk]}])
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(responder)
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(responder)) as client:
         authenticator = OIDCAdministratorAuthenticator(
             build_config(),
             http_client=client,
@@ -353,9 +341,7 @@ async def test_dirty_jwks_kid_is_service_contract_failure(
     dirty_jwk = dict(key.jwk)
     dirty_jwk["kid"] = dirty_key_id
     responder = JWKSResponder([{"keys": [dirty_jwk]}])
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(responder)
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(responder)) as client:
         authenticator = OIDCAdministratorAuthenticator(
             build_config(),
             http_client=client,
@@ -393,9 +379,7 @@ async def test_jwks_http_or_contract_failure_is_service_unavailable(
     async def handler(request: httpx.Request) -> httpx.Response:
         return response_factory(request)
 
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(handler)
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         authenticator = OIDCAdministratorAuthenticator(
             build_config(),
             http_client=client,
@@ -410,9 +394,7 @@ async def test_oversized_jwks_is_stopped_during_streaming_read() -> None:
     key = generate_key("key-1")
     oversized = {"keys": [key.jwk], "padding": "x" * 4096}
     responder = JWKSResponder([oversized])
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(responder)
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(responder)) as client:
         authenticator = OIDCAdministratorAuthenticator(
             build_config(max_jwks_bytes=128),
             http_client=client,
@@ -429,9 +411,7 @@ async def test_network_timeout_is_sanitized_and_keeps_cause() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("identity internal detail", request=request)
 
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(handler)
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         authenticator = OIDCAdministratorAuthenticator(
             build_config(),
             http_client=client,
@@ -460,16 +440,12 @@ async def test_outer_cancellation_reaches_jwks_request() -> None:
             raise
         return httpx.Response(200, json={"keys": [key.jwk]}, request=request)
 
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(handler)
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         authenticator = OIDCAdministratorAuthenticator(
             build_config(),
             http_client=client,
         )
-        task = asyncio.create_task(
-            authenticator.authenticate(build_token(key))
-        )
+        task = asyncio.create_task(authenticator.authenticate(build_token(key)))
         await started.wait()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):

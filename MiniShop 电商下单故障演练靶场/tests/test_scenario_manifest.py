@@ -11,6 +11,7 @@ from app.scenario_manifest import (
     ScenarioManifest,
     load_scenario,
     load_scenario_catalog,
+    load_extended_scenario_catalog,
 )
 
 
@@ -45,6 +46,24 @@ def test_default_catalog_contains_complete_ground_truth_for_all_faults():
         assert scenario.ground_truth.expected_tool_types
         assert scenario.ground_truth.forbidden_tool_types
         assert (PROJECT_ROOT / scenario.ground_truth.root_cause.runbook_path).is_file()
+
+
+def test_extended_catalog_contains_twelve_benchmark_scenarios():
+    catalog = load_extended_scenario_catalog()
+
+    assert len(catalog.scenarios) == 12
+    assert {item.scenario_id for item in catalog.scenarios}.issuperset(
+        {
+            "config-regression",
+            "redis-latency",
+            "connection-pool-exhaustion",
+            "third-party-api-timeout",
+            "cascading-failure",
+            "known-error-repeat",
+            "misleading-history",
+            "false-positive-alert",
+        }
+    )
 
 
 def test_every_ground_truth_requires_its_tempo_signal():

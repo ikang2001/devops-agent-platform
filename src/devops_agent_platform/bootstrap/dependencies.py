@@ -14,6 +14,9 @@ from devops_agent_platform.application.services.alert_service import (
 from devops_agent_platform.application.services.change_event_service import (
     ChangeEventApplicationService,
 )
+from devops_agent_platform.application.services.dataset_release_service import (
+    DatasetReleaseService,
+)
 from devops_agent_platform.application.services.incident_query_service import (
     IncidentQueryService,
 )
@@ -47,6 +50,9 @@ from devops_agent_platform.application.services.ticket_submission_service import
 )
 from devops_agent_platform.application.services.tool_permission_admin_service import (
     ToolPermissionAdminService,
+)
+from devops_agent_platform.application.services.workspace_service import (
+    WorkspaceService,
 )
 from devops_agent_platform.bootstrap.runtime import ApplicationRuntime
 from devops_agent_platform.domain.exceptions import AuthenticationRequired
@@ -249,6 +255,22 @@ def get_runbook_admin_service(
     service = getattr(request.app.state, "runbook_admin_service", None)
     if service is None:
         raise RuntimeUnavailableError("Runbook administration is unavailable")
+    return service
+
+
+def get_workspace_service(request: Request) -> WorkspaceService:
+    """从应用生命周期容器获取租户隔离的 Workspace 管理服务。"""
+    service = getattr(request.app.state, "workspace_service", None)
+    if service is None:
+        raise RuntimeUnavailableError("Workspace administration is unavailable")
+    return service
+
+
+def get_dataset_release_service(request: Request) -> DatasetReleaseService:
+    """从应用生命周期容器获取在线数据集审核与发布服务。"""
+    service = getattr(request.app.state, "dataset_release_service", None)
+    if service is None:
+        raise RuntimeUnavailableError("Dataset release workflow is unavailable")
     return service
 
 

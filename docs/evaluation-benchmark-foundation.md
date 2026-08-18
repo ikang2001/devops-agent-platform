@@ -2,7 +2,7 @@
 
 ## 为什么建设
 
-当前仓库已有四份 MiniShop Scenario Manifest、Ground Truth 和真实 Compose E2E，
+当前仓库已有 12 份 MiniShop Scenario Manifest、Ground Truth 和本地 Compose E2E，
 但评分主要围绕单次报告文本与必要 Evidence 是否出现，无法稳定比较根因服务、根因
 类型、因果链、影响面、Tool 选择、Unsupported Claim 和成本。
 
@@ -24,7 +24,7 @@ Topology、Historical Incident RAG 和 Bounded Dynamic Investigation 仍属于�
 
 - 不修改生产 `RCAReport` 数据库表；
 - 不从自然语言报告猜测结构化根因；
-- 不运行真实 LLM；
+- 不把 reference Provider 运行包装成真实模型质量；
 - 不声称四场景 fixture 是真实准确率；
 - 不提前实现 Topology、RAG 或 Dynamic Investigation。
 
@@ -59,7 +59,7 @@ Ground Truth、Forbidden Claims 和 Expected Tools 只由 Runner/Scorer 读取�
 Evidence 类型采用平台现有枚举语义 `METRIC`，没有另造文档示例中的 `METRICS`，
 避免运行时和 Benchmark 出现两种同义值。
 
-当前四场景中，`deployment-regression` 要求 `CHANGE + METRIC + LOG + TRACE`，并把
+当前场景中，`deployment-regression` 要求 `CHANGE + METRIC + LOG + TRACE`，并把
 “仅凭部署记录直接确认根因”列为禁止声明；另外三个场景把 `CHANGE` 设为可选 Evidence，
 用于验证固定五步计划在无相关变更或存在无关变更时不会误归因。
 
@@ -117,29 +117,30 @@ uv run --project '.\MiniShop 电商下单故障演练靶场' pytest -q `
   '.\MiniShop 电商下单故障演练靶场\tests\test_scenario_manifest.py'
 ```
 
-本地 Compose E2E 已验证四个场景都能完成 Incident → Workflow → Evidence → RCA Report，
+本地 Compose E2E 已验证核心场景都能完成 Incident → Workflow → Evidence → RCA Report，
 但这是隔离的本地确定性 Stub 验收，不是 Real LLM 准确率，也不是 staging/production 签字。
 
 ## 已实现与未实现边界
 
-当前完成的是 Benchmark Phase 1 和 Phase 2 的基础部分：统一 Ground Truth 扩展、
-结构化 Prediction 合同、Scorer、四个现有场景接入和自动报告。
+当前已完成 Benchmark Phase 1/2 的本地可复现闭环：12 个场景 Manifest、Ground Truth
+与 Runtime 隔离、结构化 Prediction 合同、确定性 Scorer、消融报告、Bad Case 输出以及
+确定性合同夹具。`ops/evaluation/artifacts/minishop-v2-contract-20260818` 记录了 12/12
+通过结果，并明确标记为 `contract_fixture=true`。
 
-仍未完成生产 RCA Adapter、12 场景、Real LLM Runner、消融、Bad Case、Load/Chaos
-以及真实容量和成本数据。只有这些真实运行后，才允许把 A/B/C/D/E 数字写入 README
-或简历。
+`RCAReport` → `RCAPrediction` Runtime Adapter 已实现并保持 Ground Truth 隔离；商业/生产
+Real LLM 多次运行、真实容量和成本数据仍未完成。reference-compatible Runner 已支持多轮、Token/成本/延迟统计并完成 60 次 synthetic stub
+运行（0/60），这些数字不能写成模型准确率。
 
 ## 面试可以说什么
 
 可以说：
 
-> 为 MiniShop 四类故障建立了隔离 Ground Truth 与结构化 RCA 评分基础，使用确定性
+> 为 MiniShop 十二类故障建立了隔离 Ground Truth 与结构化 RCA 评分闭环，使用确定性
 > Scorer 评估根因、Evidence、因果链、影响面、工具选择和幻觉风险，并自动生成
-> 机器可读结果与中文报告。
+> 机器可读结果、消融报告和 Bad Case 清单。
 
 不能说：
 
-- 已完成 12 场景完整 Benchmark；
 - 已获得真实 LLM 准确率提升；
 - 已完成生产 Chaos 或容量验收；
 - contract fixture 的 100% 通过率代表模型准确率。

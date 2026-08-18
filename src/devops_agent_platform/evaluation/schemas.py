@@ -237,13 +237,32 @@ class BenchmarkMetadata(_Model):
     investigation_policy: str = Field(min_length=1, max_length=64)
     scenario_version: str = Field(min_length=1, max_length=32)
     timestamp: datetime
+    top_p: float = Field(default=1.0, ge=0, le=1)
+    max_tokens: int = Field(default=0, ge=0, le=1_000_000)
+    scenario_hash: str = ""
+    config_hash: str = ""
+    prompt_hash: str = ""
+    knowledge_dataset_hash: str = ""
+    docker_image_digest: str = ""
 
     @model_validator(mode="after")
     def validate_metadata(self) -> BenchmarkMetadata:
         if not math.isfinite(self.temperature):
             raise ValueError("temperature must be finite")
+        if not math.isfinite(self.top_p):
+            raise ValueError("top_p must be finite")
         if self.timestamp.tzinfo is None or self.timestamp.utcoffset() is None:
             raise ValueError("timestamp must include timezone information")
+        for field_name in (
+            "scenario_hash",
+            "config_hash",
+            "prompt_hash",
+            "knowledge_dataset_hash",
+            "docker_image_digest",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or len(value) > 256:
+                raise ValueError(f"{field_name} is invalid")
         return self
 
 
@@ -267,8 +286,20 @@ def load_benchmark_input(path: Path) -> BenchmarkInput:
     return BenchmarkInput.model_validate(document)
 
 
-def load_ground_truth_catalog(directory: Path) -> tuple[ScenarioGroundTruth, ...]:
+def load_ground_truth_catalog(
+    directory: Path,
+    *,
+    include_extended: bool = False,
+) -> tuple[ScenarioGroundTruth, ...]:
     paths = sorted(directory.glob("*.json"))
+    if not include_extended and directory.name == "scenarios":
+        baseline_ids = {
+            "checkout-latency",
+            "deployment-regression",
+            "inventory-db-timeout",
+            "payment-error",
+        }
+        paths = [path for path in paths if path.stem in baseline_ids]
     if not paths:
         raise ValueError(f"no scenario manifests found in {directory}")
     catalog: list[ScenarioGroundTruth] = []
@@ -282,3 +313,9 @@ def load_ground_truth_catalog(directory: Path) -> tuple[ScenarioGroundTruth, ...
     if len(ids) != len(set(ids)):
         raise ValueError("duplicate scenario_id in ground truth catalog")
     return tuple(catalog)
+
+
+def load_extended_ground_truth_catalog(
+    directory: Path,
+) -> tuple[ScenarioGroundTruth, ...]:
+    return load_ground_truth_catalog(directory, include_extended=True)

@@ -7,6 +7,10 @@ from devops_agent_platform.application.commands.alerts import ReceiveAlertComman
 from devops_agent_platform.application.commands.change_events import (
     ReceiveChangeEventCommand,
 )
+from devops_agent_platform.application.commands.dataset_releases import (
+    CreateDatasetReleaseCommand,
+    ReviewDatasetReleaseCommand,
+)
 from devops_agent_platform.application.commands.incidents import (
     CloseIncidentCommand,
     ResolveIncidentCommand,
@@ -36,6 +40,9 @@ from devops_agent_platform.application.commands.ticket_drafts import (
 from devops_agent_platform.application.commands.tool_permissions import (
     SetToolPermissionsCommand,
 )
+from devops_agent_platform.application.commands.workspaces import (
+    UpsertWorkspaceCommand,
+)
 from devops_agent_platform.domain.enums import (
     AlertSeverity,
     ChangeEventStatus,
@@ -44,6 +51,7 @@ from devops_agent_platform.domain.enums import (
     RCAFeedbackVerdict,
     TicketDecision,
 )
+from devops_agent_platform.domain.models.dataset_release import DatasetReviewRole
 
 
 class AlertWebhookRequest(BaseModel):
@@ -560,6 +568,137 @@ class TicketSubmissionRequest(BaseModel):
             workflow_run_id=workflow_run_id,
             target_system=self.target_system,
             expected_draft_version=expected_draft_version,
+            idempotency_key=idempotency_key,
+            requested_by=requested_by,
+            trace_id=trace_id,
+        )
+
+
+class UpsertWorkspaceRequest(BaseModel):
+    """Workspace 管理正文不接受租户、身份、版本或任意凭据字段。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=128)
+    prometheus_target: str = Field(min_length=1, max_length=512)
+    loki_target: str = Field(min_length=1, max_length=512)
+    tempo_target: str = Field(min_length=1, max_length=512)
+    knowledge_scope: str = Field(default="tenant", min_length=1, max_length=128)
+    investigation_policy: str = Field(
+        default="fixed_default",
+        min_length=1,
+        max_length=64,
+    )
+    allowed_tools: list[str] = Field(default_factory=list, max_length=100)
+    llm_provider_policy: str = Field(
+        default="deterministic",
+        min_length=1,
+        max_length=128,
+    )
+    retention_days: int = Field(default=30, ge=1, le=3650)
+
+    @field_validator("allowed_tools")
+    @classmethod
+    def validate_allowed_tools(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("allowed_tools must be unique")
+        return value
+
+    def to_command(
+        self,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+        expected_revision: int,
+        idempotency_key: str,
+        requested_by: str,
+        trace_id: str,
+    ) -> UpsertWorkspaceCommand:
+        return UpsertWorkspaceCommand(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            name=self.name,
+            prometheus_target=self.prometheus_target,
+            loki_target=self.loki_target,
+            tempo_target=self.tempo_target,
+            knowledge_scope=self.knowledge_scope,
+            investigation_policy=self.investigation_policy,
+            allowed_tools=tuple(self.allowed_tools),
+            llm_provider_policy=self.llm_provider_policy,
+            retention_days=self.retention_days,
+            expected_revision=expected_revision,
+            idempotency_key=idempotency_key,
+            requested_by=requested_by,
+            trace_id=trace_id,
+        )
+
+
+class CreateDatasetReleaseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dataset_id: str = Field(min_length=1, max_length=128)
+    source_version: str = Field(pattern=r"^v[1-9][0-9]*$", max_length=32)
+    version: str = Field(pattern=r"^v[1-9][0-9]*$", max_length=32)
+    dataset: dict[str, Any]
+    candidate_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    curation_review_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    synthetic: bool
+
+    def to_command(
+        self,
+        *,
+        tenant_id: str,
+        release_id: str,
+        idempotency_key: str,
+        requested_by: str,
+        trace_id: str,
+    ) -> CreateDatasetReleaseCommand:
+        return CreateDatasetReleaseCommand(
+            tenant_id=tenant_id,
+            release_id=release_id,
+            dataset_id=self.dataset_id,
+            source_version=self.source_version,
+            version=self.version,
+            dataset=self.dataset,
+            candidate_sha256=self.candidate_sha256,
+            curation_review_sha256=self.curation_review_sha256,
+            synthetic=self.synthetic,
+            idempotency_key=idempotency_key,
+            requested_by=requested_by,
+            trace_id=trace_id,
+        )
+
+
+class ReviewDatasetReleaseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: DatasetReviewRole
+    approved: bool
+    notes: str = Field(min_length=1, max_length=1024)
+
+    @field_validator("approved")
+    @classmethod
+    def require_approval(cls, value: bool) -> bool:
+        if value is not True:
+            raise ValueError("dataset review must be explicitly approved")
+        return value
+
+    def to_command(
+        self,
+        *,
+        tenant_id: str,
+        release_id: str,
+        expected_revision: int,
+        idempotency_key: str,
+        requested_by: str,
+        trace_id: str,
+    ) -> ReviewDatasetReleaseCommand:
+        return ReviewDatasetReleaseCommand(
+            tenant_id=tenant_id,
+            release_id=release_id,
+            role=self.role,
+            notes=self.notes,
+            expected_revision=expected_revision,
             idempotency_key=idempotency_key,
             requested_by=requested_by,
             trace_id=trace_id,

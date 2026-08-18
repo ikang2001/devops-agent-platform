@@ -3,6 +3,7 @@ from .change_events import (
     ChangeEventsQueryHandlerConfig,
     register_change_events_query_tool,
 )
+from .knowledge import KnowledgeSearchHandler, register_knowledge_search_tool
 from .logs import (
     LokiLogsQueryHandler,
     LokiLogsQueryHandlerConfig,
@@ -18,6 +19,7 @@ from .runbooks import (
     RunbookRetrievalHandlerConfig,
     register_runbook_retrieval_tool,
 )
+from .topology import TopologyQueryHandler, register_topology_query_tool
 from .traces import (
     TempoTracesQueryHandler,
     TempoTracesQueryHandlerConfig,
@@ -29,6 +31,7 @@ __all__ = [
     "ChangeEventsQueryHandlerConfig",
     "LokiLogsQueryHandler",
     "LokiLogsQueryHandlerConfig",
+    "KnowledgeSearchHandler",
     "PrometheusMetricsQueryHandler",
     "PrometheusMetricsQueryHandlerConfig",
     "RunbookRetrievalHandler",
@@ -39,5 +42,8 @@ __all__ = [
     "register_change_events_query_tool",
     "register_prometheus_metrics_tool",
     "register_loki_logs_tool",
+    "register_knowledge_search_tool",
     "register_runbook_retrieval_tool",
+    "register_topology_query_tool",
+    "TopologyQueryHandler",
 ]

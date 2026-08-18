@@ -65,7 +65,7 @@ def fake_session_factory():
 
 
 async def test_bundle_builds_complete_deterministic_consumer_graph() -> None:
-    """默认报告模式应装配五类只读工具和确定性报告生成器。"""
+    """默认报告模式应装配观测、拓扑和知识只读工具。"""
     bundle = build_rca_consumer_runtime(
         build_settings(),
         fake_session_factory,  # type: ignore[arg-type]
@@ -88,8 +88,8 @@ async def test_bundle_builds_complete_deterministic_consumer_graph() -> None:
             workflow._report_generator,
             DeterministicRCAReportGenerator,
         )
-        assert len(workflow._registry.list_tools()) == 5
-        assert len(workflow._tool_executor._registry.list_handlers()) == 5
+        assert len(workflow._registry.list_tools()) == 7
+        assert len(workflow._tool_executor._registry.list_handlers()) == 7
         change_registration = workflow._tool_executor._registry.get(
             "changes.query",
             "v1",
@@ -160,8 +160,8 @@ async def test_bundle_wires_trace_free_partial_degrade_policy() -> None:
             "runbooks.retrieve",
         ]
         assert workflow._config.continue_on_step_failure is True
-        assert len(workflow._registry.list_tools()) == 4
-        assert len(workflow._tool_executor._registry.list_handlers()) == 4
+        assert len(workflow._registry.list_tools()) == 6
+        assert len(workflow._tool_executor._registry.list_handlers()) == 6
     finally:
         for resource in reversed(bundle.resources):
             await resource.close()

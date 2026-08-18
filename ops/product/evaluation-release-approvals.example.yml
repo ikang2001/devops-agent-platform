@@ -1,0 +1,20 @@
+schema_version: 1
+dataset_id: rca_step6_baseline
+source_version: v1
+target_version: v2
+requested_by: release-owner
+published_at: "2026-08-18T18:00:00+08:00"
+synthetic: true
+candidate_sha256: 8e8d0873bec9c1782c9acb78a6a10842d25a47a5cafe552c50f3c9184d4b5935
+curation_review_sha256: 4d958885f5c0c094276d27fee86328853e49335a7878d9a931988e011f4f4078
+reviews:
+  - reviewer_id: domain-reviewer
+    role: domain
+    approved: true
+    reviewed_at: "2026-08-18T17:30:00+08:00"
+    notes: Root cause and evidence labels were checked.
+  - reviewer_id: privacy-reviewer
+    role: privacy
+    approved: true
+    reviewed_at: "2026-08-18T17:45:00+08:00"
+    notes: Identifiers and sensitive values were checked.

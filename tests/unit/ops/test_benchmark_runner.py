@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from devops_agent_platform.evaluation.runner import main, run_benchmark
+from devops_agent_platform.evaluation.runner import (
+    main,
+    run_benchmark,
+    run_deterministic_contract,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCENARIO_ROOT = PROJECT_ROOT / "MiniShop 电商下单故障演练靶场" / "scenarios"
@@ -140,6 +144,24 @@ def test_repository_contract_fixture_scores_all_four_scenarios(
         "inventory-db-timeout",
         "payment-error",
     }
+
+
+def test_deterministic_contract_covers_all_extended_scenarios(tmp_path: Path) -> None:
+    result = run_deterministic_contract(
+        SCENARIO_ROOT,
+        tmp_path / "artifacts",
+        git_commit="42665bd",
+        include_extended=True,
+    )
+
+    assert result["contract_fixture"] is True
+    assert result["benchmark"]["git_commit"] == "42665bd"
+    assert result["summary"]["total_runs"] == 12
+    assert result["summary"]["passed_runs"] == 12
+    assert result["summary"]["rca_top1_accuracy"] == 1.0
+    assert not (tmp_path / "artifacts" / "bad_cases.jsonl").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_runner_refuses_to_overwrite_existing_artifacts(tmp_path: Path) -> None:

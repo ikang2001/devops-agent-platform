@@ -38,6 +38,9 @@ from devops_agent_platform.interfaces.http.routes.change_events import (
 from devops_agent_platform.interfaces.http.routes.console import (
     router as console_router,
 )
+from devops_agent_platform.interfaces.http.routes.dataset_releases import (
+    router as dataset_releases_router,
+)
 from devops_agent_platform.interfaces.http.routes.health import router as health_router
 from devops_agent_platform.interfaces.http.routes.incidents import (
     router as incidents_router,
@@ -65,6 +68,9 @@ from devops_agent_platform.interfaces.http.routes.ticket_drafts import (
 )
 from devops_agent_platform.interfaces.http.routes.tool_permissions import (
     router as tool_permissions_router,
+)
+from devops_agent_platform.interfaces.http.routes.workspaces import (
+    router as workspaces_router,
 )
 from devops_agent_platform.ports.authentication import (
     AdministratorAuthenticatorPort,
@@ -174,6 +180,12 @@ def create_app(
             "runbook_admin_service",
             None,
         )
+        app.state.workspace_service = getattr(runtime, "workspace_service", None)
+        app.state.dataset_release_service = getattr(
+            runtime,
+            "dataset_release_service",
+            None,
+        )
         app.state.ticket_draft_service = getattr(
             runtime,
             "ticket_draft_service",
@@ -206,6 +218,8 @@ def create_app(
             app.state.incident_resolution_service = None
             app.state.tool_permission_admin_service = None
             app.state.runbook_admin_service = None
+            app.state.workspace_service = None
+            app.state.dataset_release_service = None
             app.state.ticket_draft_service = None
             app.state.ticket_submission_service = None
             app.state.notification_service = None
@@ -232,6 +246,8 @@ def create_app(
     app.state.incident_resolution_service = None
     app.state.tool_permission_admin_service = None
     app.state.runbook_admin_service = None
+    app.state.workspace_service = None
+    app.state.dataset_release_service = None
     app.state.ticket_draft_service = None
     app.state.ticket_submission_service = None
     app.state.notification_service = None
@@ -269,6 +285,8 @@ def create_app(
     app.include_router(remediation_router, prefix="/api/v1")
     app.include_router(tool_permissions_router, prefix="/api/v1")
     app.include_router(runbooks_router, prefix="/api/v1")
+    app.include_router(workspaces_router, prefix="/api/v1")
+    app.include_router(dataset_releases_router, prefix="/api/v1")
     app.include_router(ticket_drafts_router, prefix="/api/v1")
     app.include_router(notifications_router, prefix="/api/v1")
     if resolved_settings.metrics_enabled:

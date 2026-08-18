@@ -69,13 +69,19 @@ class Summary:
     evidence_f1: float
     unsupported_claim_rate: float
     forbidden_claim_rate: float
+    false_positive_rate: float
     causal_chain_f1: float
     blast_radius_f1: float
     tool_selection_accuracy: float
     avg_tool_calls: float
+    avg_investigation_steps: float
+    redundant_tool_call_rate: float
+    invalid_tool_proposal_rate: float
+    policy_block_rate: float
     avg_llm_calls: float
     avg_tokens: float
     avg_cost: float
+    p50_latency_ms: int
     p95_latency_ms: int
 
     def to_dict(self) -> dict[str, object]:
@@ -306,6 +312,7 @@ def summarize_scores(scores: tuple[RunScore, ...]) -> Summary:
         return mean(float(getattr(item, field_name)) for item in scores)
 
     latencies = sorted(item.latency_ms for item in scores)
+    p50_index = max(ceil(len(latencies) * 0.5) - 1, 0)
     p95_index = ceil(len(latencies) * 0.95) - 1
     return Summary(
         total_runs=len(scores),
@@ -318,12 +325,18 @@ def summarize_scores(scores: tuple[RunScore, ...]) -> Summary:
         evidence_f1=average("evidence_f1"),
         unsupported_claim_rate=average("unsupported_claim_rate"),
         forbidden_claim_rate=mean(bool(item.forbidden_claims_found) for item in scores),
+        false_positive_rate=average("false_positive_root_cause"),
         causal_chain_f1=average("causal_chain_f1"),
         blast_radius_f1=average("blast_radius_f1"),
         tool_selection_accuracy=average("tool_selection_accuracy"),
         avg_tool_calls=average("tool_calls"),
+        avg_investigation_steps=average("investigation_steps"),
+        redundant_tool_call_rate=average("redundant_tool_call_rate"),
+        invalid_tool_proposal_rate=average("invalid_tool_proposal_rate"),
+        policy_block_rate=average("policy_block_rate"),
         avg_llm_calls=average("llm_calls"),
         avg_tokens=average("total_tokens"),
         avg_cost=average("estimated_cost"),
+        p50_latency_ms=latencies[p50_index],
         p95_latency_ms=latencies[p95_index],
     )

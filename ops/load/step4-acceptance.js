@@ -22,8 +22,8 @@ export const options = {
     alert_ingestion: {
       executor: "constant-arrival-rate",
       exec: "alertIngestion",
-      rate: Number(__ENV.ALERT_RATE || 20),
-      timeUnit: "1s",
+      rate: Number(__ENV.ALERT_RATE || 100),
+      timeUnit: __ENV.ALERT_TIME_UNIT || "1m",
       duration: __ENV.DURATION || "2m",
       preAllocatedVUs: Number(__ENV.ALERT_VUS || 30),
       maxVUs: Number(__ENV.ALERT_MAX_VUS || 100),

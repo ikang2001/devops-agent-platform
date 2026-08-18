@@ -342,6 +342,10 @@ def test_summary_aggregates_real_scores() -> None:
     assert summary.rca_top1_accuracy == 0.5
     assert summary.root_service_accuracy == 0.5
     assert summary.evidence_recall == 1.0
+    assert summary.false_positive_rate == 0.0
+    assert summary.avg_investigation_steps == 3.0
+    assert summary.redundant_tool_call_rate == 0.0
+    assert summary.p50_latency_ms == 1200
     assert summary.p95_latency_ms == 1200
 
 

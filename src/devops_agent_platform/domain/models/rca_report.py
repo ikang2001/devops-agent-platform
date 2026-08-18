@@ -29,6 +29,10 @@ class RCAReport:
     generator_name: str
     generator_version: str
     generated_at: datetime
+    suspected_root_node: str | None = None
+    causal_chain: tuple[tuple[str, str, tuple[str, ...]], ...] = ()
+    affected_services: tuple[str, ...] = ()
+    blast_radius: tuple[tuple[str, float], ...] = ()
 
     def __post_init__(self) -> None:
         """构造时执行完整领域约束。"""
@@ -58,13 +62,9 @@ class RCAReport:
             or not isinstance(self.execution_attempt, int)
             or self.execution_attempt < 1
         ):
-            raise AppValidationError(
-                "execution_attempt must be a positive integer"
-            )
+            raise AppValidationError("execution_attempt must be a positive integer")
         if not isinstance(self.conclusion_status, RCAConclusionStatus):
-            raise AppValidationError(
-                "conclusion_status must be an RCAConclusionStatus"
-            )
+            raise AppValidationError("conclusion_status must be an RCAConclusionStatus")
         if (
             isinstance(self.confidence, bool)
             or not isinstance(self.confidence, int | float)
@@ -74,14 +74,13 @@ class RCAReport:
         self._validate_evidence_ids()
         self._validate_type_counts()
         self._validate_recommendations()
+        self._validate_topology_context()
         if (
             not isinstance(self.generated_at, datetime)
             or self.generated_at.tzinfo is None
             or self.generated_at.utcoffset() is None
         ):
-            raise AppValidationError(
-                "generated_at must include timezone information"
-            )
+            raise AppValidationError("generated_at must include timezone information")
 
     def _validate_evidence_ids(self) -> None:
         """报告必须引用有限且唯一的 Evidence。"""
@@ -103,9 +102,7 @@ class RCAReport:
             not isinstance(self.evidence_type_counts, tuple)
             or not self.evidence_type_counts
         ):
-            raise AppValidationError(
-                "evidence_type_counts must be a non-empty tuple"
-            )
+            raise AppValidationError("evidence_type_counts must be a non-empty tuple")
         names: list[str] = []
         total = 0
         for item in self.evidence_type_counts:
@@ -116,16 +113,12 @@ class RCAReport:
                 or isinstance(item[1], bool)
                 or item[1] < 1
             ):
-                raise AppValidationError(
-                    "evidence_type_counts item is invalid"
-                )
+                raise AppValidationError("evidence_type_counts item is invalid")
             self._validate_text("evidence_type", item[0], 32)
             names.append(item[0])
             total += item[1]
         if names != sorted(names) or len(names) != len(set(names)):
-            raise AppValidationError(
-                "evidence_type_counts must be sorted and unique"
-            )
+            raise AppValidationError("evidence_type_counts must be sorted and unique")
         if total != len(self.evidence_ids):
             raise AppValidationError(
                 "evidence_type_counts total does not match evidence_ids"
@@ -142,6 +135,52 @@ class RCAReport:
             )
         for recommendation in self.recommendations:
             self._validate_text("recommendation", recommendation, 1024)
+
+    def _validate_topology_context(self) -> None:
+        if self.suspected_root_node is not None:
+            self._validate_text("suspected_root_node", self.suspected_root_node, 256)
+        if not isinstance(self.causal_chain, tuple) or len(self.causal_chain) > 100:
+            raise AppValidationError("causal_chain must contain at most 100 items")
+        seen_edges: set[tuple[str, str]] = set()
+        for item in self.causal_chain:
+            if not isinstance(item, tuple) or len(item) != 3:
+                raise AppValidationError("causal_chain item is invalid")
+            source, target, evidence_ids = item
+            self._validate_text("causal_chain source", source, 256)
+            self._validate_text("causal_chain target", target, 256)
+            if source == target or (source, target) in seen_edges:
+                raise AppValidationError(
+                    "causal_chain contains an invalid or duplicate edge"
+                )
+            if not isinstance(evidence_ids, tuple) or len(evidence_ids) != len(
+                set(evidence_ids)
+            ):
+                raise AppValidationError("causal_chain evidence ids are invalid")
+            for evidence_id in evidence_ids:
+                self._validate_text("causal_chain evidence_id", evidence_id, 64)
+            seen_edges.add((source, target))
+        if (
+            not isinstance(self.affected_services, tuple)
+            or len(self.affected_services) > 100
+        ):
+            raise AppValidationError("affected_services must contain at most 100 items")
+        for service in self.affected_services:
+            self._validate_text("affected_service", service, 256)
+        if len(self.affected_services) != len(set(self.affected_services)):
+            raise AppValidationError("affected_services must be unique")
+        if not isinstance(self.blast_radius, tuple) or len(self.blast_radius) > 100:
+            raise AppValidationError("blast_radius must contain at most 100 items")
+        for item in self.blast_radius:
+            if not isinstance(item, tuple) or len(item) != 2:
+                raise AppValidationError("blast_radius item is invalid")
+            node, score = item
+            self._validate_text("blast_radius node", node, 256)
+            if (
+                isinstance(score, bool)
+                or not isinstance(score, int | float)
+                or not 0 <= float(score) <= 1
+            ):
+                raise AppValidationError("blast_radius score must be between 0 and 1")
 
     @staticmethod
     def _validate_text(
@@ -161,10 +200,7 @@ class RCAReport:
                 f"{field_name} must not contain surrounding whitespace"
             )
         if any(
-            (
-                ord(character) < 32
-                and not (multiline and character == "\n")
-            )
+            (ord(character) < 32 and not (multiline and character == "\n"))
             or ord(character) == 127
             for character in value
         ):

@@ -3,8 +3,16 @@ from devops_agent_platform.infrastructure.database.models.alert import AlertReco
 from devops_agent_platform.infrastructure.database.models.change_event import (
     ChangeEventRecord,
 )
+from devops_agent_platform.infrastructure.database.models.dataset_release import (
+    DatasetReleaseRecord,
+    DatasetReleaseReviewRecord,
+)
 from devops_agent_platform.infrastructure.database.models.evidence import EvidenceRecord
 from devops_agent_platform.infrastructure.database.models.incident import IncidentRecord
+from devops_agent_platform.infrastructure.database.models.knowledge import (
+    KnowledgeChunkRecord,
+    KnowledgeDocumentRecord,
+)
 from devops_agent_platform.infrastructure.database.models.outbox import (
     OutboxEventRecord,
 )
@@ -36,8 +44,16 @@ from devops_agent_platform.infrastructure.database.models.tool_permission import
     ToolPermissionOperationRecord,
     ToolPermissionTagRecord,
 )
+from devops_agent_platform.infrastructure.database.models.topology import (
+    TopologyEdgeRecord,
+    TopologyNodeRecord,
+)
 from devops_agent_platform.infrastructure.database.models.workflow_run import (
     WorkflowRunRecord,
+)
+from devops_agent_platform.infrastructure.database.models.workspace import (
+    WorkspaceOperationRecord,
+    WorkspaceRecord,
 )
 
 metadata = Base.metadata
@@ -46,7 +62,11 @@ __all__ = [
     "AlertRecord",
     "ChangeEventRecord",
     "EvidenceRecord",
+    "DatasetReleaseRecord",
+    "DatasetReleaseReviewRecord",
     "IncidentRecord",
+    "KnowledgeDocumentRecord",
+    "KnowledgeChunkRecord",
     "OutboxEventRecord",
     "RCAReportRecord",
     "RCAFeedbackRecord",
@@ -61,5 +81,9 @@ __all__ = [
     "TicketDraftRecord",
     "TicketSubmissionRecord",
     "WorkflowRunRecord",
+    "TopologyEdgeRecord",
+    "TopologyNodeRecord",
+    "WorkspaceRecord",
+    "WorkspaceOperationRecord",
     "metadata",
 ]

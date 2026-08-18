@@ -60,6 +60,15 @@ class AlertRecord(Base):
         ),
         nullable=True,
     )
+    environment: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="default", server_default="default"
+    )
+    alert_type: Mapped[str] = mapped_column(
+        String(128), nullable=False, default="generic", server_default="generic"
+    )
+    labels_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),
         nullable=False,

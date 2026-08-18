@@ -71,6 +71,11 @@ _BACKLOG_STATUSES = (
 )
 
 
+def _low_cardinality(value: str, allowed: set[str]) -> str:
+    normalized = value.strip().casefold() if isinstance(value, str) else "other"
+    return normalized if normalized in allowed else "other"
+
+
 class ApplicationMetrics:
     """持有单个应用实例的低基数Prometheus指标。"""
 
@@ -398,7 +403,140 @@ class ApplicationMetrics:
             namespace="devops_agent",
             registry=self.registry,
         )
+        # Agent 自身的观测指标只使用有限枚举/工具名标签，不包含 incident、tenant、
+        # workflow 或 trace 等高基数标识。
+        self.rca_total = Counter(
+            "rca_total",
+            "RCA executions",
+            labelnames=("outcome",),
+            namespace="devops_agent",
+            registry=self.registry,
+        )
+        self.rca_duration = Histogram(
+            "rca_duration_seconds",
+            "RCA execution duration",
+            labelnames=("outcome",),
+            namespace="devops_agent",
+            buckets=_LLM_REPORT_BUCKETS,
+            registry=self.registry,
+        )
+        self.rca_failed_total = Counter(
+            "rca_failed_total",
+            "Failed RCA executions",
+            namespace="devops_agent",
+            registry=self.registry,
+        )
+        self.tool_invocations_total = Counter(
+            "tool_invocations_total",
+            "Tool invocations",
+            labelnames=("tool", "outcome"),
+            namespace="devops_agent",
+            registry=self.registry,
+        )
+        self.tool_duration = Histogram(
+            "tool_duration_seconds",
+            "Tool duration",
+            labelnames=("tool",),
+            namespace="devops_agent",
+            buckets=_LLM_REPORT_BUCKETS,
+            registry=self.registry,
+        )
+        self.tool_failures_total = Counter(
+            "tool_failures_total",
+            "Tool failures",
+            labelnames=("tool",),
+            namespace="devops_agent",
+            registry=self.registry,
+        )
+        self.llm_requests_total = Counter(
+            "llm_requests_total",
+            "LLM requests",
+            labelnames=("outcome",),
+            namespace="devops_agent",
+            registry=self.registry,
+        )
+        self.llm_tokens_total = Counter(
+            "llm_tokens_total",
+            "LLM tokens",
+            labelnames=("kind",),
+            namespace="devops_agent",
+            registry=self.registry,
+        )
+        self.workflow_reclaims_total = Counter(
+            "workflow_reclaims_total",
+            "Workflow lease reclaims",
+            namespace="devops_agent",
+            registry=self.registry,
+        )
+        self.partial_reports_total = Counter(
+            "partial_reports_total",
+            "Partial RCA reports",
+            namespace="devops_agent",
+            registry=self.registry,
+        )
+        self.consumer_lag = Gauge(
+            "consumer_lag",
+            "RCA consumer lag",
+            namespace="devops_agent",
+            registry=self.registry,
+        )
         self._initialize_fixed_labels()
+
+    def observe_rca(
+        self,
+        *,
+        outcome: str,
+        duration_seconds: float,
+        failed: bool = False,
+        partial: bool = False,
+    ) -> None:
+        normalized = _low_cardinality(outcome, {"succeeded", "failed", "partial"})
+        self.rca_total.labels(outcome=normalized).inc()
+        self.rca_duration.labels(outcome=normalized).observe(
+            max(0.0, float(duration_seconds))
+        )
+        if failed:
+            self.rca_failed_total.inc()
+        if partial:
+            self.partial_reports_total.inc()
+
+    def observe_tool(self, *, tool: str, outcome: str, duration_seconds: float) -> None:
+        safe_tool = _low_cardinality(
+            tool,
+            {
+                "metrics",
+                "logs",
+                "traces",
+                "changes",
+                "topology",
+                "knowledge",
+                "runbooks",
+                "other",
+            },
+        )
+        safe_outcome = _low_cardinality(
+            outcome, {"succeeded", "failed", "blocked", "timeout"}
+        )
+        self.tool_invocations_total.labels(tool=safe_tool, outcome=safe_outcome).inc()
+        self.tool_duration.labels(tool=safe_tool).observe(
+            max(0.0, float(duration_seconds))
+        )
+        if safe_outcome in {"failed", "timeout"}:
+            self.tool_failures_total.labels(tool=safe_tool).inc()
+
+    def observe_llm(
+        self, *, outcome: str, prompt_tokens: int = 0, completion_tokens: int = 0
+    ) -> None:
+        safe_outcome = _low_cardinality(outcome, {"succeeded", "failed", "fallback"})
+        self.llm_requests_total.labels(outcome=safe_outcome).inc()
+        self.llm_tokens_total.labels(kind="prompt").inc(max(0, prompt_tokens))
+        self.llm_tokens_total.labels(kind="completion").inc(max(0, completion_tokens))
+
+    def observe_workflow_reclaim(self) -> None:
+        self.workflow_reclaims_total.inc()
+
+    def set_consumer_lag(self, lag: int) -> None:
+        self.consumer_lag.set(max(0, int(lag)))
 
     def start_http_request(self, method: str) -> str:
         """增加请求处理中Gauge，并返回规范化方法标签。"""

@@ -368,6 +368,7 @@ class Settings(BaseSettings):
     admin_oidc_issuer: str | None = Field(default=None)
     admin_oidc_audience: str | None = Field(default=None)
     admin_oidc_jwks_url: str | None = Field(default=None)
+    admin_oidc_ca_bundle_path: str | None = Field(default=None)
     admin_oidc_algorithms: str = Field(default="RS256")
     admin_oidc_jwks_cache_ttl_seconds: float = Field(
         default=300,
@@ -679,6 +680,12 @@ class Settings(BaseSettings):
                 "admin_oidc_jwks_url",
                 self.admin_oidc_jwks_url or "",
             )
+            if self.admin_oidc_ca_bundle_path is not None:
+                self._validate_plain_text_identifier(
+                    "admin_oidc_ca_bundle_path",
+                    self.admin_oidc_ca_bundle_path,
+                    1024,
+                )
             for field_name, value in (
                 ("admin_oidc_subject_claim", self.admin_oidc_subject_claim),
                 ("admin_oidc_scopes_claim", self.admin_oidc_scopes_claim),

@@ -40,6 +40,10 @@ class IdentifierGeneratorPort(Protocol):
         """生成新的 Runbook 管理操作标识。"""
         ...
 
+    def new_workspace_operation_id(self) -> str:
+        """生成新的 Workspace 管理操作标识。"""
+        ...
+
     def new_ticket_draft_id(self) -> str:
         """生成新的本地工单草稿标识。"""
         ...

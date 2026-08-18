@@ -28,10 +28,12 @@ class RCAReportMapper:
             summary=report.summary,
             confidence=report.confidence,
             evidence_ids_json=_encode_json(report.evidence_ids),
-            evidence_type_counts_json=_encode_json(
-                report.evidence_type_counts
-            ),
+            evidence_type_counts_json=_encode_json(report.evidence_type_counts),
             recommendations_json=_encode_json(report.recommendations),
+            suspected_root_node=report.suspected_root_node,
+            causal_chain_json=_encode_json(report.causal_chain),
+            affected_services_json=_encode_json(report.affected_services),
+            blast_radius_json=_encode_json(report.blast_radius),
             generator_name=report.generator_name,
             generator_version=report.generator_version,
             generated_at=report.generated_at,
@@ -52,15 +54,22 @@ class RCAReportMapper:
             record.recommendations_json,
             "recommendations_json",
         )
+        causal_chain = _decode_json_list(
+            record.causal_chain_json or "[]", "causal_chain_json"
+        )
+        affected_services = _decode_json_list(
+            record.affected_services_json or "[]", "affected_services_json"
+        )
+        blast_radius = _decode_json_list(
+            record.blast_radius_json or "[]", "blast_radius_json"
+        )
         return RCAReport(
             report_id=record.report_id,
             tenant_id=record.tenant_id,
             incident_id=record.incident_id,
             workflow_run_id=record.workflow_run_id,
             execution_attempt=record.execution_attempt,
-            conclusion_status=RCAConclusionStatus(
-                record.conclusion_status
-            ),
+            conclusion_status=RCAConclusionStatus(record.conclusion_status),
             title=_escape_legacy_display_text(
                 record.title,
                 maximum=256,
@@ -85,6 +94,20 @@ class RCAReportMapper:
             generator_name=record.generator_name,
             generator_version=record.generator_version,
             generated_at=record.generated_at,
+            suspected_root_node=record.suspected_root_node,
+            causal_chain=tuple(
+                (item[0], item[1], tuple(item[2]))
+                for item in causal_chain
+                if isinstance(item, list) and len(item) == 3
+            ),
+            affected_services=tuple(
+                item for item in affected_services if isinstance(item, str)
+            ),
+            blast_radius=tuple(
+                (item[0], float(item[1]))
+                for item in blast_radius
+                if isinstance(item, list) and len(item) == 2
+            ),
         )
 
 

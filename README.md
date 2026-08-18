@@ -25,6 +25,9 @@ LLM 只负责生成供人工复核的结构化候选报告，不能把根因标�
 | MiniShop 端到端 RCA 导读 | [docs/minishop-e2e-rca-code-tour.md](docs/minishop-e2e-rca-code-tour.md) |
 | Change Event 到 RCA 闭环 | [docs/change-event-rca-loop.md](docs/change-event-rca-loop.md) |
 | Benchmark 基础评分闭环 | [docs/evaluation-benchmark-foundation.md](docs/evaluation-benchmark-foundation.md) |
+| Reference staging 验收 | [ops/reference-staging/README.md](ops/reference-staging/README.md) |
+| AIOps 项目改造任务书 | [DevOps_Agent_AIOps_项目完善改造任务书.md](DevOps_Agent_AIOps_项目完善改造任务书.md) |
+| Benchmark 实施规范 | [DevOps_Agent_Evaluation_Benchmark_实施规范.md](DevOps_Agent_Evaluation_Benchmark_实施规范.md) |
 | 部署说明 | [ops/deploy/README.md](ops/deploy/README.md) |
 | 运维 Runbook | [ops/runbooks](ops/runbooks) |
 
@@ -39,28 +42,41 @@ LLM 只负责生成供人工复核的结构化候选报告，不能把根因标�
 - 固定、受权限控制的只读 RCA 调查计划；
 - 可选的部分采集降级和置信度护栏；
 - PostgreSQL、Kafka、Prometheus、Loki、Tempo 的端口与适配器；
+- 可启动的 reference staging 全栈（PostgreSQL、Redpanda、OIDC/JWKS、Prometheus、Loki、Tempo、OpenAI-compatible Provider、Ticketing、MCP），并有 11/11 协议验收报告；
 - 工单提交、人工反馈、审批式修复计划和 MiniShop 演练闭环；
+- HTTP MCP 适配器、租户 Workspace 管理 API，以及双审核人在线数据集发布状态机；
 - 可本地验证的测试、迁移、镜像、SBOM 和安全扫描门禁。
 
 不能宣称：
 
 - 已承载真实生产流量；
 - Agent 会自由选择工具并进行自适应多轮推理；
-- Prompt Registry、Feature Flag、RAG 或反馈评测闭环已经在线自动运行；
+- Prompt Registry、Feature Flag、向量 RAG 或反馈自动学习闭环已经在线自动运行；
 - 平台能够自动接管、重试任意外部写操作；
 - 本地 Compose、Mock 或单元测试等同于 staging / production 签字。
 
-仓库中的 Prompt Registry、Feature Flag 和 RAG 资产属于 `Example Or Blueprint Only / Not Loaded By Runtime`，中文含义是“仅示例或治理蓝图，运行时未接线”。
+仓库中的 Prompt Registry、Feature Flag 和 RAG 资产属于“仅示例或治理蓝图，运行时未接线”，对应的英文边界标记为 `Example Or Blueprint Only / Not Loaded By Runtime`。
 
 ## 当前完成状态
 
 | 阶段 | 当前状态 | 仍需补齐 |
 |---|---|---|
-| Step 4 工程主链路 | 已实现并可重复本地验证 | 真实 PostgreSQL、Kafka、OIDC、观测源、LLM、工单系统的目标环境签字 |
-| Step 5 生产化资产 | 已提供 Docker、Compose、Kubernetes 骨架、CI、安全门禁和运维手册 | 真实拓扑、容量压测、故障注入、备份恢复演练证据 |
-| Step 6 产品面 | 已实现 Ops Console、反馈 API、离线评测门禁、工单和修复计划能力 | 在线多审核人策展、自动匿名化、真实 Web 产品和运行时 Prompt/Flag/RAG |
+| Step 4 工程主链路 | 已实现并可重复本地验证；reference staging 已完成 11/11 协议验收 | 真实外部 staging/production 签字与商业 LLM 准确率 |
+| Step 5 生产化资产 | 已提供 Docker、Compose、Kubernetes 骨架、CI、安全门禁；reference staging 已完成 100/500/1000 alerts/min 与四类 Chaos 实测 | 目标环境容量、备份恢复和故障注入签字 |
+| Step 6 产品面 | 已实现 Ops Console、反馈 API、Workspace API、HTTP MCP、离线策展和在线双审核人发布状态机 | 自动匿名化、真实 Web 产品、运行时 Prompt/Flag/RAG 和组织级发布流程 |
 
 完整真相源见 [缺少内容.md](缺少内容.md)。若其他文档与它冲突，以该文件为准。
+
+## Reference staging 实测资产（2026-08-18）
+
+下面的数字来自本机 Docker Compose 全栈，全部是 `synthetic/reference` 证据，不能当作生产签字：
+
+- 协议验收：`ops/reference-staging/artifacts/reference-20260818-r7/results.json`，11/11 通过；新增 Dataset Release 创建、幂等、双审核、发布后不可变和禁止创建人自审检查；
+- Real-LLM-compatible Runner：`ops/evaluation/artifacts/minishop-v2-reference-live-20260818`，12 场景 × 5 次共 60 次，使用故意保守的 reference Provider，0/60 通过，平均 112 tokens、平均成本 0.0000512，不能解释为模型准确率；
+- 到达率压测：`ops/load/artifacts/reference-20260818-r2/load-report.json`，100/500/1000 alerts/min 实测到达率约 99.883/499.556/997.892，P95 约 68.177/25.596/24.196 ms，错误率 0，使用 Python fallback，不是 k6 生产容量报告；
+- 故障注入：`ops/chaos/artifacts/reference-20260818/chaos-report.json`，Worker/Kafka/PostgreSQL/Loki 四场景通过，Worker fence 拒绝 1 次；报告明确 `synthetic=true`、`production_acceptance=false`。
+
+启动、验收和数据边界见 [reference staging README](ops/reference-staging/README.md)。
 
 ## 系统架构
 
@@ -222,8 +238,8 @@ ops/minishop-e2e/artifacts/results.json
 
 ### Benchmark 基础评分闭环
 
-现有四个 Manifest 已扩展根因类型、Evidence 类型、有向因果边、影响服务以及期望/
-禁止工具。独立 Scorer 可以对结构化 Prediction 计算 RCA、Evidence、Claim、因果链、
+MiniShop-v2 现有 12 个 Manifest 均定义了根因类型、Evidence 类型、有向因果边、影响服务
+以及期望/禁止工具。独立 Scorer 可以对结构化 Prediction 计算 RCA、Evidence、Claim、因果链、
 影响面和 Tool 指标，并生成 `results.json` 与中文 `evaluation-report.md`。
 
 运行 deterministic contract fixture：
@@ -291,7 +307,7 @@ uv run alembic upgrade head
 ```powershell
 uv build --out-dir dist
 uv run python scripts/check-release-version.py `
-  --tag v0.3.4 --dist-dir dist
+  --tag v0.4.0 --dist-dir dist
 ```
 
 Tag 流水线依次执行：
@@ -325,6 +341,23 @@ Tag 流水线依次执行：
 
 这些改动提升了版本可追溯性，但不等于目标环境已经完成生产验收。真实部署仍必须补齐 OIDC、Kafka、观测源、LLM、工单系统、外部修复控制器、容量和故障注入证据。
 
+## v0.4.0 相比 v0.3.4 的完善
+
+`v0.4.0` 是本项目面向评测闭环和平台治理能力的一次功能版本升级。相较上一版，主要完成了以下修复和增强：
+
+- 补齐 Change Event 到 RCA 的持久化、查询、证据引用和 HMAC 鉴权闭环，并覆盖变更时间窗、租户隔离与幂等语义；
+- 新增拓扑、影响面、告警关联、历史知识检索和有界动态调查能力，保持默认固定只读 RCA 计划和无界循环禁止；
+- 新增 Workspace 管理 API、HTTP MCP Adapter，以及 Dataset Release 在线双审核、幂等、版本 fence 和发布后不可变约束；
+- 将 MiniShop Benchmark 扩展为 12 个机器可读场景，补齐 Scenario Manifest、Ground Truth、结构化 Prediction、因果链、影响面、证据和 Tool 指标；
+- 新增 Real-LLM-compatible Runner、`RCAReport → RCAPrediction` Runtime Adapter、消融评测、Bad Cases 和中文评测报告输出；
+- 新增 Reference staging 全栈，覆盖 PostgreSQL、Redpanda、OIDC/JWKS、Prometheus、Loki、Tempo、LLM/Ticketing Mock、MCP 和 Agent；
+- 新增 11/11 协议验收、100/500/1000 alerts/min 合成压测、Worker/Kafka/PostgreSQL/Loki 故障注入和租约 Fence 拒绝证据；
+- 新增 Dataset Release 验收中的创建人自审禁止校验，修复验收主体映射错误，避免把创建者误当成 domain 审核人；
+- 更新任务书完成清单、中文项目说明和 Reference staging 最终报告，明确 `synthetic=true`、`production_acceptance=false` 的证据边界；
+- 统一项目版本、Kubernetes 镜像、锁文件和发布检查到 `0.4.0`，使 Tag、构建产物和部署清单可追溯。
+
+本版本已通过 `1847 passed, 9 skipped` 全量测试、Ruff、Compose 配置校验和 Reference staging 11/11 验收。真实外部 staging/production 签字、真实 LLM 准确率、目标环境容量和生产故障注入仍需在具备凭据的环境中完成。
+
 ## 部署与监控资产
 
 - Docker：`Dockerfile`、`.dockerignore`；
@@ -354,7 +387,7 @@ Alertmanager Slack Webhook 必须以 Secret 文件挂载：
 
 以下内容不能通过本地 Mock 或文档替代：
 
-1. 真实 PostgreSQL、Kafka、OIDC、Prometheus、Loki、Tempo、LLM 和 Ticketing 的 staging/sandbox 验收；
+1. 真实外部 PostgreSQL、Kafka、OIDC、Prometheus、Loki、Tempo、LLM 和 Ticketing 的 staging/sandbox 签字；reference staging 只能证明本地协议和装配；
 2. HTTPS OIDC issuer、JWKS、audience、Token 和证书链验证；
 3. 1x、2x 和峰值流量下的 k6 压测报告；
 4. 故障注入后的恢复时间、重复/丢失、Consumer Lag、Outbox Backlog、CPU 和内存证据；
@@ -364,3 +397,31 @@ Alertmanager Slack Webhook 必须以 Secret 文件挂载：
 在这些证据完成前，项目的准确定位仍是：
 
 > 生产导向的 Incident / 受控 RCA 作业编排平台，而不是已生产上线的自适应智能排障 Agent。
+
+## 任务书实现进度（2026-08）
+
+本分支已按两份任务书补齐可本地验证的能力：
+
+- P0 Topology：`ServiceNode`、`ResourceNode`、`DependencyEdge`、静态/Trace 来源、租户隔离、TTL、环检测、最大深度、`topology.query@v1` 与确定性 Blast Radius；SQLAlchemy 适配器已接入 RCA runtime。
+- P0 Dynamic RCA：`bounded_dynamic_v1`、`InvestigationState`、`StepDecision`、后端 Policy Validator、工具/证据/LLM 预算、重复调用阻止、Checkpoint/Resume。
+- P0 Historical Knowledge：知识文档发布生命周期、租户隔离、lexical 检索、服务/指纹加权、`KNOWLEDGE` 参考证据和历史事实防混淆；内存/SQLAlchemy 检索器已接入 RCA runtime。
+- P1 Alert Correlation：时间窗口、环境、服务/拓扑关系、告警类型和严重度的确定性收敛，以及 Primary Alert 元数据。
+- P1 Benchmark：MiniShop-v2 场景 Manifest 已扩展到 12 个；Runner 支持 extended/scenario 选择，`RCAReportPredictionAdapter` 可接入生产报告，并输出 `results.json`、`evaluation-report.md`、`ablation-report.md`、`bad_cases.jsonl`。
+- P1 Load/Chaos：提供 100/500/1000 alerts/min 负载计划、Python fallback 和 Worker/Kafka/PostgreSQL/观测超时演练 Harness；reference staging 已有 synthetic 实测，外部目标环境仍须独立签字。
+- P1 Agent 可观测性：增加 RCA、Tool、LLM、Lease reclaim、Partial Report、Consumer Lag 指标，禁止使用 tenant/incident/workflow/trace 作为标签。
+- P2 MCP/Workspace/Release：提供 HTTPS/Bearer/JSON-RPC 校验的 HTTP MCP Adapter、租户 Workspace 管理 API、Topology/Knowledge 工具注册，以及带 revision、幂等、双角色审核和同事务 Outbox 审计的在线 Dataset Release API。
+
+扩展 Benchmark 的本地确定性合同示例：
+
+```powershell
+$commit = git rev-parse --short HEAD
+uv run python -m ops.evaluation.run_benchmark `
+  --scenarios '.\MiniShop 电商下单故障演练靶场\scenarios' `
+  --include-extended `
+  --mode deterministic --git-commit $commit `
+  --output '.\ops\evaluation\artifacts\minishop-v2-run'
+```
+
+该命令生成 12 个场景的 `contract_fixture=true` 结果；真实 Agent/LLM 评测时改用包含
+12 个结构化 Prediction 的 `--input` 文件。Runner 不会把 Ground Truth 注入模型输入，
+也不会把未执行的消融或真实环境性能写成数字。

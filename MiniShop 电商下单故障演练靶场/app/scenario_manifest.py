@@ -17,9 +17,27 @@ from pydantic import (
 SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / "scenarios"
 
 SUPPORTED_FAULTS = {
-    "checkout-service": frozenset({"latency"}),
-    "inventory-service": frozenset({"db_timeout"}),
-    "payment-service": frozenset({"deployment_regression", "payment_error"}),
+    "checkout-service": frozenset(
+        {
+            "latency",
+            "connection_pool_exhaustion",
+            "cpu_saturation",
+            "memory_pressure",
+            "cascading_failure",
+            "false_positive_alert",
+        }
+    ),
+    "inventory-service": frozenset({"db_timeout", "redis_latency"}),
+    "payment-service": frozenset(
+        {
+            "deployment_regression",
+            "payment_error",
+            "config_regression",
+            "third_party_api_timeout",
+            "known_error_repeat",
+            "misleading_history",
+        }
+    ),
 }
 FAULT_ENDPOINTS = {
     ("checkout-service", "latency"): "/faults/checkout-latency",
@@ -29,6 +47,16 @@ FAULT_ENDPOINTS = {
         "payment-service",
         "deployment_regression",
     ): "/faults/deployment-regression",
+    ("payment-service", "config_regression"): "/faults/config-regression",
+    ("inventory-service", "redis_latency"): "/faults/redis-latency",
+    ("checkout-service", "connection_pool_exhaustion"): "/faults/connection-pool-exhaustion",
+    ("payment-service", "third_party_api_timeout"): "/faults/third-party-api-timeout",
+    ("checkout-service", "cascading_failure"): "/faults/cascading-failure",
+    ("payment-service", "known_error_repeat"): "/faults/known-error-repeat",
+    ("payment-service", "misleading_history"): "/faults/misleading-history",
+    ("checkout-service", "false_positive_alert"): "/faults/false-positive-alert",
+    ("checkout-service", "cpu_saturation"): "/faults/cpu-saturation",
+    ("checkout-service", "memory_pressure"): "/faults/memory-pressure",
 }
 ALERT_SEVERITY_MAP = {"P1": "CRITICAL", "P2": "WARNING", "P3": "INFO"}
 
@@ -289,8 +317,28 @@ def load_scenario(path: Path) -> ScenarioManifest:
     return ScenarioManifest.model_validate_json(path.read_text(encoding="utf-8"))
 
 
-def load_scenario_catalog(directory: Path = SCENARIO_DIRECTORY) -> ScenarioCatalog:
+def load_scenario_catalog(
+    directory: Path = SCENARIO_DIRECTORY,
+    *,
+    include_extended: bool = False,
+) -> ScenarioCatalog:
     scenario_paths = sorted(directory.glob("*.json"))
     if not scenario_paths:
         raise ValueError(f"no scenario manifests found in {directory}")
-    return ScenarioCatalog(scenarios=[load_scenario(path) for path in scenario_paths])
+    scenarios = [load_scenario(path) for path in scenario_paths]
+    if not include_extended and directory == SCENARIO_DIRECTORY:
+        baseline_ids = {
+            "checkout-latency",
+            "deployment-regression",
+            "inventory-db-timeout",
+            "payment-error",
+        }
+        scenarios = [scenario for scenario in scenarios if scenario.scenario_id in baseline_ids]
+    return ScenarioCatalog(scenarios=scenarios)
+
+
+def load_extended_scenario_catalog(
+    directory: Path = SCENARIO_DIRECTORY,
+) -> ScenarioCatalog:
+    """加载完整的 MiniShop-v2 场景集合；旧的四场景 API 保持兼容。"""
+    return load_scenario_catalog(directory, include_extended=True)

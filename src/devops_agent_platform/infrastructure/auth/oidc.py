@@ -1,5 +1,6 @@
 import asyncio
 import json
+import ssl
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from time import monotonic
@@ -50,6 +51,7 @@ class OIDCAuthenticatorConfig:
     scopes_claim: str = "scope"
     tenants_claim: str = "tenant_ids"
     all_tenants_claim: str = "all_tenants"
+    ca_bundle_path: str | None = None
 
     def __post_init__(self) -> None:
         """拒绝不安全算法、非HTTPS端点和无界容量配置。"""
@@ -60,9 +62,7 @@ class OIDCAuthenticatorConfig:
             not isinstance(self.algorithms, tuple)
             or not self.algorithms
             or len(set(self.algorithms)) != len(self.algorithms)
-            or not set(self.algorithms).issubset(
-                _SAFE_ASYMMETRIC_ALGORITHMS
-            )
+            or not set(self.algorithms).issubset(_SAFE_ASYMMETRIC_ALGORITHMS)
         ):
             raise AppValidationError(
                 "algorithms must contain unique supported asymmetric algorithms"
@@ -87,9 +87,7 @@ class OIDCAuthenticatorConfig:
             or not isinstance(self.leeway_seconds, int | float)
             or not 0 <= self.leeway_seconds <= 300
         ):
-            raise AppValidationError(
-                "leeway_seconds must be between 0 and 300"
-            )
+            raise AppValidationError("leeway_seconds must be between 0 and 300")
         self._validate_positive_int(
             "max_token_bytes",
             self.max_token_bytes,
@@ -112,6 +110,14 @@ class OIDCAuthenticatorConfig:
             "all_tenants_claim",
         ):
             self._validate_text(field_name, getattr(self, field_name), 128)
+        if self.ca_bundle_path is not None:
+            if (
+                not isinstance(self.ca_bundle_path, str)
+                or not self.ca_bundle_path
+                or self.ca_bundle_path != self.ca_bundle_path.strip()
+                or _contains_ascii_control(self.ca_bundle_path)
+            ):
+                raise AppValidationError("ca_bundle_path is invalid")
 
     @staticmethod
     def _validate_https_url(field_name: str, value: str) -> None:
@@ -161,9 +167,7 @@ class OIDCAuthenticatorConfig:
             or not isinstance(value, int | float)
             or not 0 < value <= maximum
         ):
-            raise AppValidationError(
-                f"{field_name} must be between 0 and {maximum}"
-            )
+            raise AppValidationError(f"{field_name} must be between 0 and {maximum}")
 
     @staticmethod
     def _validate_positive_int(
@@ -177,9 +181,7 @@ class OIDCAuthenticatorConfig:
             or not isinstance(value, int)
             or not 1 <= value <= maximum
         ):
-            raise AppValidationError(
-                f"{field_name} must be between 1 and {maximum}"
-            )
+            raise AppValidationError(f"{field_name} must be between 1 and {maximum}")
 
 
 class OIDCAdministratorAuthenticator:
@@ -193,13 +195,17 @@ class OIDCAdministratorAuthenticator:
     ) -> None:
         """创建认证器；传入Client时其生命周期仍归调用方所有。"""
         if not isinstance(config, OIDCAuthenticatorConfig):
-            raise AppValidationError(
-                "config must be an OIDCAuthenticatorConfig"
-            )
+            raise AppValidationError("config must be an OIDCAuthenticatorConfig")
         if not callable(monotonic_clock):
             raise AppValidationError("monotonic_clock must be callable")
         self._config = config
         self._owns_http_client = http_client is None
+        verify: ssl.SSLContext | bool = True
+        if config.ca_bundle_path is not None:
+            try:
+                verify = ssl.create_default_context(cafile=config.ca_bundle_path)
+            except (OSError, ssl.SSLError) as exc:
+                raise AppValidationError("OIDC CA bundle could not be loaded") from exc
         self._http_client = http_client or httpx.AsyncClient(
             timeout=httpx.Timeout(config.request_timeout_seconds),
             follow_redirects=False,
@@ -208,6 +214,7 @@ class OIDCAdministratorAuthenticator:
                 max_keepalive_connections=10,
             ),
             trust_env=False,
+            verify=verify,
         )
         self._monotonic_clock = monotonic_clock
         self._keys: dict[str, PyJWK] = {}
@@ -223,9 +230,7 @@ class OIDCAdministratorAuthenticator:
     ) -> AdministratorPrincipal:
         """验证JWT并把可信Claim映射为管理员主体。"""
         if self._closed:
-            raise AuthenticationServiceError(
-                "OIDC authenticator is closed"
-            )
+            raise AuthenticationServiceError("OIDC authenticator is closed")
         self._validate_token_size(bearer_token)
         header = self._read_unverified_header(bearer_token)
         algorithm = header.get("alg")
@@ -266,9 +271,7 @@ class OIDCAdministratorAuthenticator:
                 },
             )
         except InvalidTokenError as exc:
-            raise AuthenticationRequired(
-                "Bearer token is invalid"
-            ) from exc
+            raise AuthenticationRequired("Bearer token is invalid") from exc
         return self._build_principal(claims)
 
     async def close(self) -> None:
@@ -289,30 +292,23 @@ class OIDCAdministratorAuthenticator:
         if key is not None:
             return key
         if self._missing_key_is_cached(key_id):
-            raise AuthenticationRequired(
-                "Bearer token signing key is unknown"
-            )
+            raise AuthenticationRequired("Bearer token signing key is unknown")
 
         async with self._refresh_lock:
             key = self._cached_key(key_id, algorithm)
             if key is not None:
                 return key
             if self._missing_key_is_cached(key_id):
-                raise AuthenticationRequired(
-                    "Bearer token signing key is unknown"
-                )
+                raise AuthenticationRequired("Bearer token signing key is unknown")
             await self._refresh_keys()
             key = self._keys.get(key_id)
             if key is None or key.algorithm_name != algorithm:
                 blocked_until = (
-                    self._monotonic_clock()
-                    + self._config.unknown_kid_cache_seconds
+                    self._monotonic_clock() + self._config.unknown_kid_cache_seconds
                 )
                 self._missing_kids[key_id] = blocked_until
                 self._unknown_refresh_blocked_until = blocked_until
-                raise AuthenticationRequired(
-                    "Bearer token signing key is unknown"
-                )
+                raise AuthenticationRequired("Bearer token signing key is unknown")
             self._missing_kids.pop(key_id, None)
             return key
 
@@ -336,10 +332,7 @@ class OIDCAdministratorAuthenticator:
         """短期缓存未知kid，阻止随机kid触发无界JWKS刷新。"""
         if not self._cache_is_fresh():
             return False
-        if (
-            self._monotonic_clock()
-            < self._unknown_refresh_blocked_until
-        ):
+        if self._monotonic_clock() < self._unknown_refresh_blocked_until:
             return True
         expires_at = self._missing_kids.get(key_id)
         if expires_at is None:
@@ -359,9 +352,7 @@ class OIDCAdministratorAuthenticator:
     async def _refresh_keys(self) -> None:
         """有界拉取并严格解析JWKS，不复用失败响应。"""
         if self._closed:
-            raise AuthenticationServiceError(
-                "OIDC authenticator is closed"
-            )
+            raise AuthenticationServiceError("OIDC authenticator is closed")
         content = bytearray()
         try:
             async with self._http_client.stream(
@@ -402,18 +393,14 @@ class OIDCAdministratorAuthenticator:
             or not keys
             or len(keys) > self._config.max_jwks_keys
         ):
-            raise AuthenticationServiceError(
-                "OIDC signing key set is invalid"
-            )
+            raise AuthenticationServiceError("OIDC signing key set is invalid")
 
         parsed_keys: dict[str, PyJWK] = {}
         try:
             for key_data in keys:
                 self._add_jwk(parsed_keys, key_data)
         except (InvalidTokenError, KeyError, TypeError, ValueError) as exc:
-            raise AuthenticationServiceError(
-                "OIDC signing key set is invalid"
-            ) from exc
+            raise AuthenticationServiceError("OIDC signing key set is invalid") from exc
         if not parsed_keys:
             raise AuthenticationServiceError(
                 "OIDC signing key set has no verification keys"
@@ -471,9 +458,7 @@ class OIDCAdministratorAuthenticator:
             or not isinstance(all_tenants, bool)
         ):
             raise AuthenticationRequired("Bearer token claims are invalid")
-        scopes = frozenset(
-            item for item in scopes_value.split(" ") if item
-        )
+        scopes = frozenset(item for item in scopes_value.split(" ") if item)
         try:
             return AdministratorPrincipal(
                 admin_id=admin_id,
@@ -482,9 +467,7 @@ class OIDCAdministratorAuthenticator:
                 all_tenants=all_tenants,
             )
         except AppValidationError as exc:
-            raise AuthenticationRequired(
-                "Bearer token claims are invalid"
-            ) from exc
+            raise AuthenticationRequired("Bearer token claims are invalid") from exc
 
     def _validate_token_size(self, token: str) -> None:
         """在JWT解析前限制类型、空白和编码后字节数。"""
@@ -503,6 +486,4 @@ class OIDCAdministratorAuthenticator:
         try:
             return jwt.get_unverified_header(token)
         except InvalidTokenError as exc:
-            raise AuthenticationRequired(
-                "Bearer token is invalid"
-            ) from exc
+            raise AuthenticationRequired("Bearer token is invalid") from exc
