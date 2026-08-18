@@ -272,7 +272,7 @@ uv sync --locked --extra dev
 运行平台测试：
 
 ```powershell
-uv run pytest -q -m "not live"
+uv run python -m pytest -q -m "not live"
 uv run ruff check .
 ```
 
@@ -281,7 +281,7 @@ uv run ruff check .
 ```powershell
 Set-Location '.\MiniShop 电商下单故障演练靶场'
 uv sync --locked --extra dev
-uv run pytest -q
+uv run python -m pytest -q
 ```
 
 启动本地 API：

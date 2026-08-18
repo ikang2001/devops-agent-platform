@@ -44,13 +44,13 @@ jobs:
       - name: Lint
         run: uv run ruff check .
       - name: Unit and API tests
-        run: uv run pytest -q -m "not live"
+        run: uv run python -m pytest -q -m "not live"
       - name: Install MiniShop
         working-directory: MiniShop 电商下单故障演练靶场
         run: uv sync --locked --extra dev
       - name: Test MiniShop
         working-directory: MiniShop 电商下单故障演练靶场
-        run: uv run pytest
+        run: uv run python -m pytest
       - name: Alembic offline migration check
         env:
           DEVOPS_AGENT_DATABASE_URL: postgresql+psycopg://devops:devops@localhost:5432/devops_agent
@@ -88,7 +88,7 @@ jobs:
       - name: Install
         run: uv sync --locked --extra dev
       - name: Unit and API tests
-        run: uv run pytest -q -m "not live"
+        run: uv run python -m pytest -q -m "not live"
       - name: Alembic offline migration check
         env:
           DEVOPS_AGENT_DATABASE_URL: postgresql+psycopg://devops:devops@localhost:5432/devops_agent
