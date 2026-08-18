@@ -60,4 +60,20 @@ RunbookVersionPath = Annotated[
         pattern=_STABLE_PATH_SEGMENT_PATTERN,
     ),
 ]
+WorkspacePath = Annotated[
+    str,
+    Path(
+        min_length=1,
+        max_length=64,
+        pattern=_STABLE_PATH_SEGMENT_PATTERN,
+    ),
+]
+DatasetReleasePath = Annotated[
+    str,
+    Path(
+        min_length=1,
+        max_length=64,
+        pattern=_STABLE_PATH_SEGMENT_PATTERN,
+    ),
+]
 """管理端路径身份字段共享边界，拒绝空白和控制字符。"""

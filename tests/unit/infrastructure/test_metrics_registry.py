@@ -720,3 +720,26 @@ def test_outbox_backlog_gauges_include_age_and_stale_state() -> None:
         metrics.registry.get_sample_value("devops_agent_outbox_backlog_source_up") == 0
     )
     assert metrics.registry.get_sample_value("devops_agent_outbox_backlog_stale") == 1
+
+
+def test_agent_metrics_expose_required_low_cardinality_series() -> None:
+    metrics = ApplicationMetrics()
+    metrics.observe_rca(outcome="partial", duration_seconds=1.2, partial=True)
+    metrics.observe_tool(tool="logs", outcome="timeout", duration_seconds=0.5)
+    metrics.observe_llm(outcome="succeeded", prompt_tokens=10, completion_tokens=5)
+    metrics.observe_workflow_reclaim()
+    metrics.set_consumer_lag(7)
+
+    payload = metrics.registry.collect()
+    names = {metric.name for metric in payload}
+    assert {
+        "devops_agent_rca",
+        "devops_agent_rca_duration_seconds",
+        "devops_agent_tool_invocations",
+        "devops_agent_tool_duration_seconds",
+        "devops_agent_llm_requests",
+        "devops_agent_llm_tokens",
+        "devops_agent_workflow_reclaims",
+        "devops_agent_partial_reports",
+        "devops_agent_consumer_lag",
+    }.issubset(names)

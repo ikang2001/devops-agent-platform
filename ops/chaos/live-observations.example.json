@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "simulated": true,
+  "target_label": "replace-with-real-staging-id",
+  "results": [
+    {
+      "case": "worker-crash",
+      "recovery_seconds": null,
+      "lost_workflow_count": null,
+      "duplicate_completion_count": null,
+      "fence_rejection_count": null,
+      "notes": "模板不可作为 live 输入；完成实测后替换 null 并将 simulated 改为 false。"
+    },
+    {
+      "case": "kafka-unavailable",
+      "outbox_recovery_seconds": null,
+      "lost_event_count": null,
+      "duplicate_workflow_count": null,
+      "notes": "模板不可作为 live 输入；完成实测后替换 null 并将 simulated 改为 false。"
+    },
+    {
+      "case": "postgres-unavailable",
+      "recovery_seconds": null,
+      "state_corruption_count": null,
+      "erroneous_success_count": null,
+      "resumed": null,
+      "notes": "模板不可作为 live 输入；完成实测后替换 null 并将 simulated 改为 false。"
+    },
+    {
+      "case": "observability-timeout",
+      "partial_report": null,
+      "confidence_capped": null,
+      "confirmed_count": null,
+      "notes": "模板不可作为 live 输入；完成实测后替换 null 并将 simulated 改为 false。"
+    }
+  ]
+}

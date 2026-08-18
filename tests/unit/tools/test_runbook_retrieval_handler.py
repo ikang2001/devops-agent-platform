@@ -219,6 +219,7 @@ async def test_registered_handler_runs_through_unified_executor() -> None:
     )
 
     assert result["source"] == "runbook_catalog"
+    assert "titles=Checkout incident response" in result["summary"]
     assert definition.permission_tags == (
         "runbooks:read",
         "tenant:observe",

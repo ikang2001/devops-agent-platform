@@ -33,6 +33,7 @@ from devops_agent_platform.infrastructure.observability import (
 from devops_agent_platform.ports.rca_report import (
     LLMReportGenerationOutcome,
 )
+from devops_agent_platform.tools.handlers import ChangeEventsQueryHandler
 
 
 class RecordingReportObserver:
@@ -64,7 +65,7 @@ def fake_session_factory():
 
 
 async def test_bundle_builds_complete_deterministic_consumer_graph() -> None:
-    """默认报告模式应装配四类只读工具和确定性报告生成器。"""
+    """默认报告模式应装配观测、拓扑和知识只读工具。"""
     bundle = build_rca_consumer_runtime(
         build_settings(),
         fake_session_factory,  # type: ignore[arg-type]
@@ -80,15 +81,23 @@ async def test_bundle_builds_complete_deterministic_consumer_graph() -> None:
             bundle.worker._consumer._processor._handler
             ._execution_coordinator._agent_workflow
         )
-        assert len(workflow._plan.steps) == 4
+        assert len(workflow._plan.steps) == 5
         assert workflow._plan.plan_id == "default.observability-rca"
         assert workflow._config.continue_on_step_failure is False
         assert isinstance(
             workflow._report_generator,
             DeterministicRCAReportGenerator,
         )
-        assert len(workflow._registry.list_tools()) == 4
-        assert len(workflow._tool_executor._registry.list_handlers()) == 4
+        assert len(workflow._registry.list_tools()) == 7
+        assert len(workflow._tool_executor._registry.list_handlers()) == 7
+        change_registration = workflow._tool_executor._registry.get(
+            "changes.query",
+            "v1",
+        )
+        assert isinstance(
+            change_registration.handler,
+            ChangeEventsQueryHandler,
+        )
     finally:
         for resource in reversed(bundle.resources):
             await resource.close()
@@ -146,12 +155,13 @@ async def test_bundle_wires_trace_free_partial_degrade_policy() -> None:
         assert workflow._plan.plan_id == "observability-rca.no-traces"
         assert [step.tool_name for step in workflow._plan.steps] == [
             "metrics.query",
+            "changes.query",
             "logs.query",
             "runbooks.retrieve",
         ]
         assert workflow._config.continue_on_step_failure is True
-        assert len(workflow._registry.list_tools()) == 3
-        assert len(workflow._tool_executor._registry.list_handlers()) == 3
+        assert len(workflow._registry.list_tools()) == 6
+        assert len(workflow._tool_executor._registry.list_handlers()) == 6
     finally:
         for resource in reversed(bundle.resources):
             await resource.close()

@@ -24,19 +24,18 @@ class IncidentMapper:
             resolved_by=incident.resolved_by,
             resolution_reason=incident.resolution_reason,
             resolved_at=incident.resolved_at,
-            resolution_idempotency_key_hash=(
-                incident.resolution_idempotency_key_hash
-            ),
+            resolution_idempotency_key_hash=(incident.resolution_idempotency_key_hash),
             resolution_request_hash=incident.resolution_request_hash,
             resolution_trace_id=incident.resolution_trace_id,
             closed_by=incident.closed_by,
             closure_reason=incident.closure_reason,
             closed_at=incident.closed_at,
-            closure_idempotency_key_hash=(
-                incident.closure_idempotency_key_hash
-            ),
+            closure_idempotency_key_hash=(incident.closure_idempotency_key_hash),
             closure_request_hash=incident.closure_request_hash,
             closure_trace_id=incident.closure_trace_id,
+            primary_alert_id=incident.primary_alert_id,
+            correlated_alert_count=incident.correlated_alert_count,
+            correlation_reason=incident.correlation_reason,
         )
 
     @staticmethod
@@ -55,17 +54,17 @@ class IncidentMapper:
             resolved_by=record.resolved_by,
             resolution_reason=record.resolution_reason,
             resolved_at=record.resolved_at,
-            resolution_idempotency_key_hash=(
-                record.resolution_idempotency_key_hash
-            ),
+            resolution_idempotency_key_hash=(record.resolution_idempotency_key_hash),
             resolution_request_hash=record.resolution_request_hash,
             resolution_trace_id=record.resolution_trace_id,
             closed_by=record.closed_by,
             closure_reason=record.closure_reason,
             closed_at=record.closed_at,
-            closure_idempotency_key_hash=(
-                record.closure_idempotency_key_hash
-            ),
+            closure_idempotency_key_hash=(record.closure_idempotency_key_hash),
             closure_request_hash=record.closure_request_hash,
             closure_trace_id=record.closure_trace_id,
+            primary_alert_id=getattr(record, "primary_alert_id", None),
+            correlated_alert_count=getattr(record, "correlated_alert_count", 1) or 1,
+            correlation_reason=getattr(record, "correlation_reason", "PRIMARY_ALERT")
+            or "PRIMARY_ALERT",
         )

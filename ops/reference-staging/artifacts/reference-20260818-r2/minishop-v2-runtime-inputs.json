@@ -1,0 +1,720 @@
+{
+  "cases": [
+    {
+      "evidence": [
+        {
+          "evidence_id": "ev-cascade-metric",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "Cascade fault is enabled."
+        },
+        {
+          "evidence_id": "ev-cascade-trace",
+          "evidence_type": "TRACE",
+          "source": "tempo",
+          "summary": "Trace contains downstream failure edges."
+        }
+      ],
+      "incident_id": "reference-cascading-failure",
+      "investigation_steps": 3,
+      "scenario_id": "cascading-failure",
+      "service_name": "checkout-service",
+      "summary": "checkout downstream cascade",
+      "tool_calls": [
+        {
+          "evidence_ids": [
+            "ev-cascade-metric"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-cascade-trace"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "traces.query@v1"
+        },
+        {
+          "evidence_ids": [],
+          "status": "SUCCEEDED",
+          "tool_type": "runbooks.retrieve@v1"
+        }
+      ]
+    },
+    {
+      "evidence": [
+        {
+          "evidence_id": "ev-checkout-fault-enabled",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "The gauge equals 1 during the injected fault window."
+        },
+        {
+          "evidence_id": "ev-checkout-latency-histogram",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "The checkout p95 duration exceeds one second while the scenario is active."
+        },
+        {
+          "evidence_id": "ev-checkout-success-counter",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "Successful checkout requests still increase during the latency fault."
+        },
+        {
+          "evidence_id": "ev-checkout-latency-log",
+          "evidence_type": "LOG",
+          "source": "loki",
+          "summary": "The checkout completion event is successful and has latency_ms of at least 1000 for the trigger trace_id."
+        },
+        {
+          "evidence_id": "ev-checkout-slow-trace",
+          "evidence_type": "TRACE",
+          "source": "tempo",
+          "summary": "The trace contains a checkout.process span longer than one second while its downstream spans remain successful."
+        },
+        {
+          "evidence_id": "ev-checkout-http-success",
+          "evidence_type": "HTTP",
+          "source": "http",
+          "summary": "The trigger returns HTTP 200 and timings_ms.checkout_self_ms is at least 1000."
+        }
+      ],
+      "incident_id": "reference-checkout-latency",
+      "investigation_steps": 7,
+      "scenario_id": "checkout-latency",
+      "service_name": "checkout-service",
+      "summary": "checkout-service p95 latency is higher than 1s",
+      "tool_calls": [
+        {
+          "evidence_ids": [
+            "ev-checkout-fault-enabled"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-checkout-latency-histogram"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-checkout-success-counter"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-checkout-latency-log"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "logs.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-checkout-slow-trace"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "traces.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-checkout-http-success"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "http.observe@v1"
+        },
+        {
+          "evidence_ids": [],
+          "status": "SUCCEEDED",
+          "tool_type": "runbooks.retrieve@v1"
+        }
+      ]
+    },
+    {
+      "evidence": [
+        {
+          "evidence_id": "ev-config-metric",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "The configuration fault is enabled."
+        },
+        {
+          "evidence_id": "ev-config-trace",
+          "evidence_type": "TRACE",
+          "source": "tempo",
+          "summary": "Payment span carries the configuration fault context."
+        }
+      ],
+      "incident_id": "reference-config-regression",
+      "investigation_steps": 3,
+      "scenario_id": "config-regression",
+      "service_name": "payment-service",
+      "summary": "payment-service configuration regression",
+      "tool_calls": [
+        {
+          "evidence_ids": [
+            "ev-config-metric"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-config-trace"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "traces.query@v1"
+        },
+        {
+          "evidence_ids": [],
+          "status": "SUCCEEDED",
+          "tool_type": "runbooks.retrieve@v1"
+        }
+      ]
+    },
+    {
+      "evidence": [
+        {
+          "evidence_id": "ev-pool-metric",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "Pool exhaustion fault is enabled."
+        },
+        {
+          "evidence_id": "ev-pool-trace",
+          "evidence_type": "TRACE",
+          "source": "tempo",
+          "summary": "Checkout span shows pool exhaustion context."
+        }
+      ],
+      "incident_id": "reference-connection-pool-exhaustion",
+      "investigation_steps": 3,
+      "scenario_id": "connection-pool-exhaustion",
+      "service_name": "checkout-service",
+      "summary": "checkout connection pool exhausted",
+      "tool_calls": [
+        {
+          "evidence_ids": [
+            "ev-pool-metric"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-pool-trace"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "traces.query@v1"
+        },
+        {
+          "evidence_ids": [],
+          "status": "SUCCEEDED",
+          "tool_type": "runbooks.retrieve@v1"
+        }
+      ]
+    },
+    {
+      "evidence": [
+        {
+          "evidence_id": "ev-deployment-change",
+          "evidence_type": "CHANGE",
+          "source": "change",
+          "summary": "The RCA workflow returns the successful payment-service v1 to v2 deployment inside the fixed incident window."
+        },
+        {
+          "evidence_id": "ev-deployment-fault-enabled",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "The deployment_regression gauge equals 1 during the fault window."
+        },
+        {
+          "evidence_id": "ev-deployment-error-counter",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "The deployment regression counter increases after checkout traffic."
+        },
+        {
+          "evidence_id": "ev-deployment-error-log",
+          "evidence_type": "LOG",
+          "source": "loki",
+          "summary": "An ERROR event identifies deployment_regression and PAYMENT_DEPLOYMENT_REGRESSION."
+        },
+        {
+          "evidence_id": "ev-deployment-error-trace",
+          "evidence_type": "TRACE",
+          "source": "tempo",
+          "summary": "The checkout trace contains an ERROR payment.pay span with error.type PAYMENT_DEPLOYMENT_REGRESSION."
+        },
+        {
+          "evidence_id": "ev-deployment-http-500",
+          "evidence_type": "HTTP",
+          "source": "http",
+          "summary": "The trigger returns HTTP 500 with error_code PAYMENT_DEPLOYMENT_REGRESSION."
+        }
+      ],
+      "incident_id": "reference-deployment-regression",
+      "investigation_steps": 7,
+      "scenario_id": "deployment-regression",
+      "service_name": "payment-service",
+      "summary": "payment-service errors increased after the v2 deployment",
+      "tool_calls": [
+        {
+          "evidence_ids": [
+            "ev-deployment-change"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "changes.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-deployment-fault-enabled"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-deployment-error-counter"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-deployment-error-log"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "logs.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-deployment-error-trace"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "traces.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-deployment-http-500"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "http.observe@v1"
+        },
+        {
+          "evidence_ids": [],
+          "status": "SUCCEEDED",
+          "tool_type": "runbooks.retrieve@v1"
+        }
+      ]
+    },
+    {
+      "evidence": [
+        {
+          "evidence_id": "ev-fp-metric",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "The marker is enabled but no failure counter increases."
+        },
+        {
+          "evidence_id": "ev-fp-trace",
+          "evidence_type": "TRACE",
+          "source": "tempo",
+          "summary": "Checkout trace remains successful."
+        }
+      ],
+      "incident_id": "reference-false-positive-alert",
+      "investigation_steps": 3,
+      "scenario_id": "false-positive-alert",
+      "service_name": "checkout-service",
+      "summary": "checkout alert with no customer impact",
+      "tool_calls": [
+        {
+          "evidence_ids": [
+            "ev-fp-metric"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-fp-trace"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "traces.query@v1"
+        },
+        {
+          "evidence_ids": [],
+          "status": "SUCCEEDED",
+          "tool_type": "runbooks.retrieve@v1"
+        }
+      ]
+    },
+    {
+      "evidence": [
+        {
+          "evidence_id": "ev-inventory-fault-enabled",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "The gauge equals 1 during the injected fault window."
+        },
+        {
+          "evidence_id": "ev-inventory-timeout-counter",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "The timeout counter increase is greater than zero after the trigger request."
+        },
+        {
+          "evidence_id": "ev-inventory-downstream-counter",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "Checkout records at least one inventory downstream failure."
+        },
+        {
+          "evidence_id": "ev-inventory-timeout-log",
+          "evidence_type": "LOG",
+          "source": "loki",
+          "summary": "An ERROR event identifies db_timeout and DB_TIMEOUT for the trigger trace_id."
+        },
+        {
+          "evidence_id": "ev-inventory-checkout-log",
+          "evidence_type": "LOG",
+          "source": "loki",
+          "summary": "Checkout records inventory-service as the failed downstream on the same trace_id."
+        },
+        {
+          "evidence_id": "ev-inventory-timeout-trace",
+          "evidence_type": "TRACE",
+          "source": "tempo",
+          "summary": "The checkout trace contains an ERROR inventory.reserve span with error.type DB_TIMEOUT."
+        },
+        {
+          "evidence_id": "ev-inventory-http-503",
+          "evidence_type": "HTTP",
+          "source": "http",
+          "summary": "The trigger returns HTTP 503 with CHECKOUT_DOWNSTREAM_FAILURE and downstream inventory-service."
+        }
+      ],
+      "incident_id": "reference-inventory-db-timeout",
+      "investigation_steps": 8,
+      "scenario_id": "inventory-db-timeout",
+      "service_name": "inventory-service",
+      "summary": "inventory-service database timeout detected",
+      "tool_calls": [
+        {
+          "evidence_ids": [
+            "ev-inventory-fault-enabled"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-inventory-timeout-counter"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-inventory-downstream-counter"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-inventory-timeout-log"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "logs.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-inventory-checkout-log"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "logs.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-inventory-timeout-trace"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "traces.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-inventory-http-503"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "http.observe@v1"
+        },
+        {
+          "evidence_ids": [],
+          "status": "SUCCEEDED",
+          "tool_type": "runbooks.retrieve@v1"
+        }
+      ]
+    },
+    {
+      "evidence": [
+        {
+          "evidence_id": "ev-known-metric",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "Known error fault is enabled."
+        },
+        {
+          "evidence_id": "ev-known-trace",
+          "evidence_type": "TRACE",
+          "source": "tempo",
+          "summary": "Payment trace matches the known fingerprint."
+        }
+      ],
+      "incident_id": "reference-known-error-repeat",
+      "investigation_steps": 3,
+      "scenario_id": "known-error-repeat",
+      "service_name": "payment-service",
+      "summary": "known payment error repeated",
+      "tool_calls": [
+        {
+          "evidence_ids": [
+            "ev-known-metric"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-known-trace"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "traces.query@v1"
+        },
+        {
+          "evidence_ids": [],
+          "status": "SUCCEEDED",
+          "tool_type": "runbooks.retrieve@v1"
+        }
+      ]
+    },
+    {
+      "evidence": [
+        {
+          "evidence_id": "ev-history-metric",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "Live fault is enabled."
+        },
+        {
+          "evidence_id": "ev-history-trace",
+          "evidence_type": "TRACE",
+          "source": "tempo",
+          "summary": "Live trace identifies the current payment path."
+        }
+      ],
+      "incident_id": "reference-misleading-history",
+      "investigation_steps": 3,
+      "scenario_id": "misleading-history",
+      "service_name": "payment-service",
+      "summary": "payment incident resembles old provider timeout",
+      "tool_calls": [
+        {
+          "evidence_ids": [
+            "ev-history-metric"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-history-trace"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "traces.query@v1"
+        },
+        {
+          "evidence_ids": [],
+          "status": "SUCCEEDED",
+          "tool_type": "runbooks.retrieve@v1"
+        }
+      ]
+    },
+    {
+      "evidence": [
+        {
+          "evidence_id": "ev-payment-fault-enabled",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "The gauge equals 1 during the injected fault window."
+        },
+        {
+          "evidence_id": "ev-payment-error-counter",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "The counter increase is greater than zero after the trigger request."
+        },
+        {
+          "evidence_id": "ev-payment-error-log",
+          "evidence_type": "LOG",
+          "source": "loki",
+          "summary": "An ERROR event identifies payment_error and PAYMENT_GATEWAY_ERROR for the trigger trace_id."
+        },
+        {
+          "evidence_id": "ev-payment-error-trace",
+          "evidence_type": "TRACE",
+          "source": "tempo",
+          "summary": "The checkout trace contains an ERROR payment.pay span with error.type PAYMENT_GATEWAY_ERROR."
+        },
+        {
+          "evidence_id": "ev-payment-http-500",
+          "evidence_type": "HTTP",
+          "source": "http",
+          "summary": "The trigger returns HTTP 500 with error_code PAYMENT_GATEWAY_ERROR."
+        }
+      ],
+      "incident_id": "reference-payment-error",
+      "investigation_steps": 6,
+      "scenario_id": "payment-error",
+      "service_name": "payment-service",
+      "summary": "payment-service 5xx errors are increasing",
+      "tool_calls": [
+        {
+          "evidence_ids": [
+            "ev-payment-fault-enabled"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-payment-error-counter"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-payment-error-log"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "logs.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-payment-error-trace"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "traces.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-payment-http-500"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "http.observe@v1"
+        },
+        {
+          "evidence_ids": [],
+          "status": "SUCCEEDED",
+          "tool_type": "runbooks.retrieve@v1"
+        }
+      ]
+    },
+    {
+      "evidence": [
+        {
+          "evidence_id": "ev-redis-metric",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "Redis latency fault is enabled."
+        },
+        {
+          "evidence_id": "ev-redis-trace",
+          "evidence_type": "TRACE",
+          "source": "tempo",
+          "summary": "Inventory span shows the cache dependency."
+        }
+      ],
+      "incident_id": "reference-redis-latency",
+      "investigation_steps": 3,
+      "scenario_id": "redis-latency",
+      "service_name": "inventory-service",
+      "summary": "inventory Redis latency is high",
+      "tool_calls": [
+        {
+          "evidence_ids": [
+            "ev-redis-metric"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-redis-trace"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "traces.query@v1"
+        },
+        {
+          "evidence_ids": [],
+          "status": "SUCCEEDED",
+          "tool_type": "runbooks.retrieve@v1"
+        }
+      ]
+    },
+    {
+      "evidence": [
+        {
+          "evidence_id": "ev-provider-metric",
+          "evidence_type": "METRIC",
+          "source": "prometheus",
+          "summary": "Provider timeout fault is enabled."
+        },
+        {
+          "evidence_id": "ev-provider-trace",
+          "evidence_type": "TRACE",
+          "source": "tempo",
+          "summary": "Payment provider span times out."
+        }
+      ],
+      "incident_id": "reference-third-party-api-timeout",
+      "investigation_steps": 3,
+      "scenario_id": "third-party-api-timeout",
+      "service_name": "payment-service",
+      "summary": "payment provider timeout",
+      "tool_calls": [
+        {
+          "evidence_ids": [
+            "ev-provider-metric"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "metrics.query@v1"
+        },
+        {
+          "evidence_ids": [
+            "ev-provider-trace"
+          ],
+          "status": "SUCCEEDED",
+          "tool_type": "traces.query@v1"
+        },
+        {
+          "evidence_ids": [],
+          "status": "SUCCEEDED",
+          "tool_type": "runbooks.retrieve@v1"
+        }
+      ]
+    }
+  ],
+  "scenario_version": "1.0",
+  "schema_version": "1.0",
+  "suite": "minishop-v2-reference-runtime",
+  "synthetic": true
+}

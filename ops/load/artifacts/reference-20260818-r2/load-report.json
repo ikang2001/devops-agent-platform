@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "mode": "http-live",
+  "simulated": false,
+  "synthetic": true,
+  "target_sha256": "e74881a1c11e2c2348f756a8685e4dcec0065a450f50a53698a1fd99e13bf50d",
+  "generated_at": "2026-08-18T09:14:39.567688+00:00",
+  "profiles": [
+    {
+      "alerts_per_minute": 100,
+      "configured_duration_seconds": 6.0,
+      "actual_duration_seconds": 6.00703,
+      "actual_alerts_per_minute": 99.883,
+      "simulated": false,
+      "synthetic": true,
+      "measurement_source": "python-reference-fallback",
+      "http_p95_ms": 68.177,
+      "error_rate": 0.0,
+      "request_count": 10,
+      "dropped_iterations": 0,
+      "check_rate": 1.0,
+      "db_pool": null,
+      "outbox_backlog": 0.0,
+      "kafka_lag": 0.0,
+      "rca_queue_delay_ms": null,
+      "completion_rate": null,
+      "cpu_percent": null,
+      "memory_bytes": null,
+      "known_limitations": [
+        "本机未安装 k6，使用等到达率 Python fallback。",
+        "DB pool、RCA queue delay、completion rate 和 CPU 未采集。"
+      ]
+    },
+    {
+      "alerts_per_minute": 500,
+      "configured_duration_seconds": 6.0,
+      "actual_duration_seconds": 6.00533,
+      "actual_alerts_per_minute": 499.556,
+      "simulated": false,
+      "synthetic": true,
+      "measurement_source": "python-reference-fallback",
+      "http_p95_ms": 25.596,
+      "error_rate": 0.0,
+      "request_count": 50,
+      "dropped_iterations": 0,
+      "check_rate": 1.0,
+      "db_pool": null,
+      "outbox_backlog": 0.0,
+      "kafka_lag": 0.0,
+      "rca_queue_delay_ms": null,
+      "completion_rate": null,
+      "cpu_percent": null,
+      "memory_bytes": null,
+      "known_limitations": [
+        "本机未安装 k6，使用等到达率 Python fallback。",
+        "DB pool、RCA queue delay、completion rate 和 CPU 未采集。"
+      ]
+    },
+    {
+      "alerts_per_minute": 1000,
+      "configured_duration_seconds": 6.0,
+      "actual_duration_seconds": 6.012672,
+      "actual_alerts_per_minute": 997.892,
+      "simulated": false,
+      "synthetic": true,
+      "measurement_source": "python-reference-fallback",
+      "http_p95_ms": 24.196,
+      "error_rate": 0.0,
+      "request_count": 100,
+      "dropped_iterations": 0,
+      "check_rate": 1.0,
+      "db_pool": null,
+      "outbox_backlog": 0.0,
+      "kafka_lag": 0.0,
+      "rca_queue_delay_ms": null,
+      "completion_rate": null,
+      "cpu_percent": null,
+      "memory_bytes": null,
+      "known_limitations": [
+        "本机未安装 k6，使用等到达率 Python fallback。",
+        "DB pool、RCA queue delay、completion rate 和 CPU 未采集。"
+      ]
+    }
+  ]
+}

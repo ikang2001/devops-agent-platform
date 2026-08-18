@@ -3,6 +3,7 @@ from datetime import datetime
 from devops_agent_platform.domain.enums import IncidentStatus, WorkflowRunStatus
 from devops_agent_platform.domain.exceptions import NotImplementedInSkeleton
 from devops_agent_platform.domain.models.alert import Alert
+from devops_agent_platform.domain.models.change_event import ChangeEvent
 from devops_agent_platform.domain.models.incident import Incident
 from devops_agent_platform.domain.models.ticket_submission import TicketSubmission
 from devops_agent_platform.domain.models.workflow_run import WorkflowRun
@@ -27,6 +28,58 @@ class StubAlertRepository:
     ) -> Alert | None:
         raise NotImplementedInSkeleton(
             "StubAlertRepository is unavailable in skeleton mode"
+        )
+
+
+class StubChangeEventRepository:
+    """不模拟变更事件持久化或查询的占位仓储。"""
+
+    async def save(self, change_event: ChangeEvent) -> None:
+        raise NotImplementedInSkeleton(
+            "StubChangeEventRepository is unavailable in skeleton mode"
+        )
+
+    async def get_by_id(
+        self,
+        change_event_id: str,
+        tenant_id: str,
+    ) -> ChangeEvent | None:
+        raise NotImplementedInSkeleton(
+            "StubChangeEventRepository is unavailable in skeleton mode"
+        )
+
+    async def get_by_external_event_id(
+        self,
+        tenant_id: str,
+        source: str,
+        external_event_id: str,
+    ) -> ChangeEvent | None:
+        raise NotImplementedInSkeleton(
+            "StubChangeEventRepository is unavailable in skeleton mode"
+        )
+
+    async def list_for_service(
+        self,
+        tenant_id: str,
+        service_name: str,
+        *,
+        limit: int = 50,
+    ) -> list[ChangeEvent]:
+        raise NotImplementedInSkeleton(
+            "StubChangeEventRepository is unavailable in skeleton mode"
+        )
+
+    async def list_in_time_window(
+        self,
+        tenant_id: str,
+        service_name: str,
+        started_at_from: datetime,
+        started_at_to: datetime,
+        *,
+        limit: int = 50,
+    ) -> list[ChangeEvent]:
+        raise NotImplementedInSkeleton(
+            "StubChangeEventRepository is unavailable in skeleton mode"
         )
 
 

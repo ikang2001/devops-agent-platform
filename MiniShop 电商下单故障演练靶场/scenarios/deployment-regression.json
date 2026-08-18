@@ -1,0 +1,159 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "deployment-regression",
+  "title": "Payment v2 deployment regression",
+  "description": "Record a payment-service v1 to v2 deployment, inject a deterministic v2 regression, and require corroborated Change, Metric, Log, and Trace evidence.",
+  "service_name": "payment-service",
+  "fault_type": "deployment_regression",
+  "injection": {
+    "method": "POST",
+    "path": "/faults/deployment-regression",
+    "json_body": {
+      "error_rate": 1.0,
+      "duration_seconds": 300,
+      "created_by": "scenario-runner"
+    },
+    "expected_status": 200,
+    "service_name": "payment-service",
+    "fault_type": "deployment_regression"
+  },
+  "trigger": {
+    "method": "POST",
+    "path": "/checkout",
+    "json_body": {
+      "user_id": "scenario-deployment-user",
+      "items": [
+        {
+          "sku": "sku-deployment-001",
+          "quantity": 1
+        }
+      ],
+      "idempotency_key": "scenario-deployment-regression"
+    },
+    "expected_status": 500
+  },
+  "cleanup": {
+    "method": "POST",
+    "path": "/faults/reset",
+    "json_body": {},
+    "expected_status": 200
+  },
+  "alert_mapping": {
+    "source": "alertmanager",
+    "alert_name": "MiniShopPaymentDeploymentRegression",
+    "source_severity": "P1",
+    "platform_severity": "CRITICAL",
+    "service_name": "payment-service",
+    "summary": "payment-service errors increased after the v2 deployment",
+    "fingerprint": "minishop:payment-service:deployment-regression",
+    "external_event_id_prefix": "minishop-deployment-regression"
+  },
+  "expected_signals": [
+    {
+      "evidence_id": "ev-deployment-change",
+      "source": "change",
+      "evidence_type": "CHANGE",
+      "locator": "changes.query@v1 service=payment-service version_before=v1 version_after=v2",
+      "assertion": "The RCA workflow returns the successful payment-service v1 to v2 deployment inside the fixed incident window."
+    },
+    {
+      "evidence_id": "ev-deployment-fault-enabled",
+      "source": "prometheus",
+      "evidence_type": "METRIC",
+      "locator": "minishop_fault_enabled{service_name=\"payment-service\",fault_type=\"deployment_regression\"}",
+      "assertion": "The deployment_regression gauge equals 1 during the fault window."
+    },
+    {
+      "evidence_id": "ev-deployment-error-counter",
+      "source": "prometheus",
+      "evidence_type": "METRIC",
+      "locator": "increase(minishop_payment_deployment_regression_total[5m])",
+      "assertion": "The deployment regression counter increases after checkout traffic."
+    },
+    {
+      "evidence_id": "ev-deployment-error-log",
+      "source": "loki",
+      "evidence_type": "LOG",
+      "locator": "{service_name=\"payment-service\"} |= \"PAYMENT_DEPLOYMENT_REGRESSION\"",
+      "assertion": "An ERROR event identifies deployment_regression and PAYMENT_DEPLOYMENT_REGRESSION."
+    },
+    {
+      "evidence_id": "ev-deployment-error-trace",
+      "source": "tempo",
+      "evidence_type": "TRACE",
+      "locator": "{ resource.service.name = \"payment-service\" && span:status = error } with (most_recent=true)",
+      "assertion": "The checkout trace contains an ERROR payment.pay span with error.type PAYMENT_DEPLOYMENT_REGRESSION."
+    },
+    {
+      "evidence_id": "ev-deployment-http-500",
+      "source": "http",
+      "evidence_type": "HTTP",
+      "locator": "POST /checkout",
+      "assertion": "The trigger returns HTTP 500 with error_code PAYMENT_DEPLOYMENT_REGRESSION."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": {
+      "service_name": "payment-service",
+      "fault_type": "deployment_regression",
+      "root_cause_type": "deployment_regression",
+      "root_cause_resource": "payment-service:v2",
+      "category": "deployment_regression",
+      "summary": "The successful payment-service v2 deployment is temporally correlated with a corroborated v2 error regression.",
+      "causal_chain": [
+        "The scenario runner records a successful payment-service deployment from v1 to v2.",
+        "The deployment_regression fault makes payment-service v2 return PAYMENT_DEPLOYMENT_REGRESSION.",
+        "Payment error metrics, logs, and traces rise after the recorded deployment.",
+        "Checkout propagates the payment-service failure to the caller."
+      ],
+      "runbook_path": "runbooks/payment-deployment-regression.md"
+    },
+    "required_evidence": [
+      "ev-deployment-change",
+      "ev-deployment-fault-enabled",
+      "ev-deployment-error-counter",
+      "ev-deployment-error-log",
+      "ev-deployment-error-trace"
+    ],
+    "required_evidence_types": [
+      "CHANGE",
+      "METRIC",
+      "LOG",
+      "TRACE"
+    ],
+    "optional_evidence_types": [
+      "HTTP",
+      "RUNBOOK"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "payment-service:v2",
+        "to_node": "payment-service"
+      },
+      {
+        "from_node": "payment-service",
+        "to_node": "checkout-service"
+      }
+    ],
+    "affected_services": [
+      "payment-service",
+      "checkout-service"
+    ],
+    "forbidden_claims": [
+      "A deployment record alone proves that payment-service v2 caused the incident.",
+      "A named third-party payment provider is confirmed globally unavailable.",
+      "Inventory or database failure caused the payment regression."
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "changes.query@v1",
+      "logs.query@v1",
+      "traces.query@v1",
+      "runbooks.retrieve@v1"
+    ],
+    "forbidden_tool_types": [
+      "remediation.execute@v1",
+      "shell"
+    ]
+  }
+}

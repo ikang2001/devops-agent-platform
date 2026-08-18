@@ -52,36 +52,42 @@
     {
       "evidence_id": "ev-checkout-fault-enabled",
       "source": "prometheus",
+      "evidence_type": "METRIC",
       "locator": "minishop_fault_enabled{service_name=\"checkout-service\",fault_type=\"latency\"}",
       "assertion": "The gauge equals 1 during the injected fault window."
     },
     {
       "evidence_id": "ev-checkout-latency-histogram",
       "source": "prometheus",
+      "evidence_type": "METRIC",
       "locator": "histogram_quantile(0.95, sum(rate(minishop_http_request_duration_seconds_bucket{service_name=\"checkout-service\",endpoint=\"/checkout\"}[5m])) by (le))",
       "assertion": "The checkout p95 duration exceeds one second while the scenario is active."
     },
     {
       "evidence_id": "ev-checkout-success-counter",
       "source": "prometheus",
+      "evidence_type": "METRIC",
       "locator": "increase(minishop_http_requests_total{service_name=\"checkout-service\",endpoint=\"/checkout\",status_code=\"200\"}[5m])",
       "assertion": "Successful checkout requests still increase during the latency fault."
     },
     {
       "evidence_id": "ev-checkout-latency-log",
       "source": "loki",
+      "evidence_type": "LOG",
       "locator": "{service_name=\"checkout-service\"} | json | endpoint=\"/checkout\" | latency_ms >= 1000",
       "assertion": "The checkout completion event is successful and has latency_ms of at least 1000 for the trigger trace_id."
     },
     {
       "evidence_id": "ev-checkout-slow-trace",
       "source": "tempo",
+      "evidence_type": "TRACE",
       "locator": "{ resource.service.name = \"checkout-service\" && span:duration > 1000ms } with (most_recent=true)",
       "assertion": "The trace contains a checkout.process span longer than one second while its downstream spans remain successful."
     },
     {
       "evidence_id": "ev-checkout-http-success",
       "source": "http",
+      "evidence_type": "HTTP",
       "locator": "POST /checkout",
       "assertion": "The trigger returns HTTP 200 and timings_ms.checkout_self_ms is at least 1000."
     }
@@ -90,6 +96,8 @@
     "root_cause": {
       "service_name": "checkout-service",
       "fault_type": "latency",
+      "root_cause_type": "latency",
+      "root_cause_resource": "checkout-service:latency-fault",
       "category": "injected_checkout_processing_latency",
       "summary": "The latency fault adds 1200 ms inside checkout-service before downstream calls; inventory and payment still succeed.",
       "causal_chain": [
@@ -106,10 +114,39 @@
       "ev-checkout-latency-log",
       "ev-checkout-slow-trace"
     ],
+    "required_evidence_types": [
+      "METRIC",
+      "LOG",
+      "TRACE"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "HTTP",
+      "RUNBOOK"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "checkout-service:latency-fault",
+        "to_node": "checkout-service"
+      }
+    ],
+    "affected_services": [
+      "checkout-service"
+    ],
     "forbidden_claims": [
       "inventory-service is the source of the latency.",
       "payment-service is the source of the latency.",
       "Checkout requests are failing during this scenario."
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "logs.query@v1",
+      "traces.query@v1",
+      "runbooks.retrieve@v1"
+    ],
+    "forbidden_tool_types": [
+      "remediation.execute@v1",
+      "shell"
     ]
   }
 }

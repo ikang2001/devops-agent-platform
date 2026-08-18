@@ -47,7 +47,7 @@ services:
       POSTGRES_DB: devops_agent
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "15432:5432"
+      - "${MINISHOP_E2E_POSTGRES_PORT:-15432}:5432"
     tmpfs:
       - /var/lib/postgresql/data
     healthcheck:
@@ -103,7 +103,7 @@ services:
       redpanda:
         condition: service_healthy
     ports:
-      - "18000:8000"
+      - "${MINISHOP_E2E_AGENT_PORT:-18000}:8000"
     read_only: true
     tmpfs:
       - /tmp
@@ -132,7 +132,7 @@ services:
     volumes:
       - ./llm_stub.py:/app/llm_stub.py:ro
     ports:
-      - "18081:8081"
+      - "${MINISHOP_E2E_LLM_PORT:-18081}:8081"
     read_only: true
     tmpfs:
       - /tmp
@@ -169,7 +169,7 @@ services:
       agent:
         condition: service_healthy
     ports:
-      - "18080:8080"
+      - "${MINISHOP_E2E_MINISHOP_PORT:-18080}:8080"
     volumes:
       - minishop-logs:/var/log/minishop
     security_opt:
@@ -187,7 +187,7 @@ services:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./alerts.yml:/etc/prometheus/alerts.yml:ro
     ports:
-      - "19090:9090"
+      - "${MINISHOP_E2E_PROMETHEUS_PORT:-19090}:9090"
     tmpfs:
       - /prometheus:rw,uid=65534,gid=65534,mode=0755
     depends_on:
@@ -202,7 +202,7 @@ services:
     volumes:
       - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     ports:
-      - "19093:9093"
+      - "${MINISHOP_E2E_ALERTMANAGER_PORT:-19093}:9093"
     tmpfs:
       - /alertmanager:rw,uid=65534,gid=65534,mode=0755
 
@@ -212,7 +212,7 @@ services:
     volumes:
       - ./loki.yml:/etc/loki/loki.yml:ro
     ports:
-      - "13100:3100"
+      - "${MINISHOP_E2E_LOKI_PORT:-13100}:3100"
     tmpfs:
       - /var/loki:rw,uid=10001,gid=10001,mode=0755
 
@@ -234,8 +234,8 @@ services:
     volumes:
       - ./tempo.yml:/etc/tempo/tempo.yml:ro
     ports:
-      - "13200:3200"
-      - "14318:4318"
+      - "${MINISHOP_E2E_TEMPO_PORT:-13200}:3200"
+      - "${MINISHOP_E2E_TEMPO_OTLP_PORT:-14318}:4318"
     tmpfs:
       - /var/tempo:rw,uid=10001,gid=10001,mode=0755
 
@@ -249,6 +249,7 @@ services:
       E2E_TENANT_ID: demo
       E2E_ADMIN_ID: demo-admin
       E2E_ADMIN_TOKEN: ${MINISHOP_E2E_ADMIN_TOKEN:-minishop-e2e-admin-token-change-me-123456}
+      E2E_WEBHOOK_SECRET: ${MINISHOP_E2E_WEBHOOK_SECRET:-minishop-e2e-webhook-secret-change-me-123456}
       E2E_TIMEOUT_SECONDS: "240"
       E2E_ARTIFACTS_PATH: /artifacts/results.json
     volumes:

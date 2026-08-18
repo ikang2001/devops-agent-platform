@@ -1,16 +1,17 @@
 {
   "schema_version": "1.0",
-  "run_id": "20260723T145826",
-  "generated_at": "2026-07-23T14:59:33.953123+00:00",
+  "run_id": "20260817T173233",
+  "generated_at": "2026-08-17T17:34:08.065038+00:00",
   "passed": true,
   "scenarios": [
     {
       "scenario_id": "checkout-latency",
       "passed": true,
-      "incident_id": "inc_8d16efd0d8de4b71928debea0e070c73",
-      "workflow_run_id": "wfr_365d98656de74d4ca46b58c44e187d19",
+      "incident_id": "inc_c8968852f2484709b6074f2c064acc4c",
+      "workflow_run_id": "wfr_778eaf170cc5420886a2738e3eab07fe",
       "workflow_status": "SUCCEEDED",
       "platform_evidence_types": [
+        "CHANGE",
         "LOG",
         "METRIC",
         "RUNBOOK",
@@ -69,10 +70,11 @@
     {
       "scenario_id": "inventory-db-timeout",
       "passed": true,
-      "incident_id": "inc_25557b492dc040959ec5ae9bb6573b7a",
-      "workflow_run_id": "wfr_e9172882daf549c8a7d1955bb703aebb",
+      "incident_id": "inc_d6251d01601247979266aefaf2932691",
+      "workflow_run_id": "wfr_201c67b8cded4e09a9f014b8e2e841ac",
       "workflow_status": "SUCCEEDED",
       "platform_evidence_types": [
+        "CHANGE",
         "LOG",
         "METRIC",
         "RUNBOOK",
@@ -137,10 +139,11 @@
     {
       "scenario_id": "payment-error",
       "passed": true,
-      "incident_id": "inc_06b6002adb2e448fbe513152af53ae1c",
-      "workflow_run_id": "wfr_4387a88b99a84287a75b559851e387bc",
+      "incident_id": "inc_51847b6db2d048ceb4ec3572ed0be266",
+      "workflow_run_id": "wfr_7f171d67d53e4982aabaa10639a3d088",
       "workflow_status": "SUCCEEDED",
       "platform_evidence_types": [
+        "CHANGE",
         "LOG",
         "METRIC",
         "RUNBOOK",
@@ -187,6 +190,69 @@
         "conclusion_status": "CANDIDATE",
         "title": "Candidate: payment-service payment_error",
         "summary": "Evidence supports payment-service fault_type payment_error as the candidate root cause: PAYMENT_GATEWAY_ERROR during checkout.",
+        "confidence": 0.95
+      }
+    },
+    {
+      "scenario_id": "deployment-regression",
+      "passed": true,
+      "incident_id": "inc_590630bab17a4347b1c66eefa78a83d2",
+      "workflow_run_id": "wfr_1f1b3d6df799460485d9d0895aa4873d",
+      "workflow_status": "SUCCEEDED",
+      "platform_evidence_types": [
+        "CHANGE",
+        "LOG",
+        "METRIC",
+        "RUNBOOK",
+        "TRACE"
+      ],
+      "platform_evidence_passed": true,
+      "invocations_passed": true,
+      "root_cause_passed": true,
+      "forbidden_claims_found": [],
+      "required_evidence_passed": true,
+      "signals": [
+        {
+          "evidence_id": "ev-deployment-change",
+          "source": "change",
+          "passed": true,
+          "assertion": "The RCA workflow returns the successful payment-service v1 to v2 deployment inside the fixed incident window."
+        },
+        {
+          "evidence_id": "ev-deployment-fault-enabled",
+          "source": "prometheus",
+          "passed": true,
+          "assertion": "The deployment_regression gauge equals 1 during the fault window."
+        },
+        {
+          "evidence_id": "ev-deployment-error-counter",
+          "source": "prometheus",
+          "passed": true,
+          "assertion": "The deployment regression counter increases after checkout traffic."
+        },
+        {
+          "evidence_id": "ev-deployment-error-log",
+          "source": "loki",
+          "passed": true,
+          "assertion": "An ERROR event identifies deployment_regression and PAYMENT_DEPLOYMENT_REGRESSION."
+        },
+        {
+          "evidence_id": "ev-deployment-error-trace",
+          "source": "tempo",
+          "passed": true,
+          "assertion": "The checkout trace contains an ERROR payment.pay span with error.type PAYMENT_DEPLOYMENT_REGRESSION."
+        },
+        {
+          "evidence_id": "ev-deployment-http-500",
+          "source": "http",
+          "passed": true,
+          "assertion": "The trigger returns HTTP 500 with error_code PAYMENT_DEPLOYMENT_REGRESSION."
+        }
+      ],
+      "report": {
+        "conclusion_status": "CANDIDATE",
+        "title": "Candidate: payment-service deployment_regression",
+        "summary": "Evidence supports payment-service fault_type deployment_regression as the candidate root cause: payment-service v2 errors began after the corroborated deployment.",
         "confidence": 0.95
       }
     }

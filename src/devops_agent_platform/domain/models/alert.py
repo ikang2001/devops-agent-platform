@@ -19,6 +19,9 @@ class Alert:
     fingerprint: str
     external_event_id: str
     incident_id: str | None = None
+    environment: str = "default"
+    alert_type: str = "generic"
+    labels: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         """校验告警事实，阻止内部调用绕过 HTTP DTO 写入脏数据。"""
@@ -31,6 +34,19 @@ class Alert:
         self._validate_text("external_event_id", self.external_event_id, 256)
         if self.incident_id is not None:
             self._validate_text("incident_id", self.incident_id, 64)
+        self._validate_text("environment", self.environment, 64)
+        self._validate_text("alert_type", self.alert_type, 128)
+        if not isinstance(self.labels, tuple) or len(self.labels) > 64:
+            raise AppValidationError("labels must be a tuple with at most 64 items")
+        label_names: set[str] = set()
+        for label in self.labels:
+            if not isinstance(label, tuple) or len(label) != 2:
+                raise AppValidationError("labels must contain key/value tuples")
+            self._validate_text("label name", label[0], 128)
+            self._validate_text("label value", label[1], 512)
+            if label[0] in label_names:
+                raise AppValidationError("label names must be unique")
+            label_names.add(label[0])
 
         if not isinstance(self.severity, AlertSeverity):
             raise AppValidationError("severity must be an AlertSeverity")

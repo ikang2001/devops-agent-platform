@@ -171,4 +171,14 @@ class IncidentRecord(Base):
         default=1,
         server_default="1",
     )
+    primary_alert_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    correlated_alert_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    correlation_reason: Mapped[str] = mapped_column(
+        String(512),
+        nullable=False,
+        default="PRIMARY_ALERT",
+        server_default="PRIMARY_ALERT",
+    )
     __mapper_args__ = {"version_id_col": version}

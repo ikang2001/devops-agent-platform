@@ -1,3 +1,5 @@
+import json
+
 from devops_agent_platform.domain.enums import AlertSeverity
 from devops_agent_platform.domain.exceptions import AppValidationError
 from devops_agent_platform.domain.models.alert import Alert
@@ -34,6 +36,11 @@ class AlertMapper:
             fingerprint=alert.fingerprint,
             external_event_id=alert.external_event_id,
             incident_id=alert.incident_id,
+            environment=alert.environment,
+            alert_type=alert.alert_type,
+            labels_json=json.dumps(
+                alert.labels, ensure_ascii=False, separators=(",", ":")
+            ),
         )
 
     @staticmethod
@@ -50,4 +57,10 @@ class AlertMapper:
             fingerprint=record.fingerprint,
             external_event_id=record.external_event_id,
             incident_id=record.incident_id,
+            environment=getattr(record, "environment", "default") or "default",
+            alert_type=getattr(record, "alert_type", "generic") or "generic",
+            labels=tuple(
+                tuple(item)
+                for item in json.loads(getattr(record, "labels_json", "[]") or "[]")
+            ),
         )

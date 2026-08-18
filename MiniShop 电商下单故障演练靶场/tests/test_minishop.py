@@ -46,6 +46,22 @@ def test_payment_error_fault_returns_500():
     assert response.json()["detail"]["error_code"] == "PAYMENT_GATEWAY_ERROR"
 
 
+def test_deployment_regression_fault_returns_distinct_error_and_metric():
+    client.post(
+        "/faults/deployment-regression",
+        json={"error_rate": 1.0, "duration_seconds": 60, "created_by": "test"},
+    )
+
+    response = client.post(
+        "/payment/pay",
+        json={"order_id": "ord-deploy", "amount": 10.0, "currency": "CNY"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["error_code"] == ("PAYMENT_DEPLOYMENT_REGRESSION")
+    assert "minishop_payment_deployment_regression_total" in (client.get("/metrics").text)
+
+
 def test_inventory_db_timeout_makes_checkout_fail_and_metric_exist():
     client.post(
         "/faults/inventory-db-timeout",

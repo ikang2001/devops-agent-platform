@@ -168,7 +168,7 @@ def test_step5_ci_pipeline_keeps_quality_supply_chain_and_migration_gates() -> N
     ]
     assert "uv sync --locked --extra dev" in test_steps
     assert "uv run ruff check" in test_steps
-    assert 'uv run pytest -q -m "not live"' in test_steps
+    assert 'uv run python -m pytest -q -m "not live"' in test_steps
     assert "uv run alembic upgrade head --sql" in test_steps
     assert "docker build" in image_steps
     assert "anchore/sbom-action" in image_steps

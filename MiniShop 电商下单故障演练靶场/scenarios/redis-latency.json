@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "redis-latency",
+  "title": "Inventory Redis latency",
+  "description": "Inject latency in the inventory cache dependency.",
+  "service_name": "inventory-service",
+  "fault_type": "redis_latency",
+  "injection": {"method": "POST", "path": "/faults/redis-latency", "json_body": {"delay_ms": 250, "duration_seconds": 300, "created_by": "scenario-runner"}, "expected_status": 200, "service_name": "inventory-service", "fault_type": "redis_latency"},
+  "trigger": {"method": "POST", "path": "/checkout", "json_body": {"user_id": "scenario-redis-user", "items": [{"sku": "sku-redis-001", "quantity": 1}], "idempotency_key": "scenario-redis-latency"}, "expected_status": 200},
+  "cleanup": {"method": "POST", "path": "/faults/reset", "json_body": {}, "expected_status": 200},
+  "alert_mapping": {"source": "alertmanager", "alert_name": "MiniShopInventoryRedisLatency", "source_severity": "P1", "platform_severity": "CRITICAL", "service_name": "inventory-service", "summary": "inventory Redis latency is high", "fingerprint": "minishop:inventory-service:redis-latency", "external_event_id_prefix": "minishop-redis-latency"},
+  "expected_signals": [{"evidence_id": "ev-redis-metric", "source": "prometheus", "evidence_type": "METRIC", "locator": "minishop_fault_enabled{fault_type=\"redis_latency\"}", "assertion": "Redis latency fault is enabled."}, {"evidence_id": "ev-redis-trace", "source": "tempo", "evidence_type": "TRACE", "locator": "resource.service.name = \"inventory-service\"", "assertion": "Inventory span shows the cache dependency."}],
+  "ground_truth": {"root_cause": {"service_name": "inventory-service", "fault_type": "redis_latency", "root_cause_type": "dependency_latency", "root_cause_resource": "redis", "category": "redis_latency", "summary": "Redis latency delays inventory reservation.", "causal_chain": ["Redis latency is injected.", "Inventory reservation slows down."], "runbook_path": "runbooks/inventory-db-timeout.md"}, "required_evidence": ["ev-redis-metric", "ev-redis-trace"], "required_evidence_types": ["METRIC", "TRACE"], "optional_evidence_types": ["LOG", "RUNBOOK"], "causal_chain": [{"from_node": "redis", "to_node": "inventory-service"}], "affected_services": ["inventory-service", "checkout-service"], "forbidden_claims": ["Payment service is the root cause."], "expected_tool_types": ["metrics.query@v1", "traces.query@v1"], "forbidden_tool_types": ["shell", "remediation.execute@v1"]}
+}

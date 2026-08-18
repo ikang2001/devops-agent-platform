@@ -169,6 +169,14 @@ class RunbookSourceError(AppException):
     default_message = "Runbook source is unavailable"
 
 
+class ChangeSourceError(AppException):
+    """变更事件存储无法返回可信、有限且租户隔离的查询结果。"""
+
+    code = "CHANGE_SOURCE_UNAVAILABLE"
+    status_code = 503
+    default_message = "Change event source is unavailable"
+
+
 class LLMProviderError(AppException):
     """外部模型供应商无法返回可信且符合契约的结构化结果。"""
 

@@ -116,7 +116,7 @@ def test_ci_runs_compatibility_and_supply_chain_gates() -> None:
 
     assert "python-311-compatibility:" in workflow
     assert 'python-version: "3.11"' in workflow
-    assert 'uv run pytest -q -m "not live"' in workflow
+    assert 'uv run python -m pytest -q -m "not live"' in workflow
     assert "alembic-upgrade-py311.sql" in workflow
     assert "security:" in workflow
     assert workflow.count("pip-audit==2.10.1") == 2

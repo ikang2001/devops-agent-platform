@@ -12,6 +12,7 @@ from app.logging import get_trace_id, log_event
 from app.metrics import (
     DOWNSTREAM_TIMEOUT_TOTAL,
     INVENTORY_DB_TIMEOUT_TOTAL,
+    PAYMENT_DEPLOYMENT_REGRESSION_TOTAL,
     PAYMENT_ERROR_TOTAL,
 )
 from app.models import (
@@ -67,25 +68,47 @@ async def pay(request: PaymentRequest) -> Dict[str, object]:
     with tracer.start_as_current_span("payment.pay") as span:
         span.set_attribute("minishop.order.id", request.order_id)
         span.set_attribute("minishop.payment.currency", request.currency)
-        if fault_state.should_fail("payment-service", "payment_error"):
-            PAYMENT_ERROR_TOTAL.inc()
-            span.set_attribute("minishop.fault.type", "payment_error")
-            span.set_attribute("error.type", "PAYMENT_GATEWAY_ERROR")
-            span.set_status(Status(StatusCode.ERROR, "PAYMENT_GATEWAY_ERROR"))
+        fault_type = next(
+            (
+                candidate
+                for candidate in ("deployment_regression", "payment_error")
+                if fault_state.should_fail("payment-service", candidate)
+            ),
+            None,
+        )
+        if fault_type is not None:
+            deployment_regression = fault_type == "deployment_regression"
+            error_code = (
+                "PAYMENT_DEPLOYMENT_REGRESSION"
+                if deployment_regression
+                else "PAYMENT_GATEWAY_ERROR"
+            )
+            message = (
+                "payment deployment v2 returned 500"
+                if deployment_regression
+                else "payment gateway returned 500"
+            )
+            if deployment_regression:
+                PAYMENT_DEPLOYMENT_REGRESSION_TOTAL.inc()
+            else:
+                PAYMENT_ERROR_TOTAL.inc()
+            span.set_attribute("minishop.fault.type", fault_type)
+            span.set_attribute("error.type", error_code)
+            span.set_status(Status(StatusCode.ERROR, error_code))
             log_event(
                 level="ERROR",
                 service_name="payment-service",
                 endpoint="/payment/pay",
                 status_code=500,
-                error_code="PAYMENT_GATEWAY_ERROR",
-                fault_type="payment_error",
-                message="payment gateway returned 500",
+                error_code=error_code,
+                fault_type=fault_type,
+                message=message,
             )
             raise HTTPException(
                 status_code=500,
                 detail={
-                    "error_code": "PAYMENT_GATEWAY_ERROR",
-                    "message": "payment gateway returned 500",
+                    "error_code": error_code,
+                    "message": message,
                     "trace_id": get_trace_id(),
                 },
             )

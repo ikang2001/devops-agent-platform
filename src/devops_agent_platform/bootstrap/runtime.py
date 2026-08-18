@@ -27,6 +27,12 @@ from devops_agent_platform.application.services.audit_retention_worker import (
     AuditRetentionWorkerHealth,
     AuditRetentionWorkerRunner,
 )
+from devops_agent_platform.application.services.change_event_service import (
+    ChangeEventApplicationService,
+)
+from devops_agent_platform.application.services.dataset_release_service import (
+    DatasetReleaseService,
+)
 from devops_agent_platform.application.services.incident_query_service import (
     IncidentQueryService,
 )
@@ -84,6 +90,9 @@ from devops_agent_platform.application.services.ticket_submission_service import
 from devops_agent_platform.application.services.tool_permission_admin_service import (
     ToolPermissionAdminService,
 )
+from devops_agent_platform.application.services.workspace_service import (
+    WorkspaceService,
+)
 from devops_agent_platform.bootstrap.rca_runtime import (
     AsyncCloseable,
     build_rca_consumer_runtime,
@@ -108,11 +117,13 @@ from devops_agent_platform.infrastructure.adapters.kafka import (
 )
 from devops_agent_platform.infrastructure.adapters.sqlalchemy import (
     SQLAlchemyAuditRetentionStore,
+    SQLAlchemyDatasetReleaseStore,
     SQLAlchemyOutboxDispatchStore,
     SQLAlchemyOutboxMetricsReader,
     SQLAlchemyRunbookAdminStore,
     SQLAlchemyToolPermissionAdminStore,
     SQLAlchemyUnitOfWork,
+    SQLAlchemyWorkspaceAdminStore,
 )
 from devops_agent_platform.infrastructure.auth import (
     DemoAdministratorAuthenticator,
@@ -211,6 +222,7 @@ class ApplicationRuntime:
     alert_service: AlertApplicationService
     rca_service: RCAApplicationService
     shutdown_timeout_seconds: float
+    change_event_service: ChangeEventApplicationService | None = None
     rca_query_service: RCAExecutionQueryService | None = None
     rca_feedback_service: RCAFeedbackApplicationService | None = None
     remediation_service: RemediationApplicationService | None = None
@@ -219,6 +231,8 @@ class ApplicationRuntime:
     incident_resolution_service: IncidentResolutionService | None = None
     permission_admin_service: ToolPermissionAdminService | None = None
     runbook_admin_service: RunbookAdminService | None = None
+    workspace_service: WorkspaceService | None = None
+    dataset_release_service: DatasetReleaseService | None = None
     ticket_draft_service: TicketDraftApplicationService | None = None
     ticket_submission_service: TicketSubmissionApplicationService | None = None
     notification_service: NotificationApplicationService | None = None
@@ -734,6 +748,10 @@ def build_runtime(
         incident_policy=IncidentCreationPolicy(),
         identifier_generator=identifier_generator,
     )
+    change_event_service = ChangeEventApplicationService(
+        unit_of_work_factory=unit_of_work_factory,
+        identifier_generator=identifier_generator,
+    )
     rca_service = RCAApplicationService(
         unit_of_work_factory=unit_of_work_factory,
         identifier_generator=identifier_generator,
@@ -759,6 +777,16 @@ def build_runtime(
     runbook_admin_service = RunbookAdminService(
         store=SQLAlchemyRunbookAdminStore(session_factory),
         identifier_generator=identifier_generator,
+    )
+    workspace_store = SQLAlchemyWorkspaceAdminStore(session_factory)
+    workspace_service = WorkspaceService(
+        workspace_store,
+        admin_store=workspace_store,
+        identifier_generator=identifier_generator,
+    )
+    dataset_release_service = DatasetReleaseService(
+        SQLAlchemyDatasetReleaseStore(session_factory),
+        identifier_generator,
     )
     ticket_draft_service = TicketDraftApplicationService(
         unit_of_work_factory=unit_of_work_factory,
@@ -843,6 +871,7 @@ def build_runtime(
                 scopes_claim=settings.admin_oidc_scopes_claim,
                 tenants_claim=settings.admin_oidc_tenants_claim,
                 all_tenants_claim=(settings.admin_oidc_all_tenants_claim),
+                ca_bundle_path=settings.admin_oidc_ca_bundle_path,
             )
         )
     elif settings.admin_demo_enabled:
@@ -1027,6 +1056,7 @@ def build_runtime(
         engine=engine,
         session_factory=session_factory,
         alert_service=alert_service,
+        change_event_service=change_event_service,
         rca_service=rca_service,
         rca_query_service=rca_query_service,
         rca_cancellation_service=rca_cancellation_service,
@@ -1050,6 +1080,8 @@ def build_runtime(
         ),
         permission_admin_service=permission_admin_service,
         runbook_admin_service=runbook_admin_service,
+        workspace_service=workspace_service,
+        dataset_release_service=dataset_release_service,
         rca_feedback_service=rca_feedback_service,
         remediation_service=remediation_service,
         ticket_draft_service=ticket_draft_service,

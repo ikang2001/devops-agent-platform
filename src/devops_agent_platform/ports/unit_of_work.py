@@ -48,6 +48,7 @@
 from types import TracebackType
 from typing import Protocol, Self
 
+from devops_agent_platform.ports.change_events import ChangeEventRepositoryPort
 from devops_agent_platform.ports.evidence import EvidenceRepositoryPort
 from devops_agent_platform.ports.locks import IncidentCorrelationLockPort
 from devops_agent_platform.ports.outbox import OutboxRepositoryPort
@@ -82,6 +83,11 @@ class UnitOfWorkPort(Protocol):
     @property
     def alerts(self) -> AlertRepositoryPort:
         """返回当前事务作用域内的告警仓储。"""
+        ...
+
+    @property
+    def change_events(self) -> ChangeEventRepositoryPort:
+        """返回当前事务作用域内的变更事件仓储。"""
         ...
 
     @property

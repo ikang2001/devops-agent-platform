@@ -112,8 +112,33 @@ def build_report(request: dict[str, Any]) -> dict[str, Any]:
         raise TypeError("evidence must be a non-empty list")
 
     service_name = detect_service(evidence)
-    root_cause = ROOT_CAUSES.get(service_name)
     evidence_ids = [item["evidence_id"] for item in evidence]
+    deployment_change = has_payment_v2_deployment(evidence)
+    if deployment_change and not has_deployment_corroboration(evidence):
+        return {
+            "conclusion_status": "UNDETERMINED",
+            "title": "Deployment change requires corroboration",
+            "summary": (
+                "A payment-service deployment was observed, but Change Evidence "
+                "alone is insufficient to attribute the incident."
+            ),
+            "confidence": 0.2,
+            "evidence_ids": evidence_ids,
+            "recommendations": [
+                "Collect metric and log or trace evidence before attribution."
+            ],
+        }
+    root_cause = ROOT_CAUSES.get(service_name)
+    if deployment_change and has_deployment_corroboration(evidence):
+        root_cause = {
+            "fault_type": "deployment_regression",
+            "detail": (
+                "payment-service v2 errors began after the corroborated deployment"
+            ),
+            "recommendation": (
+                "Review the v2 rollout and use the approved rollback procedure."
+            ),
+        }
     if root_cause is None:
         return {
             "conclusion_status": "UNDETERMINED",
@@ -145,6 +170,41 @@ def detect_service(evidence: list[dict[str, Any]]) -> str:
     )
     match = re.search(r"(checkout|inventory|payment)-service", text)
     return match.group(0) if match is not None else ""
+
+
+def has_payment_v2_deployment(evidence: list[dict[str, Any]]) -> bool:
+    """只识别明确的 DEPLOYMENT v1→v2 摘要，忽略无关配置变更。"""
+    for item in evidence:
+        if item.get("evidence_type") != "CHANGE":
+            continue
+        summary = str(item.get("summary", ""))
+        normalized = summary.lower().replace(" ", "")
+        if (
+            "payment-service" in normalized
+            and "deployment" in normalized
+            and "v1->v2" in normalized
+            and "status=succeeded" in normalized
+            and is_change_temporally_correlated(summary)
+        ):
+            return True
+    return False
+
+
+def is_change_temporally_correlated(summary: str) -> bool:
+    """E2E Stub 只把事故前一分钟内的发布视为候选变更。"""
+    match = re.search(r"minutes_from_incident=(-?\d+(?:\.\d+)?)", summary.lower())
+    if match is None:
+        return False
+    offset_minutes = float(match.group(1))
+    return -1.0 <= offset_minutes <= 0.1
+
+
+def has_deployment_corroboration(evidence: list[dict[str, Any]]) -> bool:
+    """发布回归至少要求 Metric 与 Log/Trace 中的一类同时存在。"""
+    evidence_types = {
+        item.get("evidence_type") for item in evidence if isinstance(item, dict)
+    }
+    return "METRIC" in evidence_types and bool({"LOG", "TRACE"} & evidence_types)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,259 @@
+x-agent-image: &agent-image
+  image: devops-agent-platform:reference-staging
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+
+x-agent-environment: &agent-environment
+  DEVOPS_AGENT_APP_ENV: local
+  DEVOPS_AGENT_SERVICE_NAME: devops-agent-reference-staging
+  DEVOPS_AGENT_DATABASE_URL: postgresql+psycopg://devops_agent:devops_agent@postgres:5432/devops_agent
+  DEVOPS_AGENT_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  DEVOPS_AGENT_KAFKA_TOPIC: devops-agent.events.v1
+  DEVOPS_AGENT_OUTBOX_WORKER_ENABLED: "true"
+  DEVOPS_AGENT_RCA_CONSUMER_ENABLED: "true"
+  DEVOPS_AGENT_RCA_CONSUMER_GROUP_ID: reference-staging-rca-v1
+  DEVOPS_AGENT_RCA_CONSUMER_CLIENT_ID: reference-staging-rca-consumer
+  DEVOPS_AGENT_RCA_CONSUMER_WORKER_ID: reference-staging-rca-consumer-worker
+  DEVOPS_AGENT_RCA_CONSUMER_LEASE_SECONDS: "10"
+  DEVOPS_AGENT_RCA_CONSUMER_HEARTBEAT_SECONDS: "2"
+  DEVOPS_AGENT_RCA_CONTINUE_ON_STEP_FAILURE: "true"
+  DEVOPS_AGENT_PROMETHEUS_BASE_URL: http://prometheus:9090
+  DEVOPS_AGENT_LOKI_BASE_URL: http://loki:3100
+  DEVOPS_AGENT_TEMPO_BASE_URL: http://tempo:3200
+  DEVOPS_AGENT_ADMIN_OIDC_ENABLED: "true"
+  DEVOPS_AGENT_ADMIN_OIDC_ISSUER: https://oidc:8443/
+  DEVOPS_AGENT_ADMIN_OIDC_AUDIENCE: devops-agent-api
+  DEVOPS_AGENT_ADMIN_OIDC_JWKS_URL: https://oidc:8443/.well-known/jwks.json
+  DEVOPS_AGENT_ADMIN_OIDC_CA_BUNDLE_PATH: /certs/ca.pem
+  DEVOPS_AGENT_ADMIN_DEMO_ENABLED: "false"
+  DEVOPS_AGENT_LLM_REPORT_ENABLED: "true"
+  DEVOPS_AGENT_LLM_PROVIDER_ORDER: openai_compatible
+  DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_API_STYLE: chat_completions
+  DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_BASE_URL: http://provider-mock:8080/v1
+  DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_API_KEY: reference-llm-key
+  DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_MODEL: reference-synthetic-model
+  DEVOPS_AGENT_TICKET_SUBMISSION_CONSUMER_ENABLED: "true"
+  DEVOPS_AGENT_TICKETING_HTTP_JSON_ENABLED: "true"
+  DEVOPS_AGENT_TICKETING_HTTP_JSON_ENDPOINT_URL: http://provider-mock:8080/api/tickets
+  DEVOPS_AGENT_HTTP_RATE_LIMIT_ENABLED: "false"
+
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_USER: devops_agent
+      POSTGRES_PASSWORD: devops_agent
+      POSTGRES_DB: devops_agent
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${REFERENCE_POSTGRES_PORT:-25432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devops_agent -d devops_agent"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.18
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:9092
+    ports:
+      - "${REFERENCE_KAFKA_PORT:-29092}:9092"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  oidc:
+    <<: *agent-image
+    command: ["python", "/reference/oidc_mock.py"]
+    environment:
+      REFERENCE_OIDC_ISSUER: https://oidc:8443/
+      REFERENCE_OIDC_AUDIENCE: devops-agent-api
+    volumes:
+      - ./oidc_mock.py:/reference/oidc_mock.py:ro
+      - oidc-certs:/certs
+    depends_on:
+      oidc-certs-init:
+        condition: service_completed_successfully
+    ports:
+      - "${REFERENCE_OIDC_PORT:-28443}:8443"
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import ssl,urllib.request; urllib.request.urlopen('https://localhost:8443/healthz', context=ssl._create_unverified_context(), timeout=2).read()",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  oidc-certs-init:
+    <<: *agent-image
+    user: "0:0"
+    command: ["sh", "-c", "chown 10001:10001 /certs"]
+    volumes:
+      - oidc-certs:/certs
+    restart: "no"
+
+  provider-mock:
+    <<: *agent-image
+    command: ["python", "/reference/provider_mock.py"]
+    environment:
+      REFERENCE_LLM_DELAY_SECONDS: "3"
+    volumes:
+      - ./provider_mock.py:/reference/provider_mock.py:ro
+    ports:
+      - "${REFERENCE_PROVIDER_PORT:-28081}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=2).read()",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mcp-server:
+    <<: *agent-image
+    command: ["python", "/reference/mcp_server.py"]
+    environment:
+      REFERENCE_MCP_TOKEN: ${REFERENCE_MCP_TOKEN:-reference-mcp-token-change-me}
+    volumes:
+      - ./mcp_server.py:/reference/mcp_server.py:ro
+    ports:
+      - "${REFERENCE_MCP_PORT:-28082}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=2).read()",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *agent-image
+    environment:
+      DEVOPS_AGENT_APP_ENV: local
+      DEVOPS_AGENT_DATABASE_URL: postgresql+psycopg://devops_agent:devops_agent@postgres:5432/devops_agent
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    restart: "no"
+
+  agent:
+    <<: *agent-image
+    environment: *agent-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redpanda:
+        condition: service_healthy
+      oidc:
+        condition: service_healthy
+      provider-mock:
+        condition: service_healthy
+    volumes:
+      - oidc-certs:/certs:ro
+    ports:
+      - "${REFERENCE_AGENT_PORT:-28000}:8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz', timeout=2).read()",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=2h
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    tmpfs:
+      - /prometheus:rw,uid=65534,gid=65534,mode=0755
+    ports:
+      - "${REFERENCE_PROMETHEUS_PORT:-29090}:9090"
+    depends_on:
+      agent:
+        condition: service_healthy
+
+  loki:
+    image: grafana/loki:3.2.1
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ../minishop-e2e/loki.yml:/etc/loki/loki.yml:ro
+    tmpfs:
+      - /var/loki:rw,uid=10001,gid=10001,mode=0755
+    ports:
+      - "${REFERENCE_LOKI_PORT:-23100}:3100"
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    volumes:
+      - ../minishop-e2e/tempo.yml:/etc/tempo/tempo.yml:ro
+    tmpfs:
+      - /var/tempo:rw,uid=10001,gid=10001,mode=0755
+    ports:
+      - "${REFERENCE_TEMPO_PORT:-23200}:3200"
+      - "${REFERENCE_OTLP_PORT:-24318}:4318"
+
+volumes:
+  postgres-data:
+  redpanda-data:
+  oidc-certs:

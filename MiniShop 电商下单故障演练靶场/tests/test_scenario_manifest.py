@@ -11,6 +11,7 @@ from app.scenario_manifest import (
     ScenarioManifest,
     load_scenario,
     load_scenario_catalog,
+    load_extended_scenario_catalog,
 )
 
 
@@ -27,6 +28,7 @@ def test_default_catalog_contains_complete_ground_truth_for_all_faults():
 
     assert {scenario.scenario_id for scenario in catalog.scenarios} == {
         "checkout-latency",
+        "deployment-regression",
         "inventory-db-timeout",
         "payment-error",
     }
@@ -37,17 +39,38 @@ def test_default_catalog_contains_complete_ground_truth_for_all_faults():
         assert scenario.alert_mapping.platform_severity == "CRITICAL"
         assert scenario.expected_signals
         assert scenario.ground_truth.required_evidence
+        assert scenario.ground_truth.required_evidence_types
+        assert scenario.ground_truth.causal_chain
+        assert scenario.ground_truth.affected_services
         assert scenario.ground_truth.forbidden_claims
+        assert scenario.ground_truth.expected_tool_types
+        assert scenario.ground_truth.forbidden_tool_types
         assert (PROJECT_ROOT / scenario.ground_truth.root_cause.runbook_path).is_file()
+
+
+def test_extended_catalog_contains_twelve_benchmark_scenarios():
+    catalog = load_extended_scenario_catalog()
+
+    assert len(catalog.scenarios) == 12
+    assert {item.scenario_id for item in catalog.scenarios}.issuperset(
+        {
+            "config-regression",
+            "redis-latency",
+            "connection-pool-exhaustion",
+            "third-party-api-timeout",
+            "cascading-failure",
+            "known-error-repeat",
+            "misleading-history",
+            "false-positive-alert",
+        }
+    )
 
 
 def test_every_ground_truth_requires_its_tempo_signal():
     catalog = load_scenario_catalog()
 
     for scenario in catalog.scenarios:
-        tempo_signals = [
-            signal for signal in scenario.expected_signals if signal.source == "tempo"
-        ]
+        tempo_signals = [signal for signal in scenario.expected_signals if signal.source == "tempo"]
         assert len(tempo_signals) == 1
         assert tempo_signals[0].evidence_id in scenario.ground_truth.required_evidence
         assert "resource.service.name" in tempo_signals[0].locator
@@ -55,7 +78,12 @@ def test_every_ground_truth_requires_its_tempo_signal():
 
 @pytest.mark.parametrize(
     "scenario_id",
-    ["checkout-latency", "inventory-db-timeout", "payment-error"],
+    [
+        "checkout-latency",
+        "deployment-regression",
+        "inventory-db-timeout",
+        "payment-error",
+    ],
 )
 def test_manifest_actions_execute_against_minishop(scenario_id: str):
     scenario = load_scenario(SCENARIO_DIRECTORY / f"{scenario_id}.json")
@@ -92,6 +120,20 @@ def test_catalog_rejects_duplicate_scenario_ids():
 
     with pytest.raises(ValidationError, match="scenario_id values must be unique"):
         ScenarioCatalog(scenarios=[scenario, scenario])
+
+
+def test_deployment_regression_requires_change_and_corroborating_evidence():
+    scenario = load_scenario(SCENARIO_DIRECTORY / "deployment-regression.json")
+
+    assert scenario.ground_truth.root_cause.root_cause_type == ("deployment_regression")
+    assert scenario.ground_truth.root_cause.root_cause_resource == ("payment-service:v2")
+    assert set(scenario.ground_truth.required_evidence_types) == {
+        "CHANGE",
+        "LOG",
+        "METRIC",
+        "TRACE",
+    }
+    assert "changes.query@v1" in scenario.ground_truth.expected_tool_types
 
 
 def test_directory_loader_applies_catalog_uniqueness_validation(tmp_path: Path):
@@ -189,4 +231,28 @@ def test_manifest_rejects_unknown_required_evidence_reference():
     payload["ground_truth"]["required_evidence"].append("ev-does-not-exist")
 
     with pytest.raises(ValidationError, match="required_evidence references unknown signal IDs"):
+        ScenarioManifest.model_validate(payload)
+
+
+def test_manifest_rejects_signal_source_evidence_type_mismatch():
+    payload = _payload("payment-error")
+    payload["expected_signals"][0]["evidence_type"] = "LOG"
+
+    with pytest.raises(ValidationError, match="prometheus signal must use evidence_type METRIC"):
+        ScenarioManifest.model_validate(payload)
+
+
+def test_manifest_rejects_ground_truth_evidence_type_drift():
+    payload = _payload("inventory-db-timeout")
+    payload["ground_truth"]["required_evidence_types"] = ["METRIC", "TRACE"]
+
+    with pytest.raises(ValidationError, match="required_evidence_types must match"):
+        ScenarioManifest.model_validate(payload)
+
+
+def test_manifest_rejects_forbidden_tool_as_expected():
+    payload = _payload("checkout-latency")
+    payload["ground_truth"]["expected_tool_types"].append("shell")
+
+    with pytest.raises(ValidationError, match="expected_tool_types and forbidden_tool_types"):
         ScenarioManifest.model_validate(payload)

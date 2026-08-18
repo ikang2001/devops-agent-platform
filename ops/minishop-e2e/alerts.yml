@@ -24,6 +24,16 @@ groups:
         annotations:
           summary: payment-service 5xx errors are increasing
 
+      - alert: MiniShopPaymentDeploymentRegression
+        expr: increase(minishop_payment_deployment_regression_total[30s]) > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: payment-service
+        annotations:
+          summary: payment-service errors increased after the v2 deployment
+
       - alert: MiniShopInventoryDbTimeout
         expr: increase(minishop_inventory_db_timeout_total[30s]) > 0
         for: 2s

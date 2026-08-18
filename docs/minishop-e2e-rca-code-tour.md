@@ -98,6 +98,8 @@ sequenceDiagram
 主干从 `services.py:117` 的 `checkout()` 开始。它依次调用库存、支付和通知。故障不是随机撒在代码里，而是统一从 `FaultState` 读取：
 
 - `payment_error`：支付服务返回失败，并产生错误计数、错误日志和 ERROR Span。
+- `deployment_regression`：支付服务 v2 返回独立错误码，并要求部署 Change 与运行时
+  指标、日志、Trace 共同归因。
 - `db_timeout`：库存服务等待后超时，并让 checkout 记录下游失败。
 - `latency`：checkout 主链路主动变慢，直方图和 Trace 都能看到高延迟。
 
@@ -107,11 +109,12 @@ sequenceDiagram
 
 ## 第二层：Manifest 是演练契约，不只是测试数据
 
-三个场景位于：
+四个场景位于：
 
 - `MiniShop 电商下单故障演练靶场/scenarios/checkout-latency.json`
 - `MiniShop 电商下单故障演练靶场/scenarios/inventory-db-timeout.json`
 - `MiniShop 电商下单故障演练靶场/scenarios/payment-error.json`
+- `MiniShop 电商下单故障演练靶场/scenarios/deployment-regression.json`
 
 `scenario_manifest.py:151` 的 `ScenarioManifest` 把一个场景拆为：
 
@@ -132,7 +135,7 @@ sequenceDiagram
 ### 告警链路
 
 1. Prometheus 每 2 秒抓取 MiniShop `/metrics`。
-2. `ops/minishop-e2e/alerts.yml` 对三个故障定义告警规则。
+2. `ops/minishop-e2e/alerts.yml` 对四个故障定义告警规则。
 3. Alertmanager 把 firing webhook 发送到 MiniShop 的 `/integrations/alertmanager/webhook`。
 4. `app/alertmanager.py:49` 将原生 Alertmanager 格式转换成平台 canonical alert DTO。
 5. Relay 使用 HMAC 调用平台 `POST /api/v1/alerts`。
@@ -205,12 +208,13 @@ sequenceDiagram
 
 ## 第五层：受控 Agent 为什么不是“模型想调什么就调什么”
 
-`ControlledAgentWorkflow` 使用固定的四步只读计划：
+`ControlledAgentWorkflow` 默认使用固定的五步只读计划：
 
 1. `metrics.query@v1`
-2. `logs.query@v1`
-3. `traces.query@v1`
-4. `runbooks.retrieve@v1`
+2. `changes.query@v1`
+3. `logs.query@v1`
+4. `traces.query@v1`
+5. `runbooks.retrieve@v1`
 
 计划定义在 `agent/controlled_workflow.py:680`。执行前会完成三类检查：
 
@@ -218,13 +222,16 @@ sequenceDiagram
 - 操作员是否拥有工具需要的 permission tags；
 - Payload 是否满足大小、字段和 JSON 边界。
 
-执行时还受每步超时、总步骤数、结果大小和敏感文本清洗约束。任何一步失败都会记录失败 Invocation，并使工作流失败，而不是拿残缺证据伪装成功。
+执行时还受每步超时、总步骤数、结果大小和敏感文本清洗约束。默认失败即停止；只有部署
+显式开启 `continue_on_step_failure` 时才允许继续其他只读步骤，并且报告会降低置信度、
+标记失败步骤，不能拿残缺证据伪装完整成功。
 
-### 四类工具各自负责什么
+### 五类工具各自负责什么
 
 | 工具 | Handler | 查询目标 | 产出 Evidence |
 |---|---|---|---|
 | `metrics.query` | `tools/handlers/metrics.py:146` | Prometheus | 请求量、错误率、延迟、可用性摘要 |
+| `changes.query` | `tools/handlers/change_events.py` | PostgreSQL Change Event Store | 固定 Incident 窗口内的变更时间线 |
 | `logs.query` | `tools/handlers/logs.py:117` | Loki | 脱敏、截断后的相关日志 |
 | `traces.query` | `tools/handlers/traces.py:98` | Tempo | 慢 Trace、错误 Span、服务路径 |
 | `runbooks.retrieve` | `tools/handlers/runbooks.py:41` | PostgreSQL Runbook Catalog | 已发布的处置步骤 |
@@ -246,9 +253,10 @@ E2E 使用 `ops/minishop-e2e/llm_stub.py` 返回确定性候选结论。它不�
 入口是 `ops/minishop-e2e/run_e2e.py:165` 的 `MiniShopE2ERunner`：
 
 1. 等待 Agent、MiniShop、Prometheus、Loki、Tempo、Alertmanager 和 LLM Stub 健康。
-2. 通过演练管理员 Token 配置四类只读工具权限。
-3. 为三个场景创建并发布 Runbook。
-4. 对每个场景执行 cleanup → injection → traffic → wait incident → start RCA。
+2. 通过演练管理员 Token 配置五类只读工具权限。
+3. 为四个场景创建并发布 Runbook。
+4. 对发布回归场景先通过 HMAC 写入 Change Event；再对每个场景执行
+   cleanup → injection → traffic → wait incident → start RCA。
 5. 轮询 Workflow，要求终态为 `SUCCEEDED`。
 6. 同时评价外部原始信号与平台内部 Evidence。
 7. 检查报告命中服务名、故障类型，且没有 forbidden claims。
@@ -257,7 +265,7 @@ E2E 使用 `ops/minishop-e2e/llm_stub.py` 返回确定性候选结论。它不�
 一个场景通过必须同时满足：
 
 - Manifest 的 required evidence 全部命中；
-- 平台返回 METRIC、LOG、TRACE、RUNBOOK 四类 Evidence；
+- 平台返回 CHANGE、METRIC、LOG、TRACE、RUNBOOK 五类 Evidence；
 - 所有 ToolInvocation 均为 `SUCCEEDED`；
 - 报告 `conclusion_status` 为 `CANDIDATE`；
 - 报告包含正确服务和故障类型；
@@ -308,7 +316,7 @@ E2E 使用 `ops/minishop-e2e/llm_stub.py` 返回确定性候选结论。它不�
 | 新增故障场景 | `scenarios/*.json`、`scenario_manifest.py` | MiniShop fault endpoint、指标/日志/Trace、告警规则、Runner 评测 |
 | 修改告警映射 | `app/alertmanager.py` | P1/P2/P3、幂等 ID、HMAC、平台 DTO |
 | 新增 RCA 工具 | `tools/handlers/`、`bootstrap/rca_runtime.py` | Registry、permission tags、EvidenceType、E2E 权限 |
-| 修改默认四步计划 | `agent/controlled_workflow.py` | 最大步骤数、权限、Invocation 顺序、评测集 |
+| 修改默认五步计划 | `agent/controlled_workflow.py` | 最大步骤数、权限、Invocation 顺序、评测集 |
 | 修改管理员认证 | `infrastructure/auth/`、`settings.py`、`runtime.py` | 默认关闭、生产拒绝、OIDC 互斥、Token 泄漏 |
 | 修改报告契约 | LLM Gateway、报告模型、`llm_stub.py` | evidence IDs、结果 API、Ground Truth 断言 |
 
@@ -316,7 +324,7 @@ E2E 使用 `ops/minishop-e2e/llm_stub.py` 返回确定性候选结论。它不�
 
 ### 任务 1：只验证场景数据
 
-运行 MiniShop 的 Manifest 测试，确认三个场景可加载、ID 唯一、路径安全且 Evidence 引用完整。
+运行 MiniShop 的 Manifest 测试，确认四个场景可加载、ID 唯一、路径安全且 Evidence 引用完整。
 
 ### 任务 2：追踪一次 payment-error
 
@@ -338,11 +346,12 @@ E2E 使用 `ops/minishop-e2e/llm_stub.py` 返回确定性候选结论。它不�
 
 ## 已验证的真实闭环
 
-2026-07-23 使用 `ops/minishop-e2e/run-e2e.ps1` 从空 Compose 环境执行了完整验收。
-`checkout-latency`、`inventory-db-timeout`、`payment-error` 三个场景均得到
-`SUCCEEDED` Workflow，并同时具备 `METRIC`、`LOG`、`TRACE`、`RUNBOOK`
-四类平台 Evidence。每个场景的工具调用、Manifest 必需证据、候选根因和
-forbidden claims 检查均通过。
+2026-08-18 使用 `ops/minishop-e2e/run-e2e.ps1` 从空 Compose 环境执行了完整本地验收。
+`checkout-latency`、`inventory-db-timeout`、`payment-error`、`deployment-regression`
+四个场景均得到 `SUCCEEDED` Workflow，并同时具备 `CHANGE`、`METRIC`、`LOG`、
+`TRACE`、`RUNBOOK` 五类平台 Evidence。每个场景的工具调用、Manifest 必需证据、
+候选根因和 forbidden claims 检查均通过。
 
 机器可读结果保存在 `ops/minishop-e2e/artifacts/results.json`。这个文件是
-“闭环是否真的跑通”的验收证据；代码测试只能证明局部契约，不能替代它。
+“本地闭环是否真的跑通”的验收证据；代码测试只能证明局部契约，不能替代它，
+该结果也不能替代 staging/production 签字或 Real LLM 准确率评测。

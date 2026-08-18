@@ -35,6 +35,9 @@ class Incident:
     closure_idempotency_key_hash: str | None = None
     closure_request_hash: str | None = None
     closure_trace_id: str | None = None
+    primary_alert_id: str | None = None
+    correlated_alert_count: int = 1
+    correlation_reason: str = "PRIMARY_ALERT"
 
     def __post_init__(self) -> None:
         """校验事故基础字段，阻止内部调用绕过 HTTP 校验写入脏数据。"""
@@ -57,6 +60,15 @@ class Incident:
             raise AppValidationError("version must be greater than or equal to 1")
         self._validate_resolution_state()
         self._validate_closure_state()
+        if self.primary_alert_id is not None:
+            self._validate_text("primary_alert_id", self.primary_alert_id, 64)
+        if (
+            isinstance(self.correlated_alert_count, bool)
+            or not isinstance(self.correlated_alert_count, int)
+            or self.correlated_alert_count < 1
+        ):
+            raise AppValidationError("correlated_alert_count must be positive")
+        self._validate_text("correlation_reason", self.correlation_reason, 512)
 
     @staticmethod
     def _validate_text(field_name: str, value: str, max_length: int) -> None:
@@ -113,6 +125,10 @@ class Incident:
             self.severity = alert.severity
         if alert.starts_at > self.updated_at:
             self.updated_at = alert.starts_at
+        if self.primary_alert_id is None:
+            self.primary_alert_id = alert.alert_id
+        self.correlated_alert_count += 1
+        self.correlation_reason = "TOPOLOGY_OR_TIME_WINDOW_MATCH"
 
     def mark_resolved(
         self,

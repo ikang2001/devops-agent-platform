@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "config-regression",
+  "title": "Payment configuration regression",
+  "description": "Inject an invalid payment configuration and exercise checkout.",
+  "service_name": "payment-service",
+  "fault_type": "config_regression",
+  "injection": {"method": "POST", "path": "/faults/config-regression", "json_body": {"duration_seconds": 300, "created_by": "scenario-runner"}, "expected_status": 200, "service_name": "payment-service", "fault_type": "config_regression"},
+  "trigger": {"method": "POST", "path": "/checkout", "json_body": {"user_id": "scenario-config-user", "items": [{"sku": "sku-config-001", "quantity": 1}], "idempotency_key": "scenario-config-regression"}, "expected_status": 200},
+  "cleanup": {"method": "POST", "path": "/faults/reset", "json_body": {}, "expected_status": 200},
+  "alert_mapping": {"source": "alertmanager", "alert_name": "MiniShopPaymentConfigRegression", "source_severity": "P1", "platform_severity": "CRITICAL", "service_name": "payment-service", "summary": "payment-service configuration regression", "fingerprint": "minishop:payment-service:config-regression", "external_event_id_prefix": "minishop-config-regression"},
+  "expected_signals": [{"evidence_id": "ev-config-metric", "source": "prometheus", "evidence_type": "METRIC", "locator": "minishop_fault_enabled{fault_type=\"config_regression\"}", "assertion": "The configuration fault is enabled."}, {"evidence_id": "ev-config-trace", "source": "tempo", "evidence_type": "TRACE", "locator": "resource.service.name = \"payment-service\"", "assertion": "Payment span carries the configuration fault context."}],
+  "ground_truth": {"root_cause": {"service_name": "payment-service", "fault_type": "config_regression", "root_cause_type": "configuration_error", "root_cause_resource": "payment-service/config", "category": "configuration_regression", "summary": "Payment configuration is inconsistent with the running checkout contract.", "causal_chain": ["Configuration is changed.", "Payment observes the invalid value."], "runbook_path": "runbooks/payment-5xx-spike.md"}, "required_evidence": ["ev-config-metric", "ev-config-trace"], "required_evidence_types": ["METRIC", "TRACE"], "optional_evidence_types": ["LOG", "CHANGE", "RUNBOOK"], "causal_chain": [{"from_node": "payment-service/config", "to_node": "payment-service"}], "affected_services": ["payment-service", "checkout-service"], "forbidden_claims": ["Inventory database is the root cause."], "expected_tool_types": ["metrics.query@v1", "traces.query@v1"], "forbidden_tool_types": ["shell", "remediation.execute@v1"]}
+}

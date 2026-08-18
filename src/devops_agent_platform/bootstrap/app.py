@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from devops_agent_platform import __version__
 from devops_agent_platform.bootstrap.dependencies import (
     build_skeleton_alert_service,
+    build_skeleton_change_event_service,
     build_skeleton_rca_service,
 )
 from devops_agent_platform.bootstrap.runtime import (
@@ -31,8 +32,14 @@ from devops_agent_platform.interfaces.http.rate_limit import (
     RateLimitMiddleware,
 )
 from devops_agent_platform.interfaces.http.routes.alerts import router as alerts_router
+from devops_agent_platform.interfaces.http.routes.change_events import (
+    router as change_events_router,
+)
 from devops_agent_platform.interfaces.http.routes.console import (
     router as console_router,
+)
+from devops_agent_platform.interfaces.http.routes.dataset_releases import (
+    router as dataset_releases_router,
 )
 from devops_agent_platform.interfaces.http.routes.health import router as health_router
 from devops_agent_platform.interfaces.http.routes.incidents import (
@@ -61,6 +68,9 @@ from devops_agent_platform.interfaces.http.routes.ticket_drafts import (
 )
 from devops_agent_platform.interfaces.http.routes.tool_permissions import (
     router as tool_permissions_router,
+)
+from devops_agent_platform.interfaces.http.routes.workspaces import (
+    router as workspaces_router,
 )
 from devops_agent_platform.ports.authentication import (
     AdministratorAuthenticatorPort,
@@ -124,6 +134,11 @@ def create_app(
         await runtime.start()
         app.state.runtime = runtime
         app.state.alert_application_service = runtime.alert_service
+        app.state.change_event_application_service = getattr(
+            runtime,
+            "change_event_service",
+            None,
+        )
         app.state.rca_application_service = runtime.rca_service
         app.state.rca_query_service = getattr(
             runtime,
@@ -165,6 +180,12 @@ def create_app(
             "runbook_admin_service",
             None,
         )
+        app.state.workspace_service = getattr(runtime, "workspace_service", None)
+        app.state.dataset_release_service = getattr(
+            runtime,
+            "dataset_release_service",
+            None,
+        )
         app.state.ticket_draft_service = getattr(
             runtime,
             "ticket_draft_service",
@@ -187,6 +208,7 @@ def create_app(
             yield
         finally:
             app.state.alert_application_service = None
+            app.state.change_event_application_service = None
             app.state.rca_application_service = None
             app.state.rca_query_service = None
             app.state.rca_feedback_service = None
@@ -196,6 +218,8 @@ def create_app(
             app.state.incident_resolution_service = None
             app.state.tool_permission_admin_service = None
             app.state.runbook_admin_service = None
+            app.state.workspace_service = None
+            app.state.dataset_release_service = None
             app.state.ticket_draft_service = None
             app.state.ticket_submission_service = None
             app.state.notification_service = None
@@ -212,6 +236,7 @@ def create_app(
     )
     app.state.runtime = None
     app.state.alert_application_service = None
+    app.state.change_event_application_service = None
     app.state.rca_application_service = None
     app.state.rca_query_service = None
     app.state.rca_feedback_service = None
@@ -221,6 +246,8 @@ def create_app(
     app.state.incident_resolution_service = None
     app.state.tool_permission_admin_service = None
     app.state.runbook_admin_service = None
+    app.state.workspace_service = None
+    app.state.dataset_release_service = None
     app.state.ticket_draft_service = None
     app.state.ticket_submission_service = None
     app.state.notification_service = None
@@ -229,6 +256,9 @@ def create_app(
     app.state.metrics = application_metrics
     if not runtime_enabled:
         app.state.alert_application_service = build_skeleton_alert_service()
+        app.state.change_event_application_service = (
+            build_skeleton_change_event_service()
+        )
         app.state.rca_application_service = build_skeleton_rca_service()
     if resolved_settings.http_rate_limit_enabled:
         app.add_middleware(
@@ -248,12 +278,15 @@ def create_app(
     app.include_router(console_router)
     app.include_router(health_router)
     app.include_router(alerts_router, prefix="/api/v1")
+    app.include_router(change_events_router, prefix="/api/v1")
     app.include_router(incidents_router, prefix="/api/v1")
     app.include_router(rca_results_router, prefix="/api/v1")
     app.include_router(rca_feedback_router, prefix="/api/v1")
     app.include_router(remediation_router, prefix="/api/v1")
     app.include_router(tool_permissions_router, prefix="/api/v1")
     app.include_router(runbooks_router, prefix="/api/v1")
+    app.include_router(workspaces_router, prefix="/api/v1")
+    app.include_router(dataset_releases_router, prefix="/api/v1")
     app.include_router(ticket_drafts_router, prefix="/api/v1")
     app.include_router(notifications_router, prefix="/api/v1")
     if resolved_settings.metrics_enabled:

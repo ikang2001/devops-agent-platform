@@ -8,6 +8,10 @@ class UUIDIdentifierGenerator:
         """生成带类型前缀的告警标识，方便日志和人工排障识别。"""
         return f"alt_{uuid4().hex}"
 
+    def new_change_event_id(self) -> str:
+        """生成带类型前缀的变更事件标识。"""
+        return f"chg_{uuid4().hex}"
+
     def new_incident_id(self) -> str:
         """生成带类型前缀的事故标识。"""
         return f"inc_{uuid4().hex}"
@@ -35,6 +39,10 @@ class UUIDIdentifierGenerator:
     def new_runbook_operation_id(self) -> str:
         """生成带类型前缀的 Runbook 管理操作标识。"""
         return f"rop_{uuid4().hex}"
+
+    def new_workspace_operation_id(self) -> str:
+        """生成带类型前缀的 Workspace 管理操作标识。"""
+        return f"wop_{uuid4().hex}"
 
     def new_ticket_draft_id(self) -> str:
         """生成带类型前缀的本地工单草稿标识。"""

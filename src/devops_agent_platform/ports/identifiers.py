@@ -8,6 +8,10 @@ class IdentifierGeneratorPort(Protocol):
         """生成新的告警标识。"""
         ...
 
+    def new_change_event_id(self) -> str:
+        """生成新的变更事件标识。"""
+        ...
+
     def new_incident_id(self) -> str:
         """生成新的事故标识。"""
         ...
@@ -34,6 +38,10 @@ class IdentifierGeneratorPort(Protocol):
 
     def new_runbook_operation_id(self) -> str:
         """生成新的 Runbook 管理操作标识。"""
+        ...
+
+    def new_workspace_operation_id(self) -> str:
+        """生成新的 Workspace 管理操作标识。"""
         ...
 
     def new_ticket_draft_id(self) -> str:
