@@ -17,7 +17,7 @@ LLM 只负责生成供人工复核的结构化候选报告，不能把根因标�
 
 | 内容 | 入口 |
 |---|---|
-| 当前完成度与禁止话术 | [缺少内容.md](缺少内容.md) |
+| 验收边界与禁止话术 | [诚实边界说明](docs/route-a-honest-narrative.md) |
 | Step 4 验收 | [STEP4_ACCEPTANCE.md](STEP4_ACCEPTANCE.md) |
 | Step 5 部署与生产化资产 | [STEP5_PRODUCTION.md](STEP5_PRODUCTION.md) |
 | Step 6 产品化边界 | [STEP6_PRODUCTIZATION.md](STEP6_PRODUCTIZATION.md) |
@@ -59,13 +59,13 @@ LLM 只负责生成供人工复核的结构化候选报告，不能把根因标�
 
 ## 当前完成状态
 
-| 阶段 | 当前状态 | 仍需补齐 |
-|---|---|---|
-| Step 4 工程主链路 | 已实现并可重复本地验证；reference staging 已完成 11/11 协议验收 | 真实外部 staging/production 签字与商业 LLM 准确率 |
-| Step 5 生产化资产 | 已提供 Docker、Compose、Kubernetes 骨架、CI、安全门禁；reference staging 已完成 100/500/1000 alerts/min 与四类 Chaos 实测 | 目标环境容量、备份恢复和故障注入签字 |
-| Step 6 产品面 | 已实现 Ops Console、反馈 API、Workspace API、HTTP MCP、离线策展和在线双审核人发布状态机 | 自动匿名化、真实 Web 产品、运行时 Prompt/Flag/RAG 和组织级发布流程 |
+本地工程交付已经完成：代码、迁移、测试、Benchmark、Reference staging、CI 和 v0.4.0 发布链路均已落地。下表把“本地可以证明的交付结果”和“必须由目标环境提供的外部证据”分开，外部证据不是本地代码缺陷，也不会被本地 Mock 或合成数据冒充。
 
-完整真相源见 [缺少内容.md](缺少内容.md)。若其他文档与它冲突，以该文件为准。
+| 阶段 | 本地交付结果 | 外部环境验收前置条件 |
+|---|---|---|
+| Step 4 工程主链路 | 已完成 Incident、Change Event、Outbox、RCA、Evidence、反馈和修复计划闭环；Reference staging 11/11 协议验收通过 | 若要声明生产可用，需要真实外部 staging/production 签字和商业 LLM 准确率 |
+| Step 5 生产化资产 | 已完成 Docker、Compose、Kubernetes 骨架、CI、安全门禁、100/500/1000 alerts/min 合成压测和四类 Chaos 证据 | 目标环境容量、备份恢复、恢复时间和生产故障注入签字 |
+| Step 6 产品面 | 已完成 Ops Console、反馈 API、Workspace API、HTTP MCP、离线策展和在线双审核人发布状态机 | 自动匿名化、真实 Web 产品、运行时 Prompt/Flag/RAG 和组织级发布流程需在目标环境接线 |
 
 ## Reference staging 实测资产（2026-08-18）
 
@@ -81,7 +81,8 @@ LLM 只负责生成供人工复核的结构化候选报告，不能把根因标�
 ## 系统架构
 
 ```mermaid
-flowchart LR
+%%{init: {'flowchart': {'nodeSpacing': 28, 'rankSpacing': 42, 'padding': 36}, 'themeVariables': {'fontSize': '14px'}}}%%
+flowchart TB
     A[Alertmanager / Webhook] --> B[FastAPI 接入层]
     A2[CI/CD / Change Source] --> B2[Change Event HMAC 接入]
     B --> C[(PostgreSQL)]
