@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 from sqlalchemy import and_, or_, select
@@ -277,6 +278,7 @@ class SQLAlchemyIncidentRepository:
         immutable_values = (
             ("tenant_id", record.tenant_id, incident.tenant_id),
             ("service_name", record.service_name, incident.service_name),
+            ("environment", record.environment, incident.environment),
             ("created_at", record.created_at, incident.created_at),
         )
         changed_fields = [
@@ -314,3 +316,11 @@ class SQLAlchemyIncidentRepository:
         )
         record.closure_request_hash = incident.closure_request_hash
         record.closure_trace_id = incident.closure_trace_id
+        record.primary_alert_id = incident.primary_alert_id
+        record.correlated_alert_count = incident.correlated_alert_count
+        record.correlation_reason = incident.correlation_reason
+        record.affected_services_json = json.dumps(
+            incident.affected_services,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )

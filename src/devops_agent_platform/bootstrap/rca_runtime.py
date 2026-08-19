@@ -11,6 +11,12 @@ from devops_agent_platform.agent import (
     ResilientLLMRCAReportGenerator,
     build_plan_for_policy,
 )
+from devops_agent_platform.agent.dynamic_workflow import (
+    BoundedDynamicRCAWorkflow,
+    DynamicIncidentContext,
+)
+from devops_agent_platform.agent.investigation_policy import InvestigationPolicy
+from devops_agent_platform.application.exceptions import PersistenceError
 from devops_agent_platform.application.services.knowledge_service import (
     KnowledgeService,
 )
@@ -38,6 +44,8 @@ from devops_agent_platform.bootstrap.worker_identity import (
     derive_suffixed_id,
     derive_worker_id,
 )
+from devops_agent_platform.domain.models.investigation import InvestigationBudget
+from devops_agent_platform.domain.models.topology import TopologyGraph
 from devops_agent_platform.infrastructure.adapters.kafka import (
     KafkaConsumerConfig,
     KafkaDeadLetterPublisher,
@@ -45,6 +53,7 @@ from devops_agent_platform.infrastructure.adapters.kafka import (
     RCAKafkaConsumer,
 )
 from devops_agent_platform.infrastructure.adapters.sqlalchemy import (
+    SQLAlchemyInvestigationCheckpoint,
     SQLAlchemyKnowledgeRetriever,
     SQLAlchemyObservabilityTargetResolver,
     SQLAlchemyRunbookSearch,
@@ -120,7 +129,22 @@ def build_rca_consumer_runtime(
         raise ValueError("RCA consumer is not enabled")
 
     plan = build_plan_for_policy(settings.rca_investigation_policy)
-    plan_tool_names = frozenset(step.tool_name for step in plan.steps)
+    if settings.rca_investigation_policy == InvestigationPolicy.BOUNDED_DYNAMIC_V1:
+        # 动态 Planner 不发布可执行计划；这里仍显式声明它可能使用的只读工具，
+        # 让装配层注册完整 Handler，并保留固定计划的审计/回放基线。
+        plan_tool_names = frozenset(
+            {
+                "metrics.query",
+                "logs.query",
+                "traces.query",
+                "changes.query",
+                "topology.query",
+                "knowledge.search",
+                "runbooks.retrieve",
+            }
+        )
+    else:
+        plan_tool_names = frozenset(step.tool_name for step in plan.steps)
 
     prometheus_config = PrometheusRangeClientConfig(
         base_url=settings.prometheus_base_url or "",
@@ -265,18 +289,71 @@ def build_rca_consumer_runtime(
             observer=report_observer,
         )
 
-    workflow = ControlledAgentWorkflow(
-        plan=plan,
-        registry=ToolRegistry(definitions),
-        permission_checker=ToolPermissionChecker(
-            SQLAlchemyToolPermissionProvider(session_factory)
-        ),
-        tool_executor=ToolExecutor(handler_registry),
-        config=ControlledAgentWorkflowConfig(
-            continue_on_step_failure=settings.rca_continue_on_step_failure,
-        ),
-        report_generator=report_generator,
+    tool_registry = ToolRegistry(definitions)
+    permission_checker = ToolPermissionChecker(
+        SQLAlchemyToolPermissionProvider(session_factory)
     )
+    tool_executor = ToolExecutor(handler_registry)
+
+    async def load_dynamic_context(
+        tenant_id: str,
+        incident_id: str,
+    ) -> tuple[DynamicIncidentContext, TopologyGraph | None]:
+        async with unit_of_work_factory() as unit_of_work:
+            incident = await unit_of_work.incidents.get_by_id(
+                incident_id,
+                tenant_id,
+            )
+        if incident is None:
+            from devops_agent_platform.domain.exceptions import ResourceNotFound
+
+            raise ResourceNotFound(f"Incident not found: {incident_id}")
+        try:
+            graph = await topology_service.query(
+                tenant_id,
+                environment=incident.environment,
+                max_depth=8,
+            )
+        except PersistenceError:
+            # Topology 是增强上下文，不应阻断 Metrics/Logs 等基础调查；
+            # 动态工具仍会记录 topology.query 的失败 Evidence/审计结果。
+            graph = None
+        return (
+            DynamicIncidentContext(
+                service_name=incident.service_name,
+                environment=incident.environment,
+                summary=incident.title,
+            ),
+            graph if graph.nodes else None,
+        )
+
+    if settings.rca_investigation_policy == InvestigationPolicy.BOUNDED_DYNAMIC_V1:
+        workflow = BoundedDynamicRCAWorkflow(
+            registry=tool_registry,
+            permission_checker=permission_checker,
+            tool_executor=tool_executor,
+            report_generator=report_generator,
+            checkpoint=SQLAlchemyInvestigationCheckpoint(session_factory),
+            context_loader=load_dynamic_context,
+            budget=InvestigationBudget(
+                max_steps=settings.rca_dynamic_max_steps,
+                max_total_duration_ms=settings.rca_dynamic_max_total_duration_ms,
+                max_tool_calls_per_type=settings.rca_dynamic_max_tool_calls_per_type,
+                max_evidence_count=settings.rca_dynamic_max_evidence_count,
+                max_llm_calls=settings.rca_dynamic_max_llm_calls,
+            ),
+        )
+    else:
+        workflow = ControlledAgentWorkflow(
+            plan=plan,
+            registry=tool_registry,
+            permission_checker=permission_checker,
+            tool_executor=tool_executor,
+            config=ControlledAgentWorkflowConfig(
+                continue_on_step_failure=settings.rca_continue_on_step_failure,
+            ),
+            report_generator=report_generator,
+        )
 
     execution_service = WorkflowExecutionApplicationService(
         unit_of_work_factory=unit_of_work_factory,

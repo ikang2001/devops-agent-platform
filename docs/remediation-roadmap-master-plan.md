@@ -1,4 +1,4 @@
-# 最小改造路线图总计划（A → B → C0/C1）
+# 最小改造路线图总计划（A → B → C0/C1/C2）
 
 > 单一执行计划。任务点完成后在本文件勾选，并在 `docs/` 下各写一份中文说明。
 > 完成度真相源仍是 [`缺少内容.md`](../缺少内容.md)；本文件管**怎么做**，不替代完成度清单。
@@ -16,15 +16,15 @@
 
 1. **先 A**（半天）：只改叙事与边界测试
 2. **立刻 B**（3～4 天）：修复 remediation 崩溃卡死
-3. **再 C0+C1**（约 1 周）：部分失败降级 + 可配置固定计划变体
+3. **再 C0+C1+C2**：部分失败降级 + 可配置固定计划变体 + 有界动态调查与持久化 checkpoint
 
 ---
 
 ## 1. 路线总览
 
 ```text
-A 诚实叙事 ──► B 执行租约 ──► C0 部分失败降级 ──► C1 调查策略
-   (文档/测试)     (状态机真缺陷)     (RCA 可用性)         (固定计划变体)
+A 诚实叙事 ──► B 执行租约 ──► C0 部分失败降级 ──► C1 固定策略 ──► C2 有界动态调查
+   (文档/测试)     (状态机真缺陷)     (RCA 可用性)     (策略兼容)       (预算/拓扑/知识)
 ```
 
 | 路线 | 价值 | 不做 |
@@ -32,11 +32,12 @@ A 诚实叙事 ──► B 执行租约 ──► C0 部分失败降级 ──�
 | A | 面试/README 不穿帮 | 不借机“补实现”蓝图功能 |
 | B | 生产缺陷：`EXECUTING` 永久卡住 | 无自动重试/接管外部写、无 HTTP reclaim API |
 | C0 | 单步工具挂了仍能出部分报告 | 不把部分证据标 CONFIRMED |
-| C1 | 无 Tempo 等环境可选更短固定计划 | 不做运行时多轮自适应推理 |
+| C1 | 无 Tempo 等环境可选更短固定计划 | 不做自由运行时多轮自适应推理 |
+| C2 | 在只读工具、Topology、Knowledge 和预算内动态选择调查意图 | 不做自由 ReAct、Shell 或自动修复 |
 
 ---
 
-## 2. 当前进度快照（2026-07-26）
+## 2. 当前进度快照（2026-08-18）
 
 ### 2.1 路线 A — 已完成
 
@@ -75,12 +76,23 @@ A 诚实叙事 ──► B 执行租约 ──► C0 部分失败降级 ──�
 
 | 项 | 状态 | 说明 |
 | --- | --- | --- |
-| `investigation_policy.py` 固定计划变体 | ✅ 已有 | `fixed_default` / `fixed_no_traces` / `fixed_metrics_logs_runbooks` |
-| settings `rca_investigation_policy` | ✅ | 未知值与 `auto` 启动前失败 |
+| `investigation_policy.py` 固定与动态策略 | ✅ 已有 | `fixed_default` / `fixed_no_traces` / `fixed_metrics_logs_runbooks` / `bounded_dynamic_v1` |
+| settings `rca_investigation_policy` | ✅ | 未知值与 `auto` 启动前失败；动态预算也在启动前校验 |
 | `rca_runtime` 按策略建 plan | ✅ | 无 Trace 计划不创建或要求 Tempo 资源 |
-| 单元测试 | ✅ | 三策略形状、非法键、Settings 与 Runtime 接线 |
+| 单元测试 | ✅ | 三策略形状、动态预算、非法键、Settings 与 Runtime 接线 |
 | 中文文档 | ✅ | [`route-c1-investigation-policy.md`](route-c1-investigation-policy.md) |
-| 自适应多轮 / auto 策略 | ❌ 明确不做 | 禁止话术 |
+| 自由自适应多轮 / auto 策略 | ❌ 明确不做 | 有界动态调查已完成，但不扩展为自由 ReAct |
+
+### 2.5 路线 C2 — 有界动态调查已完成
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| Runtime 接线 | ✅ | `bounded_dynamic_v1` 使用 `BoundedDynamicRCAWorkflow`，固定策略保持兼容 |
+| Topology / Knowledge | ✅ | 七个只读工具统一经过后端 allowlist、权限、服务范围和参数构造 |
+| 动态预算 | ✅ | Settings 注入步骤、总时长、单工具、Evidence 和 LLM 上限 |
+| Checkpoint / Resume | ✅ | SQLAlchemy 持久化 checkpoint 按版本拒绝过期 Worker 覆盖 |
+| 失败路径与测试 | ✅ | Planner 超时、Topology 空图、Knowledge 超时、无 Evidence 和策略边界均有测试 |
+| 真实 Worker / staging 证据 | ⏳ | 仍需目标环境故障注入、租约恢复和真实观测栈签字 |
 
 ---
 
@@ -240,16 +252,16 @@ uv run pytest -q tests/unit/bootstrap/test_settings.py
 
 ## 7. 面试一句话（改造后）
 
-> 这是生产导向的 Incident/RCA **作业编排**后端：固定只读调查计划、可选部分失败降级、可配置固定计划变体；修复走审批 + claim/lease/fence，不是自适应智能 Agent，也不是通用自动修复引擎。
+> 这是生产导向的 Incident/RCA **作业编排**后端：固定只读调查计划、有界动态调查、可选部分失败降级；修复走审批 + claim/lease/fence，不是自由 ReAct Agent，也不是通用自动修复引擎。
 
 ---
 
 ## 8. 收口状态与下一边界
 
-1. A/B/C0/C1 代码、配置、测试和中文说明均已完成。
-2. C0/C1 定向回归：`190 passed`，相关 Ruff 检查通过。
-3. 根平台当前全量回归：`1712 passed, 9 skipped`，Ruff 与锁文件一致性通过。
+1. A/B/C0/C1/C2 代码、配置、测试和中文说明均已完成。
+2. C0/C1/C2 定向回归与持久化 checkpoint 测试通过，相关 Ruff 检查通过。
+3. 根平台当前全量回归：`1865 passed, 9 skipped`，Ruff 与迁移链检查通过。
 4. 下一边界不是继续扩成自由 Agent，而是在真实 staging/sandbox 验证观测数据源、
    LLM、OIDC、Kafka 和外部修复控制器；未取得证据前不得宣称生产验收完成。
 5. Remediation 后台 reclaim Worker 已作为默认关闭能力接入；外部写自动重试、
-   自适应多轮调查、Prompt/Flag/RAG 运行时接线仍属于后续独立工程。
+   Prompt/Flag/组织级 RAG 运行时接线仍属于后续独立工程。动态调查已在只读、预算和持久化 checkpoint 边界内接线。

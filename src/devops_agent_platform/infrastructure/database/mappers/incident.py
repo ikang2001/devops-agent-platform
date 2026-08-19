@@ -1,3 +1,5 @@
+import json
+
 from devops_agent_platform.domain.enums import AlertSeverity, IncidentStatus
 from devops_agent_platform.domain.models.incident import Incident
 from devops_agent_platform.infrastructure.database.models.incident import (
@@ -36,6 +38,12 @@ class IncidentMapper:
             primary_alert_id=incident.primary_alert_id,
             correlated_alert_count=incident.correlated_alert_count,
             correlation_reason=incident.correlation_reason,
+            environment=incident.environment,
+            affected_services_json=json.dumps(
+                incident.affected_services,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
         )
 
     @staticmethod
@@ -67,4 +75,8 @@ class IncidentMapper:
             correlated_alert_count=getattr(record, "correlated_alert_count", 1) or 1,
             correlation_reason=getattr(record, "correlation_reason", "PRIMARY_ALERT")
             or "PRIMARY_ALERT",
+            environment=getattr(record, "environment", "default") or "default",
+            affected_services=tuple(
+                json.loads(getattr(record, "affected_services_json", "[]") or "[]")
+            ),
         )

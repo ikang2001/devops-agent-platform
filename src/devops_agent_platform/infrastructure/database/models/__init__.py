@@ -3,6 +3,9 @@ from devops_agent_platform.infrastructure.database.models.alert import AlertReco
 from devops_agent_platform.infrastructure.database.models.change_event import (
     ChangeEventRecord,
 )
+from devops_agent_platform.infrastructure.database.models.checkpoint import (
+    InvestigationCheckpointRecord,
+)
 from devops_agent_platform.infrastructure.database.models.dataset_release import (
     DatasetReleaseRecord,
     DatasetReleaseReviewRecord,
@@ -65,6 +68,7 @@ __all__ = [
     "DatasetReleaseRecord",
     "DatasetReleaseReviewRecord",
     "IncidentRecord",
+    "InvestigationCheckpointRecord",
     "KnowledgeDocumentRecord",
     "KnowledgeChunkRecord",
     "OutboxEventRecord",

@@ -193,8 +193,12 @@ def write_report(
         raise ValueError("live mode requires a live observation input")
     simulated = mode == "contract"
     synthetic = simulated or bool(live_document.get("synthetic", True))
+    simulation = (
+        bool(live_document.get("simulation", False)) if live_document else False
+    )
     production_acceptance = (
         not synthetic
+        and not simulation
         and live_document is not None
         and live_document.get("production_acceptance") is True
     )
@@ -203,6 +207,7 @@ def write_report(
         "mode": mode,
         "simulated": simulated,
         "synthetic": synthetic,
+        "simulation": simulation,
         "production_acceptance": production_acceptance,
         "target_label": (
             "contract-only"

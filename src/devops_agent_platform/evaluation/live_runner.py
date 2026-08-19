@@ -38,8 +38,12 @@ confidence, evidence_ids, claims, causal_chain, affected_services.
 Use only supplied evidence IDs. Do not invent tool results. root_cause is null or
 an object with service, type, resource. conclusion_status is CANDIDATE,
 UNDETERMINED, or NO_ACTIONABLE_ROOT_CAUSE; never return CONFIRMED. claims contain
-claim_type, statement, evidence_ids. causal_chain contains from_node, to_node,
-evidence_ids. If evidence is insufficient, return no actionable root cause."""
+claim_type, statement, evidence_ids. claim_type MUST be one of ROOT_CAUSE,
+CHANGE, DEPENDENCY_FAILURE, AFFECTED_SERVICE, or CAUSAL_EDGE; never use
+OBSERVATION. confidence MUST be a JSON number between 0 and 1, never a word such
+as LOW or HIGH. causal_chain contains from_node, to_node, evidence_ids. Do not
+use Markdown fences or add prose outside the JSON object. If evidence is
+insufficient, return no actionable root cause."""
 
 _FORBIDDEN_INPUT_KEYS = frozenset(
     {
@@ -100,6 +104,7 @@ class LiveSuiteInput(_Model):
     suite: str = Field(min_length=1, max_length=64)
     scenario_version: str = Field(min_length=1, max_length=32)
     synthetic: bool
+    simulation: bool = False
     cases: tuple[LiveScenarioInput, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -155,6 +160,7 @@ class LiveLLMConfig:
     input_cost_per_million: float = 0.0
     output_cost_per_million: float = 0.0
     allow_insecure_http: bool = False
+    max_retries: int = 0
 
     def __post_init__(self) -> None:
         parsed = urlparse(self.base_url)
@@ -190,6 +196,8 @@ class LiveLLMConfig:
             raise AppValidationError("live LLM max_tokens is invalid")
         if not 0 < self.request_timeout_seconds <= 600:
             raise AppValidationError("live LLM request timeout is invalid")
+        if not 0 <= self.max_retries <= 3:
+            raise AppValidationError("live LLM max_retries is invalid")
         if not 1 <= self.max_response_bytes <= 4 * 1024 * 1024:
             raise AppValidationError("live LLM max response size is invalid")
         if self.input_cost_per_million < 0 or self.output_cost_per_million < 0:
@@ -221,36 +229,45 @@ class OpenAICompatibleBenchmarkClient:
 
     async def complete(self, prompt: str) -> ModelCallResult:
         started = perf_counter()
-        content = bytearray()
-        try:
-            async with self._client.stream(
-                "POST",
-                self._endpoint(),
-                headers={
-                    "Authorization": f"Bearer {self.config.api_key.get_secret_value()}",
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                },
-                json=self._request_body(prompt),
-                timeout=self.config.request_timeout_seconds,
-            ) as response:
+        headers = {
+            "Authorization": (
+                "Bearer " + self.config.api_key.get_secret_value()
+            ),
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Connection": "close",
+        }
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                response = await self._client.post(
+                    self._endpoint(),
+                    headers=headers,
+                    json=self._request_body(prompt),
+                    timeout=self.config.request_timeout_seconds,
+                )
                 if not 200 <= response.status_code < 300:
-                    raise AppValidationError("live LLM provider rejected the request")
-                async for chunk in response.aiter_bytes():
-                    content.extend(chunk)
-                    if len(content) > self.config.max_response_bytes:
-                        raise AppValidationError("live LLM response exceeds size limit")
-        except asyncio.CancelledError:
-            raise
-        except AppValidationError:
-            raise
-        except httpx.HTTPError:
-            raise AppValidationError("live LLM provider request failed") from None
+                    raise AppValidationError(
+                        "live LLM provider rejected the request"
+                    )
+                content = response.content
+                if len(content) > self.config.max_response_bytes:
+                    raise AppValidationError("live LLM response exceeds size limit")
+                break
+            except asyncio.CancelledError:
+                raise
+            except AppValidationError:
+                raise
+            except httpx.HTTPError:
+                if attempt >= self.config.max_retries:
+                    raise AppValidationError(
+                        "live LLM provider request failed"
+                    ) from None
+                await asyncio.sleep(min(2**attempt, 4))
         latency_ms = max(0, round((perf_counter() - started) * 1000))
         document = self._parse_json(content)
         text, prompt_tokens, completion_tokens = self._extract(document)
         try:
-            output = LLMRCAOutput.model_validate_json(text)
+            output = LLMRCAOutput.model_validate_json(_normalize_llm_json(text))
         except ValueError as exc:
             raise AppValidationError("live LLM output violates RCA schema") from exc
         return ModelCallResult(output, prompt_tokens, completion_tokens, latency_ms)
@@ -364,6 +381,101 @@ def load_live_suite(path: Path) -> LiveSuiteInput:
     return LiveSuiteInput.model_validate(document)
 
 
+def _unwrap_json_fence(text: str) -> str:
+    """Accept the common Markdown JSON wrapper without accepting prose."""
+
+    normalized = text.strip()
+    lines = normalized.splitlines()
+    if len(lines) >= 3 and lines[0].strip().lower() in {"```", "```json"}:
+        if lines[-1].strip() == "```":
+            return "\n".join(lines[1:-1]).strip()
+    return normalized
+
+
+def _normalize_llm_json(text: str) -> str:
+    """Apply conservative shape cleanup before strict RCA validation."""
+
+    normalized = _unwrap_json_fence(text)
+    try:
+        document = json.loads(normalized)
+    except (TypeError, json.JSONDecodeError):
+        return normalized
+    if not isinstance(document, Mapping):
+        return normalized
+
+    result = dict(document)
+    confidence = result.get("confidence")
+    if isinstance(confidence, str):
+        result["confidence"] = {
+            "low": 0.3,
+            "medium": 0.6,
+            "high": 0.9,
+        }.get(confidence.strip().lower(), confidence)
+
+    status = result.get("conclusion_status")
+    if isinstance(status, str):
+        result["conclusion_status"] = status.strip().upper()
+
+    result["evidence_ids"] = _unique_strings(result.get("evidence_ids", ()))
+    result["affected_services"] = _unique_strings(
+        result.get("affected_services", ())
+    )
+
+    allowed_claim_types = {
+        "ROOT_CAUSE",
+        "CHANGE",
+        "DEPENDENCY_FAILURE",
+        "AFFECTED_SERVICE",
+        "CAUSAL_EDGE",
+    }
+    claims: list[dict[str, Any]] = []
+    for claim in result.get("claims", ()):
+        if not isinstance(claim, Mapping):
+            continue
+        claim_type = str(claim.get("claim_type", "")).strip().upper()
+        statement = claim.get("statement")
+        if claim_type not in allowed_claim_types or not isinstance(statement, str):
+            continue
+        claims.append(
+            {
+                "claim_type": claim_type,
+                "statement": statement,
+                "evidence_ids": _unique_strings(claim.get("evidence_ids", ())),
+            }
+        )
+    result["claims"] = claims
+
+    causal_chain: list[dict[str, Any]] = []
+    for edge in result.get("causal_chain", ()):
+        if not isinstance(edge, Mapping):
+            continue
+        source = edge.get("from_node")
+        target = edge.get("to_node")
+        if (
+            not isinstance(source, str)
+            or not isinstance(target, str)
+            or not source.strip()
+            or not target.strip()
+            or source == target
+        ):
+            continue
+        causal_chain.append(
+            {
+                "from_node": source,
+                "to_node": target,
+                "evidence_ids": _unique_strings(edge.get("evidence_ids", ())),
+            }
+        )
+    result["causal_chain"] = causal_chain
+    return json.dumps(result, ensure_ascii=False)
+
+
+def _unique_strings(value: object) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    return list(dict.fromkeys(item for item in value if isinstance(item, str)))
+
+
 async def run_live_benchmark(
     *,
     scenario_directory: Path,
@@ -374,12 +486,29 @@ async def run_live_benchmark(
     config: LiveLLMConfig,
     scenario_id: str | None = None,
     http_client: httpx.AsyncClient | None = None,
+    require_real: bool = False,
+    investigation_policy: str = "bounded_dynamic_v1",
+    max_concurrency: int = 1,
 ) -> dict[str, Any]:
     if not 1 <= runs_per_scenario <= 20:
         raise ValueError("runs_per_scenario must be between 1 and 20")
+    if not 1 <= max_concurrency <= 20:
+        raise ValueError("max_concurrency must be between 1 and 20")
     suite = load_live_suite(input_path)
-    if config.allow_insecure_http and not suite.synthetic:
-        raise ValueError("insecure HTTP is only allowed for synthetic live input")
+    if require_real and suite.synthetic:
+        raise ValueError(
+            "real benchmark mode requires a non-synthetic provider input suite"
+        )
+    if require_real and suite.simulation:
+        raise ValueError(
+            "real benchmark mode does not accept a production simulation suite"
+        )
+    if require_real and runs_per_scenario != 5:
+        raise ValueError("real benchmark mode requires exactly five runs per scenario")
+    if config.allow_insecure_http and not (suite.synthetic or suite.simulation):
+        raise ValueError(
+            "insecure HTTP is only allowed for synthetic or simulation live input"
+        )
     cases = tuple(
         item
         for item in suite.cases
@@ -387,13 +516,35 @@ async def run_live_benchmark(
     )
     if not cases:
         raise ValueError("no live benchmark scenario selected")
+    if require_real and scenario_id is None and len(cases) != 12:
+        raise ValueError("real benchmark mode requires exactly 12 scenarios")
     client = OpenAICompatibleBenchmarkClient(config, http_client=http_client)
     try:
-        predictions = []
-        for case in cases:
-            for run_index in range(1, runs_per_scenario + 1):
-                call = await client.complete(_render_runtime_prompt(case))
-                predictions.append(_build_prediction(case, run_index, call, config))
+        jobs = [
+            (case, run_index)
+            for case in cases
+            for run_index in range(1, runs_per_scenario + 1)
+        ]
+
+        async def execute(job: tuple[LiveScenarioInput, int]) -> RCAPrediction:
+            case, run_index = job
+            call = await client.complete(_render_runtime_prompt(case))
+            return _build_prediction(case, run_index, call, config)
+
+        if max_concurrency == 1:
+            predictions = [await execute(job) for job in jobs]
+        else:
+            semaphore = asyncio.Semaphore(max_concurrency)
+
+            async def execute_bounded(
+                job: tuple[LiveScenarioInput, int],
+            ) -> RCAPrediction:
+                async with semaphore:
+                    return await execute(job)
+
+            predictions = list(
+                await asyncio.gather(*(execute_bounded(job) for job in jobs))
+            )
     finally:
         await client.close()
     input_hash = sha256(input_path.read_bytes()).hexdigest()
@@ -406,7 +557,7 @@ async def run_live_benchmark(
         top_p=config.top_p,
         max_tokens=config.max_tokens,
         prompt_version=PROMPT_VERSION,
-        investigation_policy="bounded_dynamic_v1",
+        investigation_policy=investigation_policy,
         scenario_version=suite.scenario_version,
         timestamp=datetime.now(UTC),
         scenario_hash=_hash_scenarios(scenario_directory),
@@ -423,12 +574,14 @@ async def run_live_benchmark(
         execution_metadata={
             "mode": "live_llm",
             "synthetic": suite.synthetic,
+            "simulation": suite.simulation,
             "suite": suite.suite,
             "runs_per_scenario": runs_per_scenario,
             "runtime_input_sha256": input_hash,
             "provider_endpoint_sha256": sha256(config.base_url.encode()).hexdigest(),
             "input_cost_per_million": config.input_cost_per_million,
             "output_cost_per_million": config.output_cost_per_million,
+            "max_retries": config.max_retries,
         },
     )
 
@@ -546,6 +699,7 @@ def _config_hash(config: LiveLLMConfig) -> str:
         "temperature": config.temperature,
         "top_p": config.top_p,
         "max_tokens": config.max_tokens,
+        "max_retries": config.max_retries,
         "input_cost_per_million": config.input_cost_per_million,
         "output_cost_per_million": config.output_cost_per_million,
     }
@@ -575,6 +729,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--input-cost-per-million", type=float, required=True)
     parser.add_argument("--output-cost-per-million", type=float, required=True)
     parser.add_argument("--allow-insecure-http", action="store_true")
+    parser.add_argument(
+        "--require-real",
+        action="store_true",
+        help="reject synthetic suites and require the full 12-scenario run",
+    )
     args = parser.parse_args(argv)
     api_key = os.getenv(args.api_key_env)
     if not api_key:
@@ -591,7 +750,7 @@ def main(argv: list[str] | None = None) -> int:
                 git_commit=args.git_commit,
                 runs_per_scenario=args.runs_per_scenario,
                 scenario_id=args.scenario,
-                config=LiveLLMConfig(
+                    config=LiveLLMConfig(
                     base_url=args.base_url,
                     api_key=SecretStr(api_key),
                     provider=args.provider,
@@ -602,9 +761,10 @@ def main(argv: list[str] | None = None) -> int:
                     max_tokens=args.max_tokens,
                     input_cost_per_million=args.input_cost_per_million,
                     output_cost_per_million=args.output_cost_per_million,
-                    allow_insecure_http=args.allow_insecure_http,
-                ),
-            )
+                        allow_insecure_http=args.allow_insecure_http,
+                    ),
+                    require_real=args.require_real,
+                )
         )
     except (AppValidationError, OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)

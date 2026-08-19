@@ -10,6 +10,8 @@ from pydantic import SecretStr
 from devops_agent_platform.domain.exceptions import AppValidationError
 from devops_agent_platform.evaluation.live_runner import (
     LiveLLMConfig,
+    _normalize_llm_json,
+    _unwrap_json_fence,
     load_live_suite,
     run_live_benchmark,
 )
@@ -112,6 +114,52 @@ def write_input(tmp_path: Path, document: dict[str, object]) -> Path:
     return path
 
 
+def test_live_runner_unwraps_only_json_markdown_fences() -> None:
+    assert _unwrap_json_fence("```json\n{\"ok\": true}\n```") == (
+        '{"ok": true}'
+    )
+    assert _unwrap_json_fence('{"ok": true}') == '{"ok": true}'
+    assert _unwrap_json_fence("prefix\n```json\n{}\n```") == (
+        "prefix\n```json\n{}\n```"
+    )
+
+
+def test_live_runner_drops_invalid_self_loop_and_unknown_claim_type() -> None:
+    normalized = json.loads(
+        _normalize_llm_json(
+            json.dumps(
+                {
+                    "root_cause": None,
+                    "conclusion_status": "undetermined",
+                    "confidence": "LOW",
+                    "evidence_ids": ["ev-1", "ev-1"],
+                    "claims": [
+                        {
+                            "claim_type": "OBSERVATION",
+                            "statement": "ignored",
+                            "evidence_ids": [],
+                        }
+                    ],
+                    "causal_chain": [
+                        {
+                            "from_node": "checkout",
+                            "to_node": "checkout",
+                            "evidence_ids": [],
+                        }
+                    ],
+                    "affected_services": ["checkout", "checkout"],
+                }
+            )
+        )
+    )
+
+    assert normalized["confidence"] == 0.3
+    assert normalized["claims"] == []
+    assert normalized["causal_chain"] == []
+    assert normalized["evidence_ids"] == ["ev-1"]
+    assert normalized["affected_services"] == ["checkout"]
+
+
 @pytest.mark.asyncio
 async def test_live_runner_repeats_calls_without_ground_truth_leak(
     tmp_path: Path,
@@ -168,6 +216,50 @@ async def test_live_runner_repeats_calls_without_ground_truth_leak(
         assert forbidden not in serialized_requests
 
 
+@pytest.mark.asyncio
+async def test_live_runner_retries_transient_provider_transport_error(
+    tmp_path: Path,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            raise httpx.ReadError("temporary disconnect", request=request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": json.dumps(llm_output())}}],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        result = await run_live_benchmark(
+            scenario_directory=SCENARIO_ROOT,
+            input_path=write_input(tmp_path, live_input()),
+            output_directory=tmp_path / "artifacts",
+            git_commit="42665bd",
+            runs_per_scenario=1,
+            scenario_id="payment-error",
+            config=LiveLLMConfig(
+                base_url="http://llm.test/v1",
+                api_key=SecretStr("test-key"),
+                provider="reference",
+                model="synthetic-test",
+                allow_insecure_http=True,
+                max_retries=1,
+            ),
+            http_client=client,
+        )
+    finally:
+        await client.aclose()
+
+    assert len(requests) == 2
+    assert result["summary"]["total_runs"] == 1
+
+
 def test_live_input_rejects_ground_truth_at_any_depth(tmp_path: Path) -> None:
     document = live_input()
     cases = document["cases"]
@@ -176,6 +268,74 @@ def test_live_input_rejects_ground_truth_at_any_depth(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="forbidden key: ground_truth"):
         load_live_suite(write_input(tmp_path, document))
+
+
+@pytest.mark.asyncio
+async def test_real_mode_rejects_synthetic_suite_before_calling_provider(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="non-synthetic"):
+        await run_live_benchmark(
+            scenario_directory=SCENARIO_ROOT,
+            input_path=write_input(tmp_path, live_input()),
+            output_directory=tmp_path / "artifacts",
+            git_commit="42665bd",
+            runs_per_scenario=5,
+            config=LiveLLMConfig(
+                base_url="https://llm.test/v1",
+                api_key=SecretStr("test-key"),
+                provider="reference",
+                model="synthetic-test",
+            ),
+            require_real=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_real_mode_requires_five_runs_per_scenario(tmp_path: Path) -> None:
+    document = live_input()
+    document["synthetic"] = False
+
+    with pytest.raises(ValueError, match="exactly five runs"):
+        await run_live_benchmark(
+            scenario_directory=SCENARIO_ROOT,
+            input_path=write_input(tmp_path, document),
+            output_directory=tmp_path / "artifacts",
+            git_commit="42665bd",
+            runs_per_scenario=4,
+            scenario_id="payment-error",
+            config=LiveLLMConfig(
+                base_url="https://llm.test/v1",
+                api_key=SecretStr("test-key"),
+                provider="real-provider",
+                model="real-model",
+            ),
+            require_real=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_real_mode_rejects_simulation_suite(tmp_path: Path) -> None:
+    document = live_input()
+    document["synthetic"] = False
+    document["simulation"] = True
+
+    with pytest.raises(ValueError, match="simulation suite"):
+        await run_live_benchmark(
+            scenario_directory=SCENARIO_ROOT,
+            input_path=write_input(tmp_path, document),
+            output_directory=tmp_path / "artifacts",
+            git_commit="42665bd",
+            runs_per_scenario=5,
+            scenario_id="payment-error",
+            config=LiveLLMConfig(
+                base_url="https://llm.test/v1",
+                api_key=SecretStr("test-key"),
+                provider="simulation-provider",
+                model="simulation-model",
+            ),
+            require_real=True,
+        )
 
 
 @pytest.mark.asyncio

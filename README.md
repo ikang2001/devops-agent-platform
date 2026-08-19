@@ -5,13 +5,18 @@
 
 平台把告警接入、Incident 管理、只读证据采集、RCA 报告、人工反馈、工单草稿和审批式修复计划串成一条可审计链路。核心工程能力包括 Outbox、幂等、租约、Owner/Attempt Fence、审批门禁、低基数监控和敏感信息脱敏。
 
-默认 RCA 使用服务端发布的固定只读计划：
+RCA 支持服务端发布的固定只读计划，以及有界动态调查策略：
 
 ```text
 Metrics → Change → Logs → Traces → Runbooks → Evidence → RCA Report
 ```
 
-LLM 只负责生成供人工复核的结构化候选报告，不能把根因标记为 `CONFIRMED`。告警接入也不会自动启动 RCA，必须由授权操作员显式触发，或由未来单独接线的策略开关触发。
+当 `rca_investigation_policy=bounded_dynamic_v1` 时，Runtime 进入
+`BoundedDynamicInvestigator`。Planner 只能提交调查意图，后端负责工具白名单、权限、
+只读风险、拓扑服务范围、预算、超时、checkpoint/resume 和 Evidence 生成；它不是自由式
+ReAct，也不接受 SQL、PromQL、LogQL、TraceQL、Shell 或 Kubernetes 命令。
+
+LLM 只负责生成供人工复核的结构化候选报告，不能把根因标记为 `CONFIRMED`。告警接入也不会自动启动 RCA，必须由授权操作员显式触发。
 
 ## 快速导航
 
@@ -25,9 +30,14 @@ LLM 只负责生成供人工复核的结构化候选报告，不能把根因标�
 | MiniShop 端到端 RCA 导读 | [docs/minishop-e2e-rca-code-tour.md](docs/minishop-e2e-rca-code-tour.md) |
 | Change Event 到 RCA 闭环 | [docs/change-event-rca-loop.md](docs/change-event-rca-loop.md) |
 | Benchmark 基础评分闭环 | [docs/evaluation-benchmark-foundation.md](docs/evaluation-benchmark-foundation.md) |
+| 真实 Provider Benchmark 与消融 | [ops/evaluation/REAL_PROVIDER.md](ops/evaluation/REAL_PROVIDER.md) |
+| 生产级本地仿真验收 | [ops/simulation/README.md](ops/simulation/README.md) |
 | Reference staging 验收 | [ops/reference-staging/README.md](ops/reference-staging/README.md) |
 | AIOps 项目改造任务书 | [DevOps_Agent_AIOps_项目完善改造任务书.md](DevOps_Agent_AIOps_项目完善改造任务书.md) |
 | Benchmark 实施规范 | [DevOps_Agent_Evaluation_Benchmark_实施规范.md](DevOps_Agent_Evaluation_Benchmark_实施规范.md) |
+| 云智实习场景最终完善与简历口径 | [云智实习场景_AIOps项目最终完善与简历包装任务书.md](云智实习场景_AIOps项目最终完善与简历包装任务书.md) |
+| 项目面试与简历讲解 | [项目面试文档.md](项目面试文档.md) |
+| 当前完成度与外部验收边界 | [缺少内容.md](缺少内容.md) |
 | 部署说明 | [ops/deploy/README.md](ops/deploy/README.md) |
 | 运维 Runbook | [ops/runbooks](ops/runbooks) |
 
@@ -50,20 +60,27 @@ LLM 只负责生成供人工复核的结构化候选报告，不能把根因标�
 不能宣称：
 
 - 已承载真实生产流量；
-- Agent 会自由选择工具并进行自适应多轮推理；
+- Agent 会自由选择工具、自由执行命令或自动修复任意生产故障；
 - Prompt Registry、Feature Flag、向量 RAG 或反馈自动学习闭环已经在线自动运行；
 - 平台能够自动接管、重试任意外部写操作；
 - 本地 Compose、Mock 或单元测试等同于 staging / production 签字。
 
-仓库中的 Prompt Registry、Feature Flag 和 RAG 资产属于“仅示例或治理蓝图，运行时未接线”，对应的英文边界标记为 `Example Or Blueprint Only / Not Loaded By Runtime`。
+仓库中的 Prompt Registry、Feature Flag 资产仍属于治理蓝图；Historical Knowledge 已通过
+受控 `knowledge.search@v1` 接入有界动态调查，但它只作为历史参考，不会单独把当前事故升级为 `CONFIRMED`。
+
+### Example Or Blueprint Only / Not Loaded By Runtime
+
+`ops/product` 中的 Prompt Registry、Feature Flag、组织级 RAG 和部分自动策展文件是治理示例，
+不会被 `src/` 运行时自动加载；运行时只使用已注册的 `knowledge.search@v1` 和显式配置的策略。
 
 ## 当前完成状态
 
-本地工程交付已经完成：代码、迁移、测试、Benchmark、Reference staging、CI 和 v0.4.0 发布链路均已落地。下表把“本地可以证明的交付结果”和“必须由目标环境提供的外部证据”分开，外部证据不是本地代码缺陷，也不会被本地 Mock 或合成数据冒充。
+本地工程交付已经完成：代码、迁移、测试、Benchmark、Reference staging、CI 和 v0.5.0 发布链路均已落地。下表把“本地可以证明的交付结果”和“必须由目标环境提供的外部证据”分开，外部证据不是本地代码缺陷，也不会被本地 Mock 或合成数据冒充。
 
 | 阶段 | 本地交付结果 | 外部环境验收前置条件 |
 |---|---|---|
 | Step 4 工程主链路 | 已完成 Incident、Change Event、Outbox、RCA、Evidence、反馈和修复计划闭环；Reference staging 11/11 协议验收通过 | 若要声明生产可用，需要真实外部 staging/production 签字和商业 LLM 准确率 |
+| Dynamic RCA 与告警聚合 | `bounded_dynamic_v1` 已进入 Runtime；Topology/Knowledge Evidence 已纳入动态调查；AlertCorrelationService 已接入跨服务候选与 Alert Storm E2E | 真实观测栈、真实 LLM 和目标环境故障注入仍需外部验收 |
 | Step 5 生产化资产 | 已完成 Docker、Compose、Kubernetes 骨架、CI、安全门禁、100/500/1000 alerts/min 合成压测和四类 Chaos 证据 | 目标环境容量、备份恢复、恢复时间和生产故障注入签字 |
 | Step 6 产品面 | 已完成 Ops Console、反馈 API、Workspace API、HTTP MCP、离线策展和在线双审核人发布状态机 | 自动匿名化、真实 Web 产品、运行时 Prompt/Flag/RAG 和组织级发布流程需在目标环境接线 |
 
@@ -96,12 +113,16 @@ flowchart TB
     G --> H2[Change Event Store]
     G --> I[Loki]
     G --> J[Tempo]
-    G --> K[Runbook Catalog]
+    G --> K[Topology]
+    G --> K2[Historical Knowledge]
+    G --> K3[Runbook Catalog]
     H --> L[Evidence]
     H2 --> L
     I --> L
     J --> L
     K --> L
+    K2 --> L
+    K3 --> L
     L --> M[RCA Report]
     M --> N[人工反馈 / 工单草稿 / 修复计划]
     N --> O[审批与受控执行]
@@ -114,7 +135,7 @@ flowchart TB
 - `domain`：纯领域模型、枚举、状态机和领域异常；
 - `ports`：应用层依赖的出站契约；
 - `infrastructure`：数据库、Kafka、OIDC、观测、LLM、工单和修复适配器；
-- `agent`：固定调查计划、工作流执行和报告生成；
+- `agent`：固定调查计划、有界动态调查、工作流执行和报告生成；
 - `tools`：工具定义、版本注册、权限、风险和只读执行门禁；
 - `ops`：部署、监控、Runbook、评测、MiniShop E2E 和修复沙箱资产。
 
@@ -132,7 +153,7 @@ flowchart TB
 1. 具有 `incidents:rca` 权限的操作员显式创建 RCA。
 2. 事务内把 Incident 置为分析中、创建 `WorkflowRun` 并写入 `rca.requested` Outbox。
 3. Kafka Consumer 领取任务；执行 Claim 带 Worker、Attempt 和过期租约。
-4. Agent 按固定计划调用只读工具，并将有界、脱敏后的结果保存为 Evidence。
+4. Agent 按固定计划或有界动态意图调用只读工具，并将有界、脱敏后的结果保存为 Evidence。
 5. 工作流完成使用 Worker/Attempt Fence，迟到结果不能覆盖新接管者。
 6. 报告使用确定性生成器或可选 LLM，最终仍受 Evidence 引用和结论状态约束。
 
@@ -171,15 +192,17 @@ flowchart TB
 
 ## RCA 调查策略
 
-部署可以选择三种服务端固定计划：
+部署可以选择三种服务端固定计划，或启用一套有界动态调查：
 
 | 策略 | 调查步骤 | 适用环境 |
 |---|---|---|
 | `fixed_default` | Metrics → Change → Logs → Traces → Runbooks | Prometheus、Change Store、Loki、Tempo 均可用 |
 | `fixed_no_traces` | Metrics → Change → Logs → Runbooks | 没有 Tempo |
 | `fixed_metrics_logs_runbooks` | Metrics → Logs → Runbooks | 显式强调无 Change/Trace 的基线流程 |
+| `bounded_dynamic_v1` | Planner 按证据选择 Metrics/Logs/Change/Traces/Topology/Knowledge/Runbook | 需要严格预算、工具权限和拓扑边界 |
 
-这些策略是部署时选择的静态计划，不是运行时自适应工具选择。
+固定策略是部署时选择的静态计划；`bounded_dynamic_v1` 是服务端有界的规则优先动态调查，
+不是自由 ReAct。Topology 和 Knowledge 调查结果都会生成带来源的 Evidence。
 
 `continue_on_step_failure` 默认关闭。显式开启后，只读步骤失败可以继续采集其他证据，但仍满足以下护栏：
 
@@ -210,12 +233,12 @@ DEVOPS_AGENT_LLM_DASHSCOPE_API_KEY=inject-from-secret-manager
 
 支持的 Provider 名称为 `openai`、`dashscope`、`openai_compatible` 和 `custom`。旧版单 Provider 环境变量仍保留兼容，但新部署建议使用有序 Provider 配置。
 
-## MiniShop 端到端故障演练
+## 云原生微服务故障演练与评测环境（MiniShop 源码）
 
-仓库内置 MiniShop 电商下单故障演练靶场，用于跑通真实的本地告警到 RCA 路径：
+仓库内置一套云原生微服务故障演练与评测环境（源码目录保留 `MiniShop` 名称），用于跑通本地告警到 RCA 路径：
 
 ```text
-MiniShop → Prometheus / Loki / Tempo → Alertmanager → 平台 → Kafka → RCA → Ground Truth 评测
+云原生微服务演练环境 → Prometheus / Loki / Tempo → Alertmanager → 平台 → Kafka → RCA → Ground Truth 评测
 ```
 
 四个机器可读场景覆盖典型的下单故障，并通过 Manifest 与 Ground Truth 校验 RCA 报告：
@@ -239,7 +262,7 @@ ops/minishop-e2e/artifacts/results.json
 
 ### Benchmark 基础评分闭环
 
-MiniShop-v2 现有 12 个 Manifest 均定义了根因类型、Evidence 类型、有向因果边、影响服务
+该云原生微服务故障演练与评测环境的 v2 版本现有 12 个 Manifest 均定义了根因类型、Evidence 类型、有向因果边、影响服务
 以及期望/禁止工具。独立 Scorer 可以对结构化 Prediction 计算 RCA、Evidence、Claim、因果链、
 影响面和 Tool 指标，并生成 `results.json` 与中文 `evaluation-report.md`。
 
@@ -254,6 +277,39 @@ uv run python -m ops.evaluation.run_benchmark `
 
 该 fixture 只验证评分合同，不是实时 E2E 或真实 LLM 准确率。完整设计、指标和未实现
 边界见 [Benchmark 基础评分闭环](docs/evaluation-benchmark-foundation.md)。
+
+### 真实 Provider Benchmark 与消融
+
+真实模型运行必须使用非 synthetic 输入、有效凭据和独立输出目录。Runner 提供
+`--require-real` 门禁，要求完整 12 场景；默认每场景 5 次，即 60 次运行：
+
+```powershell
+$env:DEVOPS_AGENT_BENCHMARK_API_KEY = '<从密钥管理器注入>'
+uv run python -m ops.evaluation.run_live_benchmark `
+  --scenarios '.\MiniShop 电商下单故障演练靶场\scenarios' `
+  --input '.\ops\evaluation\artifacts\real-input.json' `
+  --output '.\ops\evaluation\artifacts\real-v1-<timestamp>' `
+  --git-commit (git rev-parse --short HEAD) `
+  --provider dashscope --model qwen3.5-plus `
+  --base-url 'https://dashscope.aliyuncs.com/compatible-mode/v1' `
+  --api-key-env DEVOPS_AGENT_BENCHMARK_API_KEY `
+  --input-cost-per-million 0.0 --output-cost-per-million 0.0 `
+  --runs-per-scenario 5 --require-real
+```
+
+五变体消融入口为 `python -m ops.evaluation.run_real_ablation`，变体名称固定为
+`baseline/change/topology/knowledge/dynamic`。它会拒绝 synthetic/reference 结果，校验
+每个变体 12×5，并对 RCA、Evidence、Unsupported Claim、Tool、Token、Cost、P50/P95
+延迟执行 Dynamic 门禁。没有真实凭据时只能运行 contract/reference，不得把结果写成真实模型效果。
+
+### 生产级本地仿真验收
+
+`ops/simulation` 复用真实 PostgreSQL、Redpanda、OIDC、Prometheus、Loki、Tempo 和平台 Worker，
+增加持久化 Ticketing 仿真服务，并直接调用项目根 `.env` 中的千问 OpenAI-compatible API；不部署本地 Ollama/vLLM 模型。
+它可以执行本地 12×5、成本/延迟、容量、Chaos 和恢复测试；所有结果明确标记
+`simulation=true`、`production_acceptance=false`，不会与真实 Provider 结果混淆。
+2026-08-19 已用真实千问 `qwen3.7-plus` 完成五变体各 12×5（共 300 次）消融，Dynamic 门禁 PASS；
+指标与证据边界见 [`docs/local-high-fidelity-simulation-acceptance.md`](docs/local-high-fidelity-simulation-acceptance.md)。
 
 ## 本地开发
 
@@ -308,7 +364,7 @@ uv run alembic upgrade head
 ```powershell
 uv build --out-dir dist
 uv run python scripts/check-release-version.py `
-  --tag v0.4.0 --dist-dir dist
+  --tag v0.5.0 --dist-dir dist
 ```
 
 Tag 流水线依次执行：
@@ -357,7 +413,23 @@ Tag 流水线依次执行：
 - 更新任务书完成清单、中文项目说明和 Reference staging 最终报告，明确 `synthetic=true`、`production_acceptance=false` 的证据边界；
 - 统一项目版本、Kubernetes 镜像、锁文件和发布检查到 `0.4.0`，使 Tag、构建产物和部署清单可追溯。
 
-本版本已通过 `1847 passed, 9 skipped` 全量测试、Ruff、Compose 配置校验和 Reference staging 11/11 验收。真实外部 staging/production 签字、真实 LLM 准确率、目标环境容量和生产故障注入仍需在具备凭据的环境中完成。
+本版本已通过 `1875 passed, 9 skipped` 全量测试、Ruff、Compose 配置校验和 Reference staging 11/11 验收。另已完成一轮真实千问 API 驱动的本地高保真仿真：12 场景 × 5 次、真实 PostgreSQL/Redpanda/OIDC/Prometheus/Loki/Tempo、Ticketing 幂等和四类故障注入均有独立证据；该结果明确标记为 `simulation=true`，不等同于生产签字。真实外部 staging/production 签字、目标环境容量和生产故障注入仍需在具备凭据的环境中完成。
+
+## v0.5.0 相比 v0.4.0 的完善
+
+`v0.5.0` 是面向“真实模型、真实组件、本地可复核证据”的工程完善版本。相较上一版，主要完成了以下修复和增强：
+
+- 新增生产级本地仿真轨道，使用真实 PostgreSQL、Redpanda/Kafka、OIDC/JWKS、Prometheus、Loki、Tempo、Worker、MCP 和持久化 Ticketing 服务；
+- 仿真直接调用项目 `.env` 中的 DashScope 千问 `qwen3.7-plus`，明确禁止 Ollama/vLLM 本地模型，不把 API Key 写入报告或 Git；
+- 完成 12 个 MiniShop 场景的真实千问 RCA 12×5 评测，并记录根因、证据、工具、Token、成本和 P50/P95 延迟；
+- 完成 baseline、change、topology、knowledge、dynamic 五变体消融，共 300 次真实调用；Dynamic 门禁通过，Evidence Recall 为 1.0、Unsupported Claim 为 0；
+- 为真实 LLM 传输层增加有上限的连接重试，并为消融脚本增加 `--resume`，中断后只恢复缺失变体，不复用部分结果；
+- 修复真实 Provider 消融元数据，准确记录变体调查策略，并增加安全并发参数；
+- 完成 100/500/1000 alerts/min 本地负载验证、Worker/Kafka/PostgreSQL/Loki 故障注入和观测超时 Partial Report 降级证据；
+- 增加中文本地高保真仿真验收报告，补齐任务书完成状态、生产边界、证据目录和清理说明；
+- 更新项目版本、Kubernetes 镜像示例、锁文件和发布检查到 `0.5.0`，使 Tag、构建产物和部署清单保持一致。
+
+本版本最终门禁为 `1875 passed, 9 skipped`、Ruff 通过、`uv lock --check` 通过、`git diff --check` 通过。真实千问仿真结果仍明确标记 `simulation=true`、`synthetic=false`、`production_acceptance=false`，不能替代企业生产签字。
 
 ## 部署与监控资产
 

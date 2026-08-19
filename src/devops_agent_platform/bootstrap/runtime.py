@@ -90,6 +90,9 @@ from devops_agent_platform.application.services.ticket_submission_service import
 from devops_agent_platform.application.services.tool_permission_admin_service import (
     ToolPermissionAdminService,
 )
+from devops_agent_platform.application.services.topology_service import (
+    TopologyService,
+)
 from devops_agent_platform.application.services.workspace_service import (
     WorkspaceService,
 )
@@ -122,6 +125,7 @@ from devops_agent_platform.infrastructure.adapters.sqlalchemy import (
     SQLAlchemyOutboxMetricsReader,
     SQLAlchemyRunbookAdminStore,
     SQLAlchemyToolPermissionAdminStore,
+    SQLAlchemyTopologyRepositoryStore,
     SQLAlchemyUnitOfWork,
     SQLAlchemyWorkspaceAdminStore,
 )
@@ -743,10 +747,25 @@ def build_runtime(
         """为每个用例创建独立事务边界。"""
         return SQLAlchemyUnitOfWork(session_factory)
 
+    topology_service = TopologyService(
+        SQLAlchemyTopologyRepositoryStore(session_factory)
+    )
+
+    async def topology_provider(
+        tenant_id: str,
+        environment: str,
+    ):
+        return await topology_service.query(
+            tenant_id,
+            environment=environment,
+            max_depth=8,
+        )
+
     alert_service = AlertApplicationService(
         unit_of_work_factory=unit_of_work_factory,
         incident_policy=IncidentCreationPolicy(),
         identifier_generator=identifier_generator,
+        topology_provider=topology_provider,
     )
     change_event_service = ChangeEventApplicationService(
         unit_of_work_factory=unit_of_work_factory,

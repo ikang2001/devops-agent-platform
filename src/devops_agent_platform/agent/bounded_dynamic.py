@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
@@ -14,7 +13,21 @@ from devops_agent_platform.domain.models.investigation import (
 )
 from devops_agent_platform.domain.models.topology import TopologyGraph
 from devops_agent_platform.ports.investigation import InvestigationCheckpointPort
+from devops_agent_platform.ports.investigation_codec import (
+    deserialize_investigation_state as _deserialize_investigation_state,
+)
+from devops_agent_platform.ports.investigation_codec import (
+    serialize_investigation_state as _serialize_investigation_state,
+)
 from devops_agent_platform.tools.registry import ToolRegistry
+
+
+def serialize_investigation_state(state: InvestigationState) -> str:
+    return _serialize_investigation_state(state)
+
+
+def deserialize_investigation_state(value: str) -> InvestigationState:
+    return _deserialize_investigation_state(value)
 
 
 class IntentPlannerPort(Protocol):
@@ -91,22 +104,68 @@ class InvestigationPolicyValidator:
             }
             if decision.target_service not in service_names:
                 return PolicyValidationResult(False, "SERVICE_OUTSIDE_TOPOLOGY", {})
-        payload = self._build_payload(state, decision)
+        try:
+            payload = self._build_payload(state, decision)
+        except AppValidationError:
+            return PolicyValidationResult(False, "INVALID_TOOL_PAYLOAD", {})
         return PolicyValidationResult(True, "ALLOWED", payload)
 
     @staticmethod
     def _build_payload(
         state: InvestigationState, decision: StepDecision
     ) -> dict[str, Any]:
-        # 只从服务端状态和固定边界生成参数；intent 中的任意 payload 字段都会被忽略。
+        """只生成各只读工具认可的有限参数，拒绝模型自带查询语句。"""
+        if decision.next_tool is None:
+            raise AppValidationError("dynamic payload requires a tool")
+        tool_name = decision.next_tool.rsplit("@", 1)[0]
+        service = decision.target_service or state.service_name
         payload: dict[str, Any] = {
             "tenant_id": state.tenant_id,
             "incident_id": state.incident_id,
-            "max_results": 20,
-            "window_minutes": 15,
         }
-        if decision.target_service is not None:
-            payload["service_name"] = decision.target_service
+        if tool_name == "metrics.query":
+            payload.update(
+                window_minutes=15,
+                max_series=40,
+                signals=[
+                    "availability",
+                    "request_rate",
+                    "error_ratio",
+                    "latency_p95",
+                ],
+            )
+        elif tool_name == "logs.query":
+            payload.update(
+                window_minutes=15,
+                limit=30,
+                signals=["errors", "timeouts", "resource_pressure"],
+            )
+        elif tool_name == "traces.query":
+            payload.update(
+                window_minutes=15,
+                limit=12,
+                signals=["errors", "slow_spans"],
+            )
+        elif tool_name == "changes.query":
+            payload["max_results"] = 20
+        elif tool_name == "runbooks.retrieve":
+            payload["max_results"] = 5
+        elif tool_name == "topology.query":
+            payload.update(max_depth=8, environment=state.environment)
+        elif tool_name == "knowledge.search":
+            if service is None:
+                raise AppValidationError("service is required for knowledge search")
+            payload.update(
+                service=service,
+                alert_summary=state.alert_summary,
+                error_fingerprint=state.error_fingerprint,
+                log_keywords=list(state.log_keywords),
+                trace_errors=list(state.trace_errors),
+                recent_change_type=state.recent_change_type,
+                top_k=5,
+            )
+        else:
+            raise AppValidationError(f"unsupported dynamic tool: {tool_name}")
         return payload
 
 
@@ -131,12 +190,27 @@ class BoundedDynamicInvestigator:
         topology: TopologyGraph | None = None,
     ) -> InvestigationState:
         while state.can_continue(self._now()):
-            decision = await planner.next_step(state)
+            try:
+                decision = await planner.next_step(state)
+            except Exception:
+                # Planner 故障不能被当作“证据充分”；保留已收集证据并
+                # 以失败停止，交给上层报告生成器决定是否输出 partial RCA。
+                state.mark_stop(InvestigationStopReason.FAILED)
+                if self._checkpoint is not None:
+                    await self._checkpoint.save(state)
+                break
             if not isinstance(decision, StepDecision):
-                raise AppValidationError("planner must return StepDecision")
+                state.mark_stop(InvestigationStopReason.POLICY_BLOCKED)
+                if self._checkpoint is not None:
+                    await self._checkpoint.save(state)
+                break
             validation = self._validator.validate(state, decision, topology=topology)
             if not validation.allowed:
+                if decision.next_tool is not None:
+                    state.record_tool(decision.next_tool, succeeded=False)
                 state.mark_stop(InvestigationStopReason.POLICY_BLOCKED)
+                if self._checkpoint is not None:
+                    await self._checkpoint.save(state)
                 break
             if decision.stop:
                 state.mark_stop(InvestigationStopReason.EVIDENCE_SUFFICIENT)
@@ -154,10 +228,13 @@ class BoundedDynamicInvestigator:
                     decision.next_tool or "", succeeded=True, evidence_ids=evidence_ids
                 )
                 if (
-                    not evidence_ids
-                    and state.step_count >= state.remaining_budget.max_steps
+                    state.step_count >= state.remaining_budget.max_steps
                 ):
-                    state.mark_stop(InvestigationStopReason.NO_ACTIONABLE_ROOT_CAUSE)
+                    state.mark_stop(
+                        InvestigationStopReason.NO_ACTIONABLE_ROOT_CAUSE
+                        if not evidence_ids
+                        else InvestigationStopReason.EVIDENCE_SUFFICIENT
+                    )
                 if self._checkpoint is not None:
                     await self._checkpoint.save(state)
             except Exception:
@@ -188,55 +265,3 @@ class BoundedDynamicInvestigator:
             execute_tool=execute_tool,
             topology=topology,
         )
-
-
-def serialize_investigation_state(state: InvestigationState) -> str:
-    return json.dumps(
-        {
-            "incident_id": state.incident_id,
-            "tenant_id": state.tenant_id,
-            "completed_steps": state.completed_steps,
-            "failed_steps": state.failed_steps,
-            "evidence_ids": state.evidence_ids,
-            "observed_signals": state.observed_signals,
-            "candidate_root_services": state.candidate_root_services,
-            "visited_tools": state.visited_tools,
-            "tool_call_counts": state.tool_call_counts,
-            "llm_calls": state.llm_calls,
-            "started_at": state.started_at.isoformat(),
-            "checkpoint_version": state.checkpoint_version,
-            "stop_reason": state.stop_reason.value if state.stop_reason else None,
-            "remaining_budget": state.remaining_budget.__dict__,
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-    )
-
-
-def deserialize_investigation_state(value: str) -> InvestigationState:
-    try:
-        payload = json.loads(value)
-        from devops_agent_platform.domain.models.investigation import (
-            InvestigationBudget,
-        )
-
-        return InvestigationState(
-            incident_id=payload["incident_id"],
-            tenant_id=payload["tenant_id"],
-            completed_steps=list(payload.get("completed_steps", [])),
-            failed_steps=list(payload.get("failed_steps", [])),
-            evidence_ids=list(payload.get("evidence_ids", [])),
-            observed_signals=list(payload.get("observed_signals", [])),
-            candidate_root_services=list(payload.get("candidate_root_services", [])),
-            visited_tools=list(payload.get("visited_tools", [])),
-            tool_call_counts=dict(payload.get("tool_call_counts", {})),
-            llm_calls=int(payload.get("llm_calls", 0)),
-            started_at=datetime.fromisoformat(payload["started_at"]),
-            checkpoint_version=int(payload.get("checkpoint_version", 1)),
-            stop_reason=InvestigationStopReason(payload["stop_reason"])
-            if payload.get("stop_reason")
-            else None,
-            remaining_budget=InvestigationBudget(**payload.get("remaining_budget", {})),
-        )
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise AppValidationError("investigation checkpoint is invalid") from exc

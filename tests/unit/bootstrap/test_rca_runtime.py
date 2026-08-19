@@ -167,6 +167,39 @@ async def test_bundle_wires_trace_free_partial_degrade_policy() -> None:
             await resource.close()
 
 
+async def test_bundle_wires_bounded_dynamic_tools_and_budget() -> None:
+    bundle = build_rca_consumer_runtime(
+        build_settings(
+            rca_investigation_policy="bounded_dynamic_v1",
+            rca_dynamic_max_steps=5,
+            rca_dynamic_max_total_duration_ms=12_000,
+            rca_dynamic_max_tool_calls_per_type=1,
+            rca_dynamic_max_evidence_count=25,
+            rca_dynamic_max_llm_calls=2,
+        ),
+        fake_session_factory,  # type: ignore[arg-type]
+    )
+    try:
+        workflow = (
+            bundle.worker._consumer._processor._handler
+            ._execution_coordinator._agent_workflow
+        )
+        assert workflow.__class__.__name__ == "BoundedDynamicRCAWorkflow"
+        assert workflow._budget.max_steps == 5
+        assert workflow._budget.max_total_duration_ms == 12_000
+        assert workflow._budget.max_tool_calls_per_type == 1
+        assert workflow._budget.max_evidence_count == 25
+        assert workflow._budget.max_llm_calls == 2
+        assert len(workflow._registry.list_tools()) == 7
+        assert len(workflow._tool_executor._registry.list_handlers()) == 7
+        assert workflow._tool_executor._registry.get(
+            "changes.query", "v1"
+        ).handler is not None
+    finally:
+        for resource in reversed(bundle.resources):
+            await resource.close()
+
+
 async def test_bundle_optionally_wires_resilient_llm_generator() -> None:
     """显式启用后才增加模型网关资源和弹性报告生成器。"""
     observer = RecordingReportObserver()

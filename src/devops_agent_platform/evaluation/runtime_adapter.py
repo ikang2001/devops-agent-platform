@@ -32,6 +32,8 @@ _EVIDENCE_TYPE_MAP = {
     DomainEvidenceType.CHANGE: EvidenceType.CHANGE,
     DomainEvidenceType.RUNBOOK: EvidenceType.RUNBOOK,
     DomainEvidenceType.INCIDENT_HISTORY: EvidenceType.KNOWLEDGE,
+    DomainEvidenceType.TOPOLOGY: EvidenceType.TOPOLOGY,
+    DomainEvidenceType.KNOWLEDGE: EvidenceType.KNOWLEDGE,
 }
 
 

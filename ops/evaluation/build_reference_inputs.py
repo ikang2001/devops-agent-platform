@@ -16,7 +16,11 @@ _SOURCE_TO_TOOL = {
 }
 
 
-def build_reference_suite(scenario_directory: Path) -> dict[str, Any]:
+def build_reference_suite(
+    scenario_directory: Path,
+    *,
+    simulation: bool = False,
+) -> dict[str, Any]:
     """从公开信号描述构造合成 Runtime 快照，不复制 Ground Truth。"""
     cases = []
     versions: set[str] = set()
@@ -68,7 +72,8 @@ def build_reference_suite(scenario_directory: Path) -> dict[str, Any]:
         "schema_version": "1.0",
         "suite": "minishop-v2-reference-runtime",
         "scenario_version": versions.pop(),
-        "synthetic": True,
+        "synthetic": not simulation,
+        "simulation": simulation,
         "cases": cases,
     }
 
@@ -77,10 +82,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build synthetic live benchmark input")
     parser.add_argument("--scenarios", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--simulation",
+        action="store_true",
+        help="mark the suite as a production-like local simulation",
+    )
     args = parser.parse_args(argv)
     if args.output.exists():
         raise ValueError("reference input already exists; choose a new output path")
-    document = build_reference_suite(args.scenarios)
+    document = build_reference_suite(args.scenarios, simulation=args.simulation)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n",

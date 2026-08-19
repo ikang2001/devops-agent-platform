@@ -6,8 +6,9 @@
 但评分主要围绕单次报告文本与必要 Evidence 是否出现，无法稳定比较根因服务、根因
 类型、因果链、影响面、Tool 选择、Unsupported Claim 和成本。
 
-本轮先建设确定性评分基础，并已把 Change Event 发布回归场景接入同一测量轨道；
-Topology、Historical Incident RAG 和 Bounded Dynamic Investigation 仍属于后续阶段。
+本轮先建设确定性评分基础，并已把 Change Event 发布回归、Topology、Historical Incident
+Knowledge 和 Bounded Dynamic Investigation 接入同一测量轨道；真实 Provider 结果仍保持
+独立门禁，不能用 reference/synthetic 夹具冒充模型效果。
 
 ## 目标与非目标
 
@@ -26,7 +27,7 @@ Topology、Historical Incident RAG 和 Bounded Dynamic Investigation 仍属于�
 - 不从自然语言报告猜测结构化根因；
 - 不把 reference Provider 运行包装成真实模型质量；
 - 不声称四场景 fixture 是真实准确率；
-- 不提前实现 Topology、RAG 或 Dynamic Investigation。
+- 不把 synthetic/reference 运行包装成 Real LLM 质量、生产容量或 Chaos 签字。
 
 ## 数据流与隔离
 
@@ -130,6 +131,12 @@ uv run --project '.\MiniShop 电商下单故障演练靶场' pytest -q `
 `RCAReport` → `RCAPrediction` Runtime Adapter 已实现并保持 Ground Truth 隔离；商业/生产
 Real LLM 多次运行、真实容量和成本数据仍未完成。reference-compatible Runner 已支持多轮、Token/成本/延迟统计并完成 60 次 synthetic stub
 运行（0/60），这些数字不能写成模型准确率。
+
+在上述合同夹具之外，`ops/simulation` 已提供独立的本地高保真轨道：使用真实千问
+`qwen3.7-plus` API 和真实开源组件完成 12×5 RCA 以及五变体各 12×5 消融（共 300 次），
+并产出真实成本、Token、延迟和准确率数据。该轨道所有结果都标记
+`simulation=true`、`production_acceptance=false`，不会进入 Real Provider 生产门禁；
+指标与边界见 [`docs/local-high-fidelity-simulation-acceptance.md`](local-high-fidelity-simulation-acceptance.md)。
 
 ## 面试可以说什么
 

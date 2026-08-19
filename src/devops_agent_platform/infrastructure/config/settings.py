@@ -27,6 +27,7 @@ _RCA_INVESTIGATION_POLICIES = frozenset(
         "fixed_default",
         "fixed_no_traces",
         "fixed_metrics_logs_runbooks",
+        "bounded_dynamic_v1",
     }
 )
 
@@ -118,6 +119,15 @@ class Settings(BaseSettings):
     )
     rca_continue_on_step_failure: bool = Field(default=False)
     rca_investigation_policy: str = Field(default="fixed_default")
+    rca_dynamic_max_steps: int = Field(default=7, ge=1, le=100)
+    rca_dynamic_max_total_duration_ms: int = Field(
+        default=30_000,
+        ge=1,
+        le=600_000,
+    )
+    rca_dynamic_max_tool_calls_per_type: int = Field(default=2, ge=1, le=20)
+    rca_dynamic_max_evidence_count: int = Field(default=100, ge=1, le=1000)
+    rca_dynamic_max_llm_calls: int = Field(default=3, ge=1, le=100)
     rca_consumer_shutdown_timeout_seconds: int = Field(
         default=30,
         ge=1,
@@ -748,7 +758,10 @@ class Settings(BaseSettings):
                 "prometheus_base_url": self.prometheus_base_url,
                 "loki_base_url": self.loki_base_url,
             }
-            if self.rca_investigation_policy == "fixed_default":
+            if self.rca_investigation_policy in {
+                "fixed_default",
+                "bounded_dynamic_v1",
+            }:
                 required_observability_endpoints["tempo_base_url"] = self.tempo_base_url
             self._require_non_empty_fields(
                 required_observability_endpoints,

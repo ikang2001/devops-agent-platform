@@ -1,0 +1,54 @@
+services:
+  ticketing-simulation:
+    image: devops-agent-platform:reference-staging
+    command: ["python", "/simulation/ticketing_server.py"]
+    # The named volume is created root-owned by Docker.  Keep the simulation
+    # service isolated and read-only, but allow its SQLite file to be created.
+    user: "0:0"
+    environment:
+      SIM_TICKETING_DB: /data/tickets.sqlite3
+    volumes:
+      # Compose resolves relative paths from the first compose file
+      # (ops/reference-staging), hence the explicit parent directory.
+      - ../simulation/ticketing_server.py:/simulation/ticketing_server.py:ro
+      - simulation-ticketing-data:/data
+    ports:
+      - "${SIM_TICKETING_PORT:-28083}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=2).read()",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  agent:
+    environment:
+      DEVOPS_AGENT_RCA_INVESTIGATION_POLICY: bounded_dynamic_v1
+      DEVOPS_AGENT_RCA_DYNAMIC_MAX_STEPS: "7"
+      DEVOPS_AGENT_RCA_DYNAMIC_MAX_TOTAL_DURATION_MS: "120000"
+      DEVOPS_AGENT_RCA_DYNAMIC_MAX_TOOL_CALLS_PER_TYPE: "2"
+      DEVOPS_AGENT_RCA_DYNAMIC_MAX_EVIDENCE_COUNT: "100"
+      DEVOPS_AGENT_RCA_DYNAMIC_MAX_LLM_CALLS: "3"
+      DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_API_STYLE: ${SIM_LLM_API_STYLE:-chat_completions}
+      DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_BASE_URL: ${SIM_LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_API_KEY: ${SIM_LLM_API_KEY:?SIM_LLM_API_KEY must come from the project .env}
+      DEVOPS_AGENT_LLM_OPENAI_COMPATIBLE_MODEL: ${SIM_LLM_MODEL:?SIM_LLM_MODEL must come from the project .env}
+      DEVOPS_AGENT_TICKETING_HTTP_JSON_ENDPOINT_URL: http://ticketing-simulation:8080/api/tickets
+    depends_on:
+      ticketing-simulation:
+        condition: service_healthy
+
+volumes:
+  simulation-ticketing-data:

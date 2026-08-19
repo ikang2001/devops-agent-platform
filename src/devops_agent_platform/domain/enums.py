@@ -164,6 +164,8 @@ class EvidenceType(StrEnum):
     CHANGE = "CHANGE"
     RUNBOOK = "RUNBOOK"
     INCIDENT_HISTORY = "INCIDENT_HISTORY"
+    TOPOLOGY = "TOPOLOGY"
+    KNOWLEDGE = "KNOWLEDGE"
 
 
 class RunbookStatus(StrEnum):
