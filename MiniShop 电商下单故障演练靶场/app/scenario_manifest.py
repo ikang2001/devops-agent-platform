@@ -197,6 +197,13 @@ class RootCause(FaultIdentity):
     runbook_path: RunbookPath
 
 
+ExpectedConclusionStatus = Literal[
+    "CANDIDATE",
+    "UNDETERMINED",
+    "NO_ACTIONABLE_ROOT_CAUSE",
+]
+
+
 class CausalEdge(ManifestModel):
     from_node: str = Field(min_length=1, max_length=256)
     to_node: str = Field(min_length=1, max_length=256)
@@ -209,7 +216,8 @@ class CausalEdge(ManifestModel):
 
 
 class GroundTruth(ManifestModel):
-    root_cause: RootCause
+    root_cause: RootCause | None = None
+    expected_conclusion_status: ExpectedConclusionStatus = "CANDIDATE"
     required_evidence: List[str] = Field(min_length=1, max_length=20)
     required_evidence_types: List[BenchmarkEvidenceType] = Field(
         min_length=1,
@@ -219,14 +227,50 @@ class GroundTruth(ManifestModel):
         default_factory=list,
         max_length=8,
     )
-    causal_chain: List[CausalEdge] = Field(min_length=1, max_length=16)
-    affected_services: List[str] = Field(min_length=1, max_length=20)
+    causal_chain: List[CausalEdge] = Field(default_factory=list, max_length=16)
+    affected_services: List[str] = Field(default_factory=list, max_length=20)
     forbidden_claims: List[str] = Field(min_length=1, max_length=20)
     expected_tool_types: List[str] = Field(min_length=1, max_length=20)
     forbidden_tool_types: List[str] = Field(min_length=1, max_length=20)
 
+    @model_validator(mode="before")
+    @classmethod
+    def default_conclusion_status(cls, value: object) -> object:
+        if (
+            not isinstance(value, dict)
+            or (
+                "expected_conclusion_status" in value
+                and value["expected_conclusion_status"] is not None
+            )
+        ):
+            return value
+        payload = dict(value)
+        payload["expected_conclusion_status"] = (
+            "CANDIDATE" if payload.get("root_cause") is not None else "NO_ACTIONABLE_ROOT_CAUSE"
+        )
+        return payload
+
     @model_validator(mode="after")
     def validate_unique_items(self) -> GroundTruth:
+        expected_status = self.expected_conclusion_status
+        if self.root_cause is None:
+            if expected_status == "CANDIDATE":
+                raise ValueError(
+                    "a candidate conclusion requires a root_cause"
+                )
+            if self.causal_chain or self.affected_services:
+                raise ValueError(
+                    "a no-root-cause scenario cannot define causal impact"
+                )
+        else:
+            if expected_status != "CANDIDATE":
+                raise ValueError(
+                    "a root_cause requires expected_conclusion_status CANDIDATE"
+                )
+            if not self.causal_chain or not self.affected_services:
+                raise ValueError(
+                    "a root-cause scenario must define causal impact"
+                )
         unique_fields = (
             "required_evidence",
             "required_evidence_types",
@@ -278,7 +322,10 @@ class ScenarioManifest(FaultIdentity):
         if self.alert_mapping.service_name != self.service_name:
             raise ValueError("alert_mapping service_name must match scenario service_name")
         root_cause = self.ground_truth.root_cause
-        if (root_cause.service_name, root_cause.fault_type) != identity:
+        if root_cause is not None and (
+            root_cause.service_name,
+            root_cause.fault_type,
+        ) != identity:
             raise ValueError("root cause identity must match scenario identity")
 
         signal_ids = [signal.evidence_id for signal in self.expected_signals]
@@ -296,7 +343,7 @@ class ScenarioManifest(FaultIdentity):
         }
         if required_types != set(self.ground_truth.required_evidence_types):
             raise ValueError("required_evidence_types must match required_evidence signal types")
-        if self.service_name not in self.ground_truth.affected_services:
+        if root_cause is not None and self.service_name not in self.ground_truth.affected_services:
             raise ValueError("affected_services must include the root cause service")
         return self
 
