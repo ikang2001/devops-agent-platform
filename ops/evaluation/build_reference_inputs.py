@@ -11,9 +11,25 @@ _SOURCE_TO_TOOL = {
     "tempo": "traces.query@v1",
     "change": "changes.query@v1",
     "topology": "topology.query@v1",
-    "knowledge": "knowledge.retrieve@v1",
+    "knowledge": "knowledge.search@v1",
     "http": "http.observe@v1",
 }
+
+
+def _entry_service(document: dict[str, Any]) -> str | None:
+    trigger = document.get("trigger")
+    if not isinstance(trigger, dict):
+        return None
+    path = trigger.get("path")
+    if not isinstance(path, str):
+        return None
+    segment = path.strip("/").split("/", 1)[0].strip().casefold()
+    if not segment or any(
+        character not in "abcdefghijklmnopqrstuvwxyz0123456789-"
+        for character in segment
+    ):
+        return None
+    return segment if segment.endswith("-service") else f"{segment}-service"
 
 
 def build_reference_suite(
@@ -58,6 +74,7 @@ def build_reference_suite(
                 "scenario_id": document["scenario_id"],
                 "incident_id": f"reference-{document['scenario_id']}",
                 "service_name": alert.get("service_name", document["service_name"]),
+                "entry_service": _entry_service(document),
                 "summary": alert.get("summary", "Synthetic reference incident"),
                 "evidence": evidence,
                 "tool_calls": tool_calls,

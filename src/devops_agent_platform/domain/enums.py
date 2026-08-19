@@ -189,6 +189,23 @@ class RCAConclusionStatus(StrEnum):
     UNDETERMINED = "UNDETERMINED"
     CANDIDATE = "CANDIDATE"
     CONFIRMED = "CONFIRMED"
+    NO_ACTIONABLE_ROOT_CAUSE = "NO_ACTIONABLE_ROOT_CAUSE"
+
+
+class RootCauseType(StrEnum):
+    """由 MiniShop v2 Ground Truth 版本化得到的根因分类。"""
+
+    APPLICATION_ERROR = "application_error"
+    CASCADING_FAILURE = "cascading_failure"
+    CONFIGURATION_ERROR = "configuration_error"
+    DEPENDENCY_LATENCY = "dependency_latency"
+    DEPENDENCY_TIMEOUT = "dependency_timeout"
+    DEPLOYMENT_REGRESSION = "deployment_regression"
+    KNOWN_ERROR = "known_error"
+    LATENCY = "latency"
+    NO_ACTIONABLE_ROOT_CAUSE = "no_actionable_root_cause"
+    RESOURCE_EXHAUSTION = "resource_exhaustion"
+    UNKNOWN = "unknown"
 
 
 class RCAFeedbackVerdict(StrEnum):

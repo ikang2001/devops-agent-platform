@@ -49,6 +49,18 @@ def test_simulation_suite_is_not_a_synthetic_or_real_acceptance_suite() -> None:
     assert len(suite["cases"]) == 12
 
 
+def test_reference_runtime_maps_knowledge_to_registered_search_tool() -> None:
+    suite = build_reference_suite(SCENARIO_ROOT, simulation=True)
+
+    calls_by_scenario = {
+        case["scenario_id"]: {call["tool_type"] for call in case["tool_calls"]}
+        for case in suite["cases"]
+    }
+    assert "topology.query@v1" in calls_by_scenario["cascading-failure"]
+    assert "knowledge.search@v1" in calls_by_scenario["known-error-repeat"]
+    assert "knowledge.search@v1" in calls_by_scenario["misleading-history"]
+
+
 def test_simulation_llm_defaults_to_configured_dashscope_api() -> None:
     settings = resolve_llm_settings(
         {

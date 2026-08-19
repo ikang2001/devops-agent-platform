@@ -22,6 +22,7 @@ from devops_agent_platform.agent.report_generator import (
 from devops_agent_platform.application.commands.workflow_execution import (
     ExecuteRCAWorkflowCommand,
 )
+from devops_agent_platform.causal_context import TopologyCausalContextBuilder
 from devops_agent_platform.domain.enums import (
     RCAConclusionStatus,
 )
@@ -334,41 +335,18 @@ class BoundedDynamicRCAWorkflow:
                 report,
                 summary=report.summary[: 4096 - len(marker)] + marker,
             )
-        if topology is None:
-            return report
-        topology_evidence = next(
-            (
-                item
-                for item in evidence
-                if item.tool_name == "topology.query"
-            ),
-            None,
-        )
-        if topology_evidence is None:
-            return report
-        root = report.suspected_root_node or f"service:{state.service_name}"
-        affected = report.affected_services or tuple(
-            node.service_name
-            for node in topology.nodes
-            if hasattr(node, "service_name") and node.service_name != state.service_name
-        )
-        causal_chain = report.causal_chain or tuple(
-            (
-                edge.source_node_id,
-                edge.target_node_id,
-                (topology_evidence.evidence_id,),
-            )
-            for edge in topology.edges
-        )
-        blast_radius = report.blast_radius or tuple(
-            (edge.target_node_id, edge.confidence) for edge in topology.edges
+        causal_context = TopologyCausalContextBuilder().build(
+            report=report,
+            incident_service=state.service_name,
+            topology=topology,
+            evidence=evidence,
         )
         return replace(
             report,
-            suspected_root_node=root,
-            affected_services=tuple(dict.fromkeys(affected)),
-            causal_chain=causal_chain,
-            blast_radius=blast_radius,
+            suspected_root_node=causal_context.root_node,
+            affected_services=causal_context.affected_services,
+            causal_chain=causal_context.causal_chain,
+            blast_radius=causal_context.blast_radius,
         )
 
 

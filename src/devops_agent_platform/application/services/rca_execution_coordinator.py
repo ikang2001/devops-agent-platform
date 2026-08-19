@@ -1,7 +1,9 @@
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import timedelta
+from time import perf_counter
 from typing import Protocol
 
 from devops_agent_platform.application.commands.workflow_execution import (
@@ -27,6 +29,22 @@ from devops_agent_platform.ports.workflow import (
 from devops_agent_platform.tools.sanitization import redact_sensitive_text
 
 WaitForStop = Callable[[asyncio.Event, float], Awaitable[bool]]
+logger = logging.getLogger(__name__)
+
+
+class RCAExecutionObserver(Protocol):
+    """记录一次已经成功收口的 RCA 执行指标。"""
+
+    def observe_rca(
+        self,
+        *,
+        outcome: str,
+        duration_seconds: float,
+        failed: bool = False,
+        partial: bool = False,
+    ) -> None:
+        """记录低基数 RCA 执行指标。"""
+        ...
 
 
 class WorkflowExecutionControlPort(Protocol):
@@ -93,11 +111,13 @@ class RCAExecutionCoordinator:
         execution_control: WorkflowExecutionControlPort,
         config: RCAExecutionCoordinatorConfig | None = None,
         wait_for_stop: WaitForStop | None = None,
+        observer: RCAExecutionObserver | None = None,
     ) -> None:
         self._agent_workflow = agent_workflow
         self._execution_control = execution_control
         self._config = config or RCAExecutionCoordinatorConfig()
         self._wait_for_stop = wait_for_stop or self._default_wait_for_stop
+        self._observer = observer
 
     async def execute(
         self,
@@ -106,6 +126,7 @@ class RCAExecutionCoordinator:
         worker_id: str,
     ) -> RCAExecutionResult:
         """执行已抢占任务，并在拥有有效租约时提交最终状态。"""
+        started = perf_counter()
         self._validate_claim(event, claim, worker_id)
         agent_command = ExecuteRCAWorkflowCommand(
             tenant_id=event.tenant_id,
@@ -149,7 +170,7 @@ class RCAExecutionCoordinator:
                 ),
             )
         )
-        return RCAExecutionResult(
+        result = RCAExecutionResult(
             workflow_run_id=completion.workflow_run_id,
             status=WorkflowRunStatus(completion.status),
             execution_attempt=completion.execution_attempts,
@@ -161,6 +182,39 @@ class RCAExecutionCoordinator:
             ),
             trace_id=completion.trace_id,
         )
+        self._observe_result(result, workflow_result, perf_counter() - started)
+        return result
+
+    def _observe_result(
+        self,
+        result: RCAExecutionResult,
+        workflow_result: AgentWorkflowResult | None,
+        duration_seconds: float,
+    ) -> None:
+        if self._observer is None:
+            return
+        outcome = (
+            "succeeded"
+            if result.status is WorkflowRunStatus.SUCCEEDED
+            else "failed"
+        )
+        partial = bool(
+            workflow_result is not None
+            and workflow_result.report is not None
+            and "Partial collection:" in workflow_result.report.summary
+        )
+        if partial and outcome == "succeeded":
+            outcome = "partial"
+        try:
+            self._observer.observe_rca(
+                outcome=outcome,
+                duration_seconds=duration_seconds,
+                failed=outcome == "failed",
+                partial=partial,
+            )
+        except Exception:
+            # 观测失败不能改变已经持久化的 RCA 终态，也不能触发消息重试。
+            logger.warning("记录 RCA 执行指标失败")
 
     async def _run_with_heartbeat(
         self,

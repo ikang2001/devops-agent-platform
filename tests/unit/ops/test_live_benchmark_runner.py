@@ -160,6 +160,53 @@ def test_live_runner_drops_invalid_self_loop_and_unknown_claim_type() -> None:
     assert normalized["affected_services"] == ["checkout"]
 
 
+def test_live_runner_clears_causal_impact_for_no_actionable_result() -> None:
+    normalized = json.loads(
+        _normalize_llm_json(
+            json.dumps(
+                {
+                    "root_cause": None,
+                    "conclusion_status": "NO_ACTIONABLE_ROOT_CAUSE",
+                    "confidence": 0.9,
+                    "evidence_ids": ["ev-fp"],
+                    "claims": [],
+                    "causal_chain": [
+                        {
+                            "from_node": "alert-rule",
+                            "to_node": "checkout-service",
+                            "evidence_ids": ["ev-fp"],
+                        }
+                    ],
+                    "affected_services": ["checkout-service"],
+                }
+            )
+        )
+    )
+
+    assert normalized["causal_chain"] == []
+    assert normalized["affected_services"] == []
+
+
+def test_live_runner_aligns_root_cause_and_conclusion_status() -> None:
+    normalized = json.loads(
+        _normalize_llm_json(
+            json.dumps(
+                {
+                    "root_cause": {
+                        "service": "payment-service",
+                        "type": "application_error",
+                        "resource": None,
+                    },
+                    "conclusion_status": "UNDETERMINED",
+                    "confidence": 0.7,
+                }
+            )
+        )
+    )
+
+    assert normalized["conclusion_status"] == "CANDIDATE"
+
+
 @pytest.mark.asyncio
 async def test_live_runner_repeats_calls_without_ground_truth_leak(
     tmp_path: Path,
@@ -208,12 +255,65 @@ async def test_live_runner_repeats_calls_without_ground_truth_leak(
     assert len(requests) == 2
     assert result["summary"]["total_runs"] == 2
     assert result["summary"]["passed_runs"] == 2
+    assert result["summary"]["candidate_recall_at_3"] == 1.0
+    assert result["summary"]["candidate_ranking_accuracy"] == 1.0
     assert result["execution"]["synthetic"] is True
     assert result["runs"][0]["estimated_cost"] == pytest.approx(0.0002)
     assert (tmp_path / "artifacts" / "predictions.json").is_file()
     serialized_requests = b"".join(request.content for request in requests).decode()
     for forbidden in ("ground_truth", "forbidden_claims", "expected_tool_types"):
         assert forbidden not in serialized_requests
+    assert "candidate_set" in serialized_requests
+    assert "application_error" in serialized_requests
+
+
+@pytest.mark.asyncio
+async def test_live_runner_falls_back_to_highest_scoring_candidate_on_undetermined(
+    tmp_path: Path,
+) -> None:
+    """候选器已有充分证据时，偶发的模型 UNDETERMINED 不应丢失最终选择。"""
+    output = {
+        "root_cause": None,
+        "conclusion_status": "UNDETERMINED",
+        "confidence": 0.2,
+        "evidence_ids": ["ev-metric", "ev-log", "ev-trace"],
+        "claims": [],
+        "causal_chain": [],
+        "affected_services": [],
+    }
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"content": json.dumps(output)}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                },
+            )
+        )
+    )
+    try:
+        result = await run_live_benchmark(
+            scenario_directory=SCENARIO_ROOT,
+            input_path=write_input(tmp_path, live_input()),
+            output_directory=tmp_path / "artifacts",
+            git_commit="42665bd",
+            runs_per_scenario=1,
+            scenario_id="payment-error",
+            config=LiveLLMConfig(
+                base_url="http://llm.test/v1",
+                api_key=SecretStr("test-key"),
+                provider="reference",
+                model="synthetic-test",
+                allow_insecure_http=True,
+            ),
+            http_client=client,
+        )
+    finally:
+        await client.aclose()
+
+    assert result["summary"]["passed_runs"] == 1
+    assert result["summary"]["rca_top1_accuracy"] == 1.0
 
 
 @pytest.mark.asyncio
@@ -355,6 +455,43 @@ async def test_live_runner_rejects_unknown_evidence_reference(tmp_path: Path) ->
     )
     try:
         with pytest.raises(AppValidationError, match="unknown evidence"):
+            await run_live_benchmark(
+                scenario_directory=SCENARIO_ROOT,
+                input_path=write_input(tmp_path, live_input()),
+                output_directory=tmp_path / "artifacts",
+                git_commit="42665bd",
+                runs_per_scenario=1,
+                scenario_id="payment-error",
+                config=LiveLLMConfig(
+                    base_url="http://llm.test/v1",
+                    api_key=SecretStr("test-key"),
+                    provider="reference",
+                    model="synthetic-test",
+                    allow_insecure_http=True,
+                ),
+                http_client=client,
+            )
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_live_runner_rejects_unknown_selected_candidate(tmp_path: Path) -> None:
+    output = llm_output()
+    output["selected_candidate_id"] = "cand-not-supplied"
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"content": json.dumps(output)}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                },
+            )
+        )
+    )
+    try:
+        with pytest.raises(AppValidationError, match="unknown candidate"):
             await run_live_benchmark(
                 scenario_directory=SCENARIO_ROOT,
                 input_path=write_input(tmp_path, live_input()),

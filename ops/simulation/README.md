@@ -39,6 +39,16 @@ python -m ops.simulation.run_simulation `
 Worker/Kafka/PostgreSQL/Loki 故障注入，并将所有证据写入 D 盘。默认结束后会
 停止并删除仿真 Compose 容器与卷；需要留存栈排查时可加 `--keep-stack`。
 
+容量测试结束后还会运行 RCA completion probe：真实创建 Incident、按 Incident 去重启动
+RCA、等待 Worker 终态，并从平台 Prometheus 指标计算完成率。结果会写入
+`rca-completion-probe.json`，同时回写到 `load-report.json` 的每个 profile，重新计算
+端到端门禁。
+
+真实 Provider 全量请求如果中断，可以把已完成主批次与只重跑受影响场景的 Prediction 交给
+`python -m ops.evaluation.merge_live_benchmark_shards`。合并器会校验模型、Prompt、Scenario
+和配置元数据，强制每场景 5 条、总计 60 条，并生成带输入 SHA-256 和替换 run_id 的 provenance；
+合并后的 Prediction 仍必须通过原有确定性 Scorer 重新评分。
+
 ## 五变体消融
 
 ```powershell

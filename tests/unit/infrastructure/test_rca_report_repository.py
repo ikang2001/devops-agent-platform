@@ -1,5 +1,6 @@
 import json
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -14,6 +15,7 @@ from devops_agent_platform.domain.enums import (
     AlertSeverity,
     IncidentStatus,
     RCAConclusionStatus,
+    RootCauseType,
     WorkflowRunStatus,
 )
 from devops_agent_platform.domain.exceptions import (
@@ -21,7 +23,7 @@ from devops_agent_platform.domain.exceptions import (
     ConflictError,
 )
 from devops_agent_platform.domain.models.incident import Incident
-from devops_agent_platform.domain.models.rca_report import RCAReport
+from devops_agent_platform.domain.models.rca_report import RCAReport, RCAReportCandidate
 from devops_agent_platform.domain.models.workflow_run import WorkflowRun
 from devops_agent_platform.infrastructure.adapters.sqlalchemy import (
     SQLAlchemyRCAReportRepository,
@@ -130,6 +132,43 @@ async def test_repository_persists_and_restores_structured_report(
     assert restored == report
     assert restored is not None
     assert restored.evidence_type_counts == (("LOG", 1),)
+
+
+async def test_repository_round_trips_root_cause_candidate_context(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    candidate = RCAReportCandidate(
+        candidate_id="cand-inventory-timeout",
+        service="inventory-service",
+        root_type=RootCauseType.DEPENDENCY_TIMEOUT,
+        resource="postgres",
+        score=0.9,
+        supporting_evidence_ids=("d" * 64,),
+        source_evidence_types=("LOG", "TRACE"),
+    )
+    report = replace(
+        build_report(),
+        conclusion_status=RCAConclusionStatus.CANDIDATE,
+        confidence=0.9,
+        suspected_root_node="inventory-service",
+        root_cause_type=RootCauseType.DEPENDENCY_TIMEOUT,
+        root_cause_resource="postgres",
+        selected_candidate_id=candidate.candidate_id,
+        root_cause_candidates=(candidate,),
+    )
+    async with session_factory() as session:
+        repository = SQLAlchemyRCAReportRepository(session)
+        await repository.save(report)
+        await session.commit()
+
+    async with session_factory() as session:
+        restored = await SQLAlchemyRCAReportRepository(
+            session
+        ).get_by_workflow_run("tenant_001", "wfr_001")
+
+    assert restored == report
+    assert restored is not None
+    assert restored.root_cause_candidates == (candidate,)
 
 
 async def test_repository_does_not_commit_outer_transaction(

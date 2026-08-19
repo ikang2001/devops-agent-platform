@@ -32,7 +32,7 @@ TOOL_PREFIXES = {
     "traces": "traces.query@v1",
     "changes": "changes.query@v1",
     "topology": "topology.query@v1",
-    "knowledge": "knowledge.retrieve@v1",
+    "knowledge": "knowledge.search@v1",
     "runbooks": "runbooks.retrieve@v1",
 }
 

@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -35,6 +35,13 @@ class ConclusionStatus(StrEnum):
     NO_ACTIONABLE_ROOT_CAUSE = "NO_ACTIONABLE_ROOT_CAUSE"
 
 
+ExpectedConclusionStatus = Literal[
+    ConclusionStatus.UNDETERMINED,
+    ConclusionStatus.CANDIDATE,
+    ConclusionStatus.NO_ACTIONABLE_ROOT_CAUSE,
+]
+
+
 class ClaimType(StrEnum):
     ROOT_CAUSE = "ROOT_CAUSE"
     CHANGE = "CHANGE"
@@ -53,6 +60,31 @@ class RootCauseRef(_Model):
     service: str = Field(min_length=1, max_length=128)
     type: str = Field(min_length=1, max_length=128)
     resource: str | None = Field(default=None, max_length=256)
+
+
+class RootCauseCandidateRef(_Model):
+    """进入最终选择器的、按分数降序排列的根因候选快照。"""
+
+    candidate_id: str = Field(min_length=1, max_length=64)
+    root_cause: RootCauseRef
+    score: float = Field(ge=0, le=1)
+    supporting_evidence_ids: tuple[str, ...] = ()
+    contradicting_evidence_ids: tuple[str, ...] = ()
+    source_evidence_types: tuple[EvidenceType, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_candidate(self) -> RootCauseCandidateRef:
+        support = self.supporting_evidence_ids
+        contradiction = self.contradicting_evidence_ids
+        if len(support) != len(set(support)):
+            raise ValueError("supporting_evidence_ids must be unique")
+        if len(contradiction) != len(set(contradiction)):
+            raise ValueError("contradicting_evidence_ids must be unique")
+        if set(support) & set(contradiction):
+            raise ValueError("support and contradiction evidence must be disjoint")
+        if len(self.source_evidence_types) != len(set(self.source_evidence_types)):
+            raise ValueError("source_evidence_types must be unique")
+        return self
 
 
 class CausalEdge(_Model):
@@ -111,6 +143,10 @@ class RCAPrediction(_Model):
     claims: tuple[Claim, ...] = ()
     causal_chain: tuple[CausalEdge, ...] = ()
     affected_services: tuple[str, ...] = ()
+    root_cause_candidates: tuple[RootCauseCandidateRef, ...] = Field(
+        default=(),
+        max_length=5,
+    )
     tool_calls: tuple[ToolCall, ...] = ()
     investigation_steps: int = Field(ge=0)
     llm_calls: int = Field(ge=0)
@@ -126,6 +162,22 @@ class RCAPrediction(_Model):
             raise ValueError("evidence_types must be unique")
         if len(self.affected_services) != len(set(self.affected_services)):
             raise ValueError("affected_services must be unique")
+        candidate_ids = [item.candidate_id for item in self.root_cause_candidates]
+        if len(candidate_ids) != len(set(candidate_ids)):
+            raise ValueError("candidate_id values must be unique")
+        candidate_roots = [
+            (
+                item.root_cause.service,
+                item.root_cause.type,
+                item.root_cause.resource,
+            )
+            for item in self.root_cause_candidates
+        ]
+        if len(candidate_roots) != len(set(candidate_roots)):
+            raise ValueError("root cause candidates must be unique")
+        scores = [item.score for item in self.root_cause_candidates]
+        if scores != sorted(scores, reverse=True):
+            raise ValueError("root cause candidates must be sorted by score")
         if self.root_cause is None and self.conclusion_status in {
             ConclusionStatus.CANDIDATE,
             ConclusionStatus.CONFIRMED,
@@ -149,6 +201,10 @@ class ScenarioGroundTruth(_Model):
     scenario_id: str = Field(min_length=1, max_length=64)
     scenario_version: str = Field(min_length=1, max_length=32)
     root_cause: RootCauseRef | None
+    expected_conclusion_status: ExpectedConclusionStatus = ConclusionStatus.CANDIDATE
+    # Ground Truth 的 Evidence ID 是稳定的事实引用；不要把它和 EvidenceType
+    # 混为一谈。旧版的内存构造数据可能没有 ID，因此保留空元组表示 N/A。
+    required_evidence_ids: tuple[str, ...] = ()
     required_evidence_types: tuple[EvidenceType, ...] = Field(min_length=1)
     optional_evidence_types: tuple[EvidenceType, ...] = ()
     causal_chain: tuple[CausalEdge, ...] = ()
@@ -157,11 +213,31 @@ class ScenarioGroundTruth(_Model):
     expected_tool_types: tuple[str, ...] = Field(min_length=1)
     forbidden_tool_types: tuple[str, ...] = Field(min_length=1)
 
+    @model_validator(mode="before")
+    @classmethod
+    def default_expected_conclusion_status(cls, value: object) -> object:
+        if (
+            not isinstance(value, Mapping)
+            or (
+                "expected_conclusion_status" in value
+                and value["expected_conclusion_status"] is not None
+            )
+        ):
+            return value
+        payload = dict(value)
+        payload["expected_conclusion_status"] = (
+            ConclusionStatus.CANDIDATE
+            if payload.get("root_cause") is not None
+            else ConclusionStatus.NO_ACTIONABLE_ROOT_CAUSE
+        )
+        return payload
+
     @model_validator(mode="after")
     def validate_ground_truth(self) -> ScenarioGroundTruth:
         if set(self.required_evidence_types) & set(self.optional_evidence_types):
             raise ValueError("required and optional evidence types must be disjoint")
         for field_name in (
+            "required_evidence_ids",
             "required_evidence_types",
             "optional_evidence_types",
             "affected_services",
@@ -177,8 +253,15 @@ class ScenarioGroundTruth(_Model):
         edges = [(item.from_node, item.to_node) for item in self.causal_chain]
         if len(edges) != len(set(edges)):
             raise ValueError("causal_chain edges must be unique")
-        if self.root_cause is None and (self.causal_chain or self.affected_services):
-            raise ValueError("a no-root-cause scenario cannot define causal impact")
+        if self.root_cause is None:
+            if self.expected_conclusion_status is ConclusionStatus.CANDIDATE:
+                raise ValueError("a candidate conclusion requires a root_cause")
+            if self.causal_chain or self.affected_services:
+                raise ValueError("a no-root-cause scenario cannot define causal impact")
+        elif self.expected_conclusion_status is not ConclusionStatus.CANDIDATE:
+            raise ValueError(
+                "a root_cause requires expected_conclusion_status CANDIDATE"
+            )
         return self
 
     @classmethod
@@ -203,7 +286,10 @@ class ScenarioGroundTruth(_Model):
         else:
             raise ValueError("ground_truth.root_cause must be an object or null")
         required = ground_truth.get("required_evidence_types")
+        required_ids = ground_truth.get("required_evidence", [])
         optional = ground_truth.get("optional_evidence_types", [])
+        if not isinstance(required_ids, list):
+            raise ValueError("ground_truth.required_evidence must be a list")
         chain = ground_truth.get("causal_chain")
         if not isinstance(required, list):
             raise ValueError("ground_truth.required_evidence_types is required")
@@ -216,6 +302,16 @@ class ScenarioGroundTruth(_Model):
                 "scenario_id": scenario_id,
                 "scenario_version": schema_version,
                 "root_cause": root_payload,
+                **(
+                    {
+                        "expected_conclusion_status": ground_truth[
+                            "expected_conclusion_status"
+                        ]
+                    }
+                    if "expected_conclusion_status" in ground_truth
+                    else {}
+                ),
+                "required_evidence_ids": required_ids,
                 "required_evidence_types": required,
                 "optional_evidence_types": optional,
                 "causal_chain": chain,

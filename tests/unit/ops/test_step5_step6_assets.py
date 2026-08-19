@@ -25,11 +25,11 @@ def test_root_readme_keeps_chinese_product_and_release_boundaries() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert readme.startswith("# DevOps 智能排障 Agent 平台\n")
-    assert "## 项目定位与诚实边界" in readme
-    assert "## 发布与供应链门禁" in readme
-    assert "Example Or Blueprint Only / Not Loaded By Runtime" in readme
+    assert "## 核心能力" in readme
+    assert "## 生产级本地仿真" in readme
+    assert "## 发布" in readme
     assert f"--tag v{project_version()} --dist-dir dist" in readme
-    assert "相比 v0.3.3 的完善" in readme
+    assert "v0.6.0 相比 v0.5.0" in readme
 
 
 def test_step5_container_image_is_non_root_and_uses_real_app_entrypoint() -> None:

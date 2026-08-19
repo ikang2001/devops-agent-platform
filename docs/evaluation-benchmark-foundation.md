@@ -50,9 +50,9 @@ Ground Truth、Forbidden Claims 和 Expected Tools 只由 Runner/Scorer 读取�
 ## 关键类型
 
 - `ScenarioGroundTruth`：从 Manifest 提取评分所需的根因、Evidence 类型、因果边、
-  影响服务和 Tool 约束。
+  影响服务、稳定的必需 Evidence ID、结论状态和 Tool 约束。
 - `RCAPrediction`：记录结构化根因、结论状态、Evidence、关键 Claim、因果边、
-  影响服务、Tool Trace、延迟、Token 和成本。
+  影响服务、候选根因快照、Tool Trace、延迟、Token 和成本。
 - `BenchmarkScorer`：对单次运行执行确定性评分。
 - `RunScore` / `Summary`：分别保存单次和聚合指标。
 - `run_benchmark`：绑定输入版本、校验场景覆盖并写出不可静默覆盖的资产。
@@ -69,8 +69,15 @@ Evidence 类型采用平台现有枚举语义 `METRIC`，没有另造文档示�
 ```text
 Root Service Accuracy
 Root Type Accuracy
+Root Resource Accuracy
 RCA Exact / Strict Match
+Candidate Recall@3 / MRR / Ranking Accuracy
+Conclusion Status Accuracy
+Undetermined Precision / Recall
+No Actionable Root Cause Accuracy
 Evidence Precision / Recall / F1
+Required Evidence ID Recall
+Change / History Over-attribution Rate
 Unsupported Claim Rate
 Forbidden Claim Rate
 False Positive Root Cause
@@ -83,8 +90,31 @@ Policy Block Rate
 Latency / Tool Calls / LLM Calls / Tokens / Cost
 ```
 
-Scorer 采用有向 Edge Set 评估因果链，反转边不会被视为正确。无根因场景必须同时
+Scorer 采用有向 Edge Set 评估因果链，反转边不会被视为正确。Evidence Type Recall
+只判断类型集合；`Required Evidence ID Recall` 进一步判断是否引用了 Manifest 指定的
+事实 ID，避免“拿到了同类型但错误事实”被误判为完整召回。无根因场景使用
+`root_cause: null` + `expected_conclusion_status: NO_ACTIONABLE_ROOT_CAUSE`，必须同时
 没有因果链和影响面；Agent 强行输出根因会命中 False Positive。
+
+## RCA 准确率优化链路
+
+生产报告生成器现在按以下顺序收敛推理空间：
+
+```text
+Evidence
+  → Evidence Normalization
+  → Root Cause Candidate Generation
+  → Support / Contradiction
+  → Deterministic Candidate Scoring
+  → LLM Candidate Selection
+  → RCA Report
+```
+
+候选集合最多保留 3 个，候选包含支持/反证 Evidence ID、来源类型、分数和缺失证据。
+LLM 只能选择后端给出的候选；未知候选、候选与结构化根因不一致、低分候选和非法
+Root Cause 类型都会 fail closed 并回退到 `UNDETERMINED`。Root CauseTaxonomyMapper
+把 `db_timeout`、`database timeout`、`postgres timeout` 等别名归一化到统一枚举，
+未知类型不会被硬猜成已知故障。
 
 ## 失败策略
 
@@ -123,9 +153,10 @@ uv run --project '.\MiniShop 电商下单故障演练靶场' pytest -q `
 
 ## 已实现与未实现边界
 
-当前已完成 Benchmark Phase 1/2 的本地可复现闭环：12 个场景 Manifest、Ground Truth
-与 Runtime 隔离、结构化 Prediction 合同、确定性 Scorer、消融报告、Bad Case 输出以及
-确定性合同夹具。`ops/evaluation/artifacts/minishop-v2-contract-20260818` 记录了 12/12
+当前已完成 Benchmark Phase 1/2 以及 RCA 准确率优化核心链路：12 个场景 Manifest、
+Ground Truth 与 Runtime 隔离、结构化 Prediction 合同、无可执行根因状态、确定性候选
+评分、Candidate Recall/MRR、Evidence ID Recall、消融报告、Bad Case 输出以及确定性
+合同夹具。`ops/evaluation/artifacts/minishop-v2-contract-20260818` 记录了 12/12
 通过结果，并明确标记为 `contract_fixture=true`。
 
 `RCAReport` → `RCAPrediction` Runtime Adapter 已实现并保持 Ground Truth 隔离；商业/生产

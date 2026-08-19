@@ -26,6 +26,7 @@ from devops_agent_platform.application.services.rca_consumer_runner import (
 from devops_agent_platform.application.services.rca_execution_coordinator import (
     RCAExecutionCoordinator,
     RCAExecutionCoordinatorConfig,
+    RCAExecutionObserver,
 )
 from devops_agent_platform.application.services.rca_record_processor import (
     RCARequestedRecordProcessor,
@@ -119,6 +120,7 @@ def build_rca_consumer_runtime(
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
     report_observer: LLMReportGenerationObserverPort | None = None,
+    execution_observer: RCAExecutionObserver | None = None,
 ) -> RCAConsumerRuntimeBundle:
     """装配消息消费、租约协调、只读工具和可选 LLM 报告链路。
 
@@ -372,6 +374,7 @@ def build_rca_consumer_runtime(
                 seconds=settings.rca_consumer_execution_timeout_seconds
             ),
         ),
+        observer=execution_observer,
     )
     handler = RCARequestedMessageHandler(
         workflow_execution_service=execution_service,

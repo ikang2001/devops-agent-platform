@@ -3,8 +3,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from devops_agent_platform.domain.enums import EvidenceType
+from devops_agent_platform.domain.enums import EvidenceType, RCAConclusionStatus
 from devops_agent_platform.domain.exceptions import AppValidationError
+from devops_agent_platform.domain.models.rca_report import RCAReportCandidate
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,8 @@ class LLMReportRequest:
     trace_id: str
     prompt_version: str
     evidence: tuple[LLMReportEvidence, ...]
+    candidates: tuple[RCAReportCandidate, ...] = ()
+    recommended_status: RCAConclusionStatus = RCAConclusionStatus.UNDETERMINED
 
     def __post_init__(self) -> None:
         """校验请求身份和容量，避免适配器绕过上游约束。"""
@@ -73,6 +76,18 @@ class LLMReportRequest:
         evidence_ids = [item.evidence_id for item in self.evidence]
         if len(evidence_ids) != len(set(evidence_ids)):
             raise AppValidationError("evidence IDs must be unique")
+        if (
+            not isinstance(self.candidates, tuple)
+            or len(self.candidates) > 5
+            or not all(isinstance(item, RCAReportCandidate) for item in self.candidates)
+        ):
+            raise AppValidationError("candidates must contain at most five items")
+        for candidate in self.candidates:
+            candidate.validate()
+        if not isinstance(self.recommended_status, RCAConclusionStatus):
+            raise AppValidationError("recommended_status is invalid")
+        if self.recommended_status is RCAConclusionStatus.CONFIRMED:
+            raise AppValidationError("recommended_status cannot be confirmed")
 
 
 class LLMReportGatewayPort(Protocol):

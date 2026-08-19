@@ -122,12 +122,19 @@ def test_runner_writes_machine_and_human_readable_artifacts(tmp_path: Path) -> N
     )
 
     stored = json.loads((output / "results.json").read_text(encoding="utf-8"))
+    breakdown = json.loads(
+        (output / "root-cause-error-breakdown.json").read_text(encoding="utf-8")
+    )
     report = (output / "evaluation-report.md").read_text(encoding="utf-8")
     assert result == stored
     assert stored["summary"]["total_runs"] == 1
     assert stored["summary"]["passed_runs"] == 1
     assert "ground_truth" not in stored
+    assert breakdown["total_failed_runs"] == 0
+    assert breakdown["failure_types"] == {}
     assert "# AIOps Benchmark 评测报告" in report
+    assert "Strict RCA Top-1" in report
+    assert "Candidate Recall@3" in report
     assert "不等同于真实生产环境或真实 LLM 验收" in report
 
 

@@ -17,24 +17,38 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
+from devops_agent_platform.domain.enums import RootCauseType
 from devops_agent_platform.domain.exceptions import AppValidationError
+from devops_agent_platform.evaluation.causal_builder import (
+    RuntimeCausalContextBuilder,
+    RuntimeEvidenceFact,
+)
 from devops_agent_platform.evaluation.runner import run_benchmark_input
 from devops_agent_platform.evaluation.schemas import (
     BenchmarkInput,
     BenchmarkMetadata,
     CausalEdge,
     Claim,
+    ClaimType,
     ConclusionStatus,
     EvidenceType,
     RCAPrediction,
+    RootCauseCandidateRef,
     RootCauseRef,
     ToolCall,
 )
+from devops_agent_platform.rca_reasoning import (
+    ReasoningEvidence,
+    ReasoningEvidenceType,
+    RootCauseReasoningPipeline,
+    RootCauseReasoningResult,
+)
 
-PROMPT_VERSION = "real-llm-rca-v1"
+PROMPT_VERSION = "real-llm-rca-v2-candidate-review"
 SYSTEM_PROMPT = """You are evaluating a bounded incident investigation snapshot.
-Return exactly one JSON object with these keys: root_cause, conclusion_status,
-confidence, evidence_ids, claims, causal_chain, affected_services.
+Return exactly one JSON object with these keys: selected_candidate_id, root_cause,
+conclusion_status, confidence, evidence_ids, claims, causal_chain,
+affected_services.
 Use only supplied evidence IDs. Do not invent tool results. root_cause is null or
 an object with service, type, resource. conclusion_status is CANDIDATE,
 UNDETERMINED, or NO_ACTIONABLE_ROOT_CAUSE; never return CONFIRMED. claims contain
@@ -42,8 +56,11 @@ claim_type, statement, evidence_ids. claim_type MUST be one of ROOT_CAUSE,
 CHANGE, DEPENDENCY_FAILURE, AFFECTED_SERVICE, or CAUSAL_EDGE; never use
 OBSERVATION. confidence MUST be a JSON number between 0 and 1, never a word such
 as LOW or HIGH. causal_chain contains from_node, to_node, evidence_ids. Do not
-use Markdown fences or add prose outside the JSON object. If evidence is
-insufficient, return no actionable root cause."""
+use Markdown fences or add prose outside the JSON object. Select only one of the
+provided candidates. selected_candidate_id must be null only when no candidate is
+supported. The root_cause object must match the selected candidate. For the
+no_actionable_root_cause candidate, return root_cause=null and
+NO_ACTIONABLE_ROOT_CAUSE. If evidence is insufficient, return UNDETERMINED."""
 
 _FORBIDDEN_INPUT_KEYS = frozenset(
     {
@@ -77,6 +94,7 @@ class LiveScenarioInput(_Model):
     scenario_id: str = Field(min_length=1, max_length=64)
     incident_id: str = Field(min_length=1, max_length=128)
     service_name: str = Field(min_length=1, max_length=256)
+    entry_service: str | None = Field(default=None, min_length=1, max_length=256)
     summary: str = Field(min_length=1, max_length=4096)
     evidence: tuple[LiveEvidence, ...] = Field(min_length=1, max_length=100)
     tool_calls: tuple[ToolCall, ...] = Field(default=(), max_length=100)
@@ -116,6 +134,7 @@ class LiveSuiteInput(_Model):
 
 
 class LLMRCAOutput(_Model):
+    selected_candidate_id: str | None = None
     root_cause: RootCauseRef | None
     conclusion_status: ConclusionStatus
     confidence: float = Field(ge=0, le=1)
@@ -415,6 +434,14 @@ def _normalize_llm_json(text: str) -> str:
     status = result.get("conclusion_status")
     if isinstance(status, str):
         result["conclusion_status"] = status.strip().upper()
+    if result.get("root_cause") is not None and result.get(
+        "conclusion_status"
+    ) not in {"CANDIDATE"}:
+        result["conclusion_status"] = "CANDIDATE"
+    if result.get("root_cause") is None and result.get(
+        "conclusion_status"
+    ) == "CANDIDATE":
+        result["conclusion_status"] = "UNDETERMINED"
 
     result["evidence_ids"] = _unique_strings(result.get("evidence_ids", ()))
     result["affected_services"] = _unique_strings(
@@ -467,6 +494,9 @@ def _normalize_llm_json(text: str) -> str:
             }
         )
     result["causal_chain"] = causal_chain
+    if result.get("conclusion_status") == "NO_ACTIONABLE_ROOT_CAUSE":
+        result["causal_chain"] = []
+        result["affected_services"] = []
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -528,8 +558,9 @@ async def run_live_benchmark(
 
         async def execute(job: tuple[LiveScenarioInput, int]) -> RCAPrediction:
             case, run_index = job
-            call = await client.complete(_render_runtime_prompt(case))
-            return _build_prediction(case, run_index, call, config)
+            reasoning = _build_reasoning(case)
+            call = await client.complete(_render_runtime_prompt(case, reasoning))
+            return _build_prediction(case, run_index, call, config, reasoning)
 
         if max_concurrency == 1:
             predictions = [await execute(job) for job in jobs]
@@ -586,16 +617,37 @@ async def run_live_benchmark(
     )
 
 
-def _render_runtime_prompt(case: LiveScenarioInput) -> str:
+def _render_runtime_prompt(
+    case: LiveScenarioInput,
+    reasoning: RootCauseReasoningResult | None = None,
+) -> str:
     payload = {
         "incident": {
             "incident_id": case.incident_id,
             "service_name": case.service_name,
+            "entry_service": case.entry_service,
             "summary": case.summary,
         },
         "evidence": [item.model_dump(mode="json") for item in case.evidence],
         "executed_tool_calls": [
             item.model_dump(mode="json") for item in case.tool_calls
+        ],
+        "candidate_set": [
+            {
+                "candidate_id": item.candidate_id,
+                "root_cause": {
+                    "service": item.identity.service,
+                    "type": item.identity.root_type.value,
+                    "resource": item.identity.resource,
+                },
+                "score": item.final_score,
+                "supporting_evidence_ids": list(item.supporting_evidence_ids),
+                "contradicting_evidence_ids": list(
+                    item.contradicting_evidence_ids
+                ),
+                "missing_evidence": list(item.missing_evidence),
+            }
+            for item in (reasoning.candidates if reasoning is not None else ())
         ],
     }
     serialized = json.dumps(
@@ -615,6 +667,7 @@ def _build_prediction(
     run_index: int,
     call: ModelCallResult,
     config: LiveLLMConfig,
+    reasoning: RootCauseReasoningResult | None = None,
 ) -> RCAPrediction:
     allowed_ids = {item.evidence_id for item in case.evidence}
     referenced_ids = set(call.output.evidence_ids)
@@ -642,23 +695,173 @@ def _build_prediction(
         call.prompt_tokens * config.input_cost_per_million
         + call.completion_tokens * config.output_cost_per_million
     ) / 1_000_000
+    candidates = tuple(
+        RootCauseCandidateRef(
+            candidate_id=item.candidate_id,
+            root_cause=RootCauseRef(
+                service=item.identity.service,
+                type=item.identity.root_type.value,
+                resource=item.identity.resource,
+            ),
+            score=item.final_score,
+            supporting_evidence_ids=item.supporting_evidence_ids,
+            contradicting_evidence_ids=item.contradicting_evidence_ids,
+            source_evidence_types=tuple(
+                EvidenceType(value.value) for value in item.source_evidence_types
+            ),
+        )
+        for item in (reasoning.candidates if reasoning is not None else ())
+    )
+    effective_root_cause = call.output.root_cause
+    effective_status = call.output.conclusion_status
+    effective_claims = call.output.claims
+    selected: RootCauseCandidateRef | None = None
+    if call.output.selected_candidate_id is not None:
+        selected = next(
+            (
+                item
+                for item in candidates
+                if item.candidate_id == call.output.selected_candidate_id
+            ),
+            None,
+        )
+        if selected is None:
+            raise AppValidationError("live LLM selected an unknown candidate")
+        if (
+            call.output.root_cause is not None
+            and call.output.root_cause != selected.root_cause
+        ):
+            raise AppValidationError("live LLM root cause does not match candidate")
+        if (
+            call.output.conclusion_status is ConclusionStatus.NO_ACTIONABLE_ROOT_CAUSE
+            and selected.root_cause.type != RootCauseType.NO_ACTIONABLE_ROOT_CAUSE.value
+        ):
+            raise AppValidationError(
+                "no-actionable conclusion selected an actionable candidate"
+            )
+    elif call.output.root_cause is not None:
+        selected = next(
+            (
+                item
+                for item in candidates
+                if item.root_cause == call.output.root_cause
+            ),
+            None,
+        )
+    elif (
+        reasoning is not None
+        and reasoning.recommended_status.value == "CANDIDATE"
+        and candidates
+        and call.output.conclusion_status
+        in {
+            ConclusionStatus.UNDETERMINED,
+            ConclusionStatus.NO_ACTIONABLE_ROOT_CAUSE,
+        }
+    ):
+        # 模型偶发返回“无法确定”时，后端使用已计算的最高分候选完成最终选择。
+        # 该兜底只在确定性候选器已有足够证据时触发，不会把低置信度事实升级为根因。
+        selected = candidates[0]
+        effective_root_cause = selected.root_cause
+        effective_status = ConclusionStatus.CANDIDATE
+        if not any(
+            claim.claim_type is ClaimType.ROOT_CAUSE
+            for claim in effective_claims
+        ):
+            effective_claims = (
+                *effective_claims,
+                Claim(
+                    claim_type=ClaimType.ROOT_CAUSE,
+                    statement=(
+                        "Backend selected the highest-scoring candidate supported "
+                        "by the runtime evidence."
+                    ),
+                    evidence_ids=selected.supporting_evidence_ids,
+                ),
+            )
+    if (
+        selected is not None
+        and candidates
+        and selected != candidates[0]
+        and candidates[0].score - selected.score >= 0.2
+    ):
+        # 模型选择与确定性评分出现明显分差时，以高置信度候选收敛最终结论，
+        # 避免模型把低分历史/下游候选误选为根因。
+        selected = candidates[0]
+        effective_root_cause = selected.root_cause
+        effective_status = ConclusionStatus.CANDIDATE
+        if not any(
+            claim.claim_type is ClaimType.ROOT_CAUSE
+            for claim in effective_claims
+        ):
+            effective_claims = (
+                *effective_claims,
+                Claim(
+                    claim_type=ClaimType.ROOT_CAUSE,
+                    statement=(
+                        "Backend selected the highest-scoring candidate supported "
+                        "by the runtime evidence."
+                    ),
+                    evidence_ids=selected.supporting_evidence_ids,
+                ),
+            )
+    supporting_ids = (
+        selected.supporting_evidence_ids
+        if selected is not None
+        else call.output.evidence_ids
+    )
+    causal_context = RuntimeCausalContextBuilder().build(
+        root_cause=effective_root_cause,
+        conclusion_status=effective_status.value,
+        incident_service=case.service_name,
+        entry_service=case.entry_service,
+        evidence=tuple(
+            RuntimeEvidenceFact(item.evidence_id, item.summary)
+            for item in case.evidence
+        ),
+        supporting_evidence_ids=supporting_ids,
+        proposed_chain=call.output.causal_chain,
+        proposed_affected_services=call.output.affected_services,
+    )
     return RCAPrediction(
         scenario_id=case.scenario_id,
         run_id=f"live-{case.scenario_id}-{run_index:02d}",
-        root_cause=call.output.root_cause,
-        conclusion_status=call.output.conclusion_status,
+        root_cause=effective_root_cause,
+        conclusion_status=effective_status,
         confidence=call.output.confidence,
-        evidence_ids=call.output.evidence_ids,
+        evidence_ids=tuple(
+            dict.fromkeys(
+                (*call.output.evidence_ids, *supporting_ids)
+            )
+        ),
         evidence_types=selected_types,
-        claims=call.output.claims,
-        causal_chain=call.output.causal_chain,
-        affected_services=call.output.affected_services,
+        claims=effective_claims,
+        causal_chain=causal_context.causal_chain,
+        affected_services=causal_context.affected_services,
+        root_cause_candidates=candidates,
         tool_calls=case.tool_calls,
         investigation_steps=case.investigation_steps,
         llm_calls=1,
         latency_ms=call.latency_ms,
         total_tokens=total_tokens,
         estimated_cost=round(estimated_cost, 12),
+    )
+
+
+def _build_reasoning(case: LiveScenarioInput) -> RootCauseReasoningResult:
+    return RootCauseReasoningPipeline().reason(
+        incident_service=case.service_name,
+        incident_summary=case.summary,
+        evidence=tuple(
+            ReasoningEvidence(
+                evidence_id=item.evidence_id,
+                evidence_type=ReasoningEvidenceType.from_value(
+                    item.evidence_type.value
+                ),
+                source=item.source,
+                summary=item.summary,
+            )
+            for item in case.evidence
+        ),
     )
 
 
@@ -722,6 +925,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--api-key-env", default="DEVOPS_AGENT_BENCHMARK_API_KEY")
     parser.add_argument("--runs-per-scenario", type=int, default=5)
+    parser.add_argument(
+        "--max-concurrency",
+        type=int,
+        default=1,
+        help="并发调用上限；仅在 Provider 配额允许时提高",
+    )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=0,
+        help="连接/传输错误的有界重试次数；schema 错误不会重试",
+    )
     parser.add_argument("--scenario")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--top-p", type=float, default=1.0)
@@ -750,7 +965,8 @@ def main(argv: list[str] | None = None) -> int:
                 git_commit=args.git_commit,
                 runs_per_scenario=args.runs_per_scenario,
                 scenario_id=args.scenario,
-                    config=LiveLLMConfig(
+                max_concurrency=args.max_concurrency,
+                config=LiveLLMConfig(
                     base_url=args.base_url,
                     api_key=SecretStr(api_key),
                     provider=args.provider,
@@ -761,8 +977,9 @@ def main(argv: list[str] | None = None) -> int:
                     max_tokens=args.max_tokens,
                     input_cost_per_million=args.input_cost_per_million,
                     output_cost_per_million=args.output_cost_per_million,
-                        allow_insecure_http=args.allow_insecure_http,
-                    ),
+                    allow_insecure_http=args.allow_insecure_http,
+                    max_retries=args.max_retries,
+                ),
                     require_real=args.require_real,
                 )
         )

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,7 @@ REPORT_NAME = "evaluation-report.md"
 ABLATION_NAME = "ablation-report.md"
 BAD_CASES_NAME = "bad_cases.jsonl"
 PREDICTIONS_NAME = "predictions.json"
+ROOT_CAUSE_BREAKDOWN_NAME = "root-cause-error-breakdown.json"
 
 
 def run_benchmark(
@@ -89,6 +91,7 @@ def run_benchmark_input(
         render_evaluation_report(benchmark_input.benchmark, scores, summary),
         _render_ablation_report(result),
         _render_bad_cases(scores),
+        _render_root_cause_breakdown(scores),
         benchmark_input,
     )
     return result
@@ -147,13 +150,14 @@ def run_deterministic_contract(
         render_evaluation_report(metadata, scores, summary),
         _render_ablation_report(result),
         _render_bad_cases(scores),
+        _render_root_cause_breakdown(scores),
         benchmark_input,
     )
     return result
 
 
 def _contract_prediction(ground_truth: Any) -> RCAPrediction:
-    evidence_ids = tuple(
+    evidence_ids = ground_truth.required_evidence_ids or tuple(
         f"contract-{ground_truth.scenario_id}-{index}"
         for index, _ in enumerate(ground_truth.required_evidence_types, start=1)
     )
@@ -227,6 +231,7 @@ def _write_artifacts(
     report: str,
     ablation_report: str,
     bad_cases: tuple[str, ...],
+    root_cause_breakdown: str,
     benchmark_input: BenchmarkInput,
 ) -> None:
     paths = tuple(
@@ -237,6 +242,7 @@ def _write_artifacts(
             ABLATION_NAME,
             BAD_CASES_NAME,
             PREDICTIONS_NAME,
+            ROOT_CAUSE_BREAKDOWN_NAME,
         )
     )
     if any(path.exists() for path in paths):
@@ -253,6 +259,10 @@ def _write_artifacts(
     report_path.write_text(report, encoding="utf-8")
     (output_directory / ABLATION_NAME).write_text(ablation_report, encoding="utf-8")
     (output_directory / BAD_CASES_NAME).write_text("".join(bad_cases), encoding="utf-8")
+    (output_directory / ROOT_CAUSE_BREAKDOWN_NAME).write_text(
+        root_cause_breakdown,
+        encoding="utf-8",
+    )
     (output_directory / PREDICTIONS_NAME).write_text(
         json.dumps(
             benchmark_input.model_dump(mode="json"),
@@ -301,8 +311,8 @@ def _render_bad_cases(scores: tuple[Any, ...]) -> tuple[str, ...]:
         if score.passed:
             continue
         categories: list[str] = []
-        if not score.rca_exact_match:
-            categories.append("WRONG_ROOT_CAUSE")
+        if score.root_cause_failure_type is not None:
+            categories.append(score.root_cause_failure_type)
         if score.evidence_recall < 1:
             categories.append("INSUFFICIENT_EVIDENCE")
         if score.unsupported_claim_rate:
@@ -327,6 +337,31 @@ def _render_bad_cases(scores: tuple[Any, ...]) -> tuple[str, ...]:
             + "\n"
         )
     return tuple(lines)
+
+
+def _render_root_cause_breakdown(scores: tuple[Any, ...]) -> str:
+    failed = [score for score in scores if not score.passed]
+    failure_types = Counter(
+        score.root_cause_failure_type
+        for score in failed
+        if score.root_cause_failure_type is not None
+    )
+    layers = Counter(
+        score.suspected_failure_layer
+        for score in failed
+        if score.suspected_failure_layer is not None
+    )
+    payload = {
+        "schema_version": "1.0",
+        "total_failed_runs": len(failed),
+        "classified_root_cause_failures": sum(failure_types.values()),
+        "candidate_evaluated_runs": sum(
+            score.candidate_recall_at_3 is not None for score in scores
+        ),
+        "failure_types": dict(sorted(failure_types.items())),
+        "suspected_layers": dict(sorted(layers.items())),
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:

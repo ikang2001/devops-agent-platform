@@ -282,6 +282,8 @@ class MiniShopE2ERunner:
 
     def _publish_runbooks(self, scenarios: list[ScenarioManifest]) -> None:
         for scenario in scenarios:
+            if scenario.ground_truth.root_cause is None:
+                continue
             runbook_key = f"minishop-{scenario.scenario_id}"
             base = self._admin_url(f"runbooks/{runbook_key}/versions/v1")
             draft = self.http.request(
@@ -491,17 +493,26 @@ class MiniShopE2ERunner:
         )
         report = result.get("report") or {}
         report_text = f"{report.get('title', '')} {report.get('summary', '')}".lower()
-        root_cause_passed = (
-            report.get("conclusion_status") == "CANDIDATE"
-            and scenario.service_name.lower() in report_text
-            and scenario.fault_type.lower() in report_text
-        )
+        if scenario.ground_truth.root_cause is None:
+            root_cause_passed = (
+                report.get("conclusion_status")
+                == scenario.ground_truth.expected_conclusion_status
+                and report.get("root_cause") is None
+            )
+        else:
+            root_cause_passed = (
+                report.get("conclusion_status")
+                == scenario.ground_truth.expected_conclusion_status
+                and scenario.service_name.lower() in report_text
+                and scenario.fault_type.lower() in report_text
+            )
         forbidden_claims = [
             claim
             for claim in scenario.ground_truth.forbidden_claims
             if claim.lower() in report_text
         ]
-        platform_evidence_passed = REQUIRED_PLATFORM_EVIDENCE.issubset(evidence_types)
+        required_platform_evidence = set(scenario.ground_truth.required_evidence_types)
+        platform_evidence_passed = required_platform_evidence.issubset(evidence_types)
         passed = all(
             (
                 required_passed,

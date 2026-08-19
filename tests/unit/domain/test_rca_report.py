@@ -12,6 +12,7 @@ from devops_agent_platform.application.commands.workflow_execution import (
 from devops_agent_platform.domain.enums import (
     EvidenceType,
     RCAConclusionStatus,
+    RootCauseType,
 )
 from devops_agent_platform.domain.exceptions import AppValidationError
 from devops_agent_platform.domain.models.evidence import (
@@ -124,6 +125,18 @@ def test_report_rejects_inconsistent_type_counts() -> None:
         replace(
             build_report(),
             evidence_type_counts=(("LOG", 2),),
+        )
+
+
+def test_non_candidate_status_rejects_structured_root_cause() -> None:
+    """未确定/无行动状态不能携带结构化根因。"""
+    with pytest.raises(
+        AppValidationError,
+        match="cannot contain a structured root cause",
+    ):
+        replace(
+            build_report(),
+            root_cause_type=RootCauseType.APPLICATION_ERROR,
         )
 
 
