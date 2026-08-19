@@ -22,6 +22,9 @@ class ReceiveAlertCommand:
     fingerprint: str
     external_event_id: str
     trace_id: str
+    environment: str = "default"
+    alert_type: str = "generic"
+    labels: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         """校验告警接入身份和摘要，避免内部调用绕过 HTTP DTO。"""
@@ -35,6 +38,14 @@ class ReceiveAlertCommand:
         ):
             _validate_identifier_text(field_name, value, maximum)
         _validate_summary(self.summary)
+        _validate_identifier_text("environment", self.environment, 64)
+        _validate_identifier_text("alert_type", self.alert_type, 128)
+        if not isinstance(self.labels, tuple) or len(self.labels) > 64:
+            raise AppValidationError("labels must be a tuple with at most 64 items")
+        for key, value in self.labels:
+            _validate_identifier_text("label", key, 128)
+            if not isinstance(value, str) or not 1 <= len(value) <= 512:
+                raise AppValidationError("label value is invalid")
         if not isinstance(self.severity, AlertSeverity):
             raise AppValidationError("severity must be an AlertSeverity")
         if (

@@ -182,6 +182,35 @@ def test_log_level_is_normalized() -> None:
     assert settings.log_level == "WARNING"
 
 
+def test_bounded_dynamic_policy_and_budget_defaults_are_available() -> None:
+    settings = Settings(_env_file=None, rca_investigation_policy="bounded_dynamic_v1")
+
+    assert settings.rca_investigation_policy == "bounded_dynamic_v1"
+    assert settings.rca_dynamic_max_steps == 7
+    assert settings.rca_dynamic_max_total_duration_ms == 30_000
+    assert settings.rca_dynamic_max_tool_calls_per_type == 2
+    assert settings.rca_dynamic_max_evidence_count == 100
+    assert settings.rca_dynamic_max_llm_calls == 3
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("rca_dynamic_max_steps", 0),
+        ("rca_dynamic_max_total_duration_ms", 0),
+        ("rca_dynamic_max_tool_calls_per_type", 21),
+        ("rca_dynamic_max_evidence_count", 1001),
+        ("rca_dynamic_max_llm_calls", 0),
+    ],
+)
+def test_invalid_bounded_dynamic_budgets_are_rejected(
+    field_name: str,
+    value: int,
+) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **{field_name: value})
+
+
 def test_production_requires_authenticated_alert_webhook() -> None:
     """生产环境不能因遗漏开关而暴露匿名告警入口。"""
     with pytest.raises(ValidationError, match="must be enabled"):

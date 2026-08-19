@@ -17,7 +17,6 @@ else:
     from harness import write_report
 
 TENANT_ID = "reference-tenant"
-AGENT_URL = "http://localhost:28000"
 REFERENCE_OPERATOR_ID = "reference-reviewer"
 REFERENCE_PERMISSION_TAGS = (
     "changes:read",
@@ -32,8 +31,20 @@ REFERENCE_PERMISSION_TAGS = (
 
 
 class ReferenceChaosRunner:
-    def __init__(self, compose_file: Path) -> None:
+    def __init__(
+        self,
+        compose_file: Path | tuple[Path, ...],
+        *,
+        project_name: str | None = None,
+        env_file: Path | None = None,
+        agent_url: str = "http://localhost:28000",
+        oidc_token_url: str = "https://localhost:28443/token",
+    ) -> None:
         self.compose_file = compose_file
+        self.project_name = project_name
+        self.env_file = env_file
+        self.agent_url = agent_url.rstrip("/")
+        self.oidc_token_url = oidc_token_url
         self.client = httpx.Client(timeout=10, follow_redirects=False)
         self.oidc_client = httpx.Client(
             timeout=10,
@@ -142,7 +153,7 @@ class ReferenceChaosRunner:
         try:
             identity = uuid4().hex
             response = self.client.post(
-                f"{AGENT_URL}/api/v1/alerts",
+                f"{self.agent_url}/api/v1/alerts",
                 json=self._alert_payload(identity, "postgres-unavailable"),
             )
             erroneous_success = 1 if 200 <= response.status_code < 300 else 0
@@ -157,7 +168,7 @@ class ReferenceChaosRunner:
                 "120",
                 "postgres",
             )
-        self._wait_http(f"{AGENT_URL}/readyz", timeout=60)
+        self._wait_http(f"{self.agent_url}/readyz", timeout=60)
         state_ok = self._sql("select 1") == "1"
         return {
             "case": "postgres-unavailable",
@@ -183,6 +194,7 @@ class ReferenceChaosRunner:
                 for item in invocations
             )
             summary = str(report.get("summary", ""))
+            failed_logs = failed_logs or "Partial collection:" in summary
             confidence = report.get("confidence")
             conclusion = report.get("conclusion_status")
             return {
@@ -199,7 +211,7 @@ class ReferenceChaosRunner:
 
     def _token(self) -> str:
         response = self.oidc_client.post(
-            "https://localhost:28443/token",
+            self.oidc_token_url,
             data={
                 "client_id": "reference-cli",
                 "scope": (
@@ -214,7 +226,7 @@ class ReferenceChaosRunner:
     def _ensure_permissions(self, token: str) -> None:
         """幂等授予 reference reviewer 执行只读 RCA 工具所需权限。"""
         url = (
-            f"{AGENT_URL}/api/v1/admin/tenants/{TENANT_ID}/operators/"
+            f"{self.agent_url}/api/v1/admin/tenants/{TENANT_ID}/operators/"
             f"{REFERENCE_OPERATOR_ID}/tool-permissions"
         )
         headers = {"Authorization": f"Bearer {token}"}
@@ -243,13 +255,13 @@ class ReferenceChaosRunner:
     def _start_workflow(self, token: str, case: str) -> str:
         identity = uuid4().hex
         alert = self.client.post(
-            f"{AGENT_URL}/api/v1/alerts",
+            f"{self.agent_url}/api/v1/alerts",
             json=self._alert_payload(identity, case),
         )
         alert.raise_for_status()
         incident_id = alert.json()["data"]["incident_id"]
         response = self.client.post(
-            f"{AGENT_URL}/api/v1/admin/tenants/{TENANT_ID}/incidents/{incident_id}/rca",
+            f"{self.agent_url}/api/v1/admin/tenants/{TENANT_ID}/incidents/{incident_id}/rca",
             headers={
                 "Authorization": f"Bearer {token}",
                 "Idempotency-Key": f"reference-chaos-{case}-{identity}",
@@ -261,12 +273,20 @@ class ReferenceChaosRunner:
 
     @staticmethod
     def _alert_payload(identity: str, case: str) -> dict:
+        summary = f"Synthetic reference chaos case {case}"
+        if case == "observability-timeout":
+            summary += "; Loki logs are unavailable, inspect logs and traces"
+        service_name = (
+            "checkout-service"
+            if case == "observability-timeout"
+            else f"reference-{case}-{identity[:8]}"
+        )
         return {
             "tenant_id": TENANT_ID,
             "source": "reference-chaos",
-            "service_name": f"reference-{case}-{identity[:8]}",
+            "service_name": service_name,
             "severity": "CRITICAL",
-            "summary": f"Synthetic reference chaos case {case}",
+            "summary": summary,
             "starts_at": datetime.now(UTC).isoformat(),
             "fingerprint": f"reference-chaos-{identity}",
             "external_event_id": f"reference-chaos-{identity}",
@@ -380,7 +400,7 @@ class ReferenceChaosRunner:
 
     def _workflow_result(self, token: str, workflow_id: str) -> dict:
         response = self.client.get(
-            f"{AGENT_URL}/api/v1/admin/tenants/{TENANT_ID}/workflow-runs/"
+            f"{self.agent_url}/api/v1/admin/tenants/{TENANT_ID}/workflow-runs/"
             f"{workflow_id}/result",
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -423,8 +443,20 @@ class ReferenceChaosRunner:
         )
 
     def _compose(self, *arguments: str, capture: bool = False) -> str:
+        compose_files = (
+            (self.compose_file,)
+            if isinstance(self.compose_file, Path)
+            else self.compose_file
+        )
+        command = ["docker", "compose"]
+        if self.project_name:
+            command.extend(("--project-name", self.project_name))
+        if self.env_file:
+            command.extend(("--env-file", str(self.env_file)))
+        for path in compose_files:
+            command.extend(("-f", str(path)))
         completed = subprocess.run(
-            ["docker", "compose", "-f", str(self.compose_file), *arguments],
+            [*command, *arguments],
             check=False,
             capture_output=True,
             text=True,
@@ -443,12 +475,29 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=Path(__file__).parents[1] / "reference-staging" / "docker-compose.yml",
     )
+    parser.add_argument("--compose-override", type=Path, action="append", default=[])
+    parser.add_argument("--compose-project-name")
+    parser.add_argument("--compose-env-file", type=Path)
+    parser.add_argument("--agent-url", default="http://localhost:28000")
+    parser.add_argument("--oidc-token-url", default="https://localhost:28443/token")
+    parser.add_argument("--simulation", action="store_true")
     parser.add_argument("--output-directory", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.output_directory.exists() and any(args.output_directory.iterdir()):
         print("chaos output directory already exists", file=sys.stderr)
         return 2
-    runner = ReferenceChaosRunner(args.compose_file)
+    compose_files = (
+        (args.compose_file, *args.compose_override)
+        if args.compose_override
+        else args.compose_file
+    )
+    runner = ReferenceChaosRunner(
+        compose_files,
+        project_name=args.compose_project_name,
+        env_file=args.compose_env_file,
+        agent_url=args.agent_url,
+        oidc_token_url=args.oidc_token_url,
+    )
     try:
         results = runner.run()
     except (KeyError, OSError, RuntimeError, httpx.HTTPError) as exc:
@@ -460,9 +509,12 @@ def main(argv: list[str] | None = None) -> int:
     observations = {
         "schema_version": "1.0",
         "simulated": False,
-        "synthetic": True,
+        "synthetic": not args.simulation,
+        "simulation": args.simulation,
         "production_acceptance": False,
-        "target_label": "reference-staging",
+        "target_label": (
+            "production-like-simulation" if args.simulation else "reference-staging"
+        ),
         "generated_at": datetime.now(UTC).isoformat(),
         "results": results,
     }

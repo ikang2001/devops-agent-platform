@@ -15,6 +15,8 @@ class CorrelationDecision:
     score: float
     reason: str
     is_primary: bool
+    root_service: str | None = None
+    affected_services: tuple[str, ...] = ()
 
 
 class AlertCorrelationService:
@@ -45,17 +47,32 @@ class AlertCorrelationService:
             ):
                 best = candidate
         if best is None:
-            return CorrelationDecision(None, 0.0, "NO_MATCH", True)
+            return CorrelationDecision(
+                None,
+                0.0,
+                "NO_MATCH",
+                True,
+                root_service=alert.service_name,
+                affected_services=(alert.service_name,),
+            )
         score, incident, reason = best
-        return CorrelationDecision(incident.incident_id, round(score, 6), reason, False)
+        return CorrelationDecision(
+            incident.incident_id,
+            round(score, 6),
+            reason,
+            False,
+            root_service=incident.service_name,
+            affected_services=tuple(
+                dict.fromkeys((*incident.affected_services, alert.service_name))
+            ),
+        )
 
     def _score(
         self, alert: Alert, incident: Incident, topology: TopologyGraph | None
     ) -> tuple[float, str]:
         if (
             alert.tenant_id != incident.tenant_id
-            or alert.environment != "default"
-            and alert.environment != getattr(incident, "environment", "default")
+            or alert.environment != getattr(incident, "environment", "default")
         ):
             return 0.0, "TENANT_OR_ENVIRONMENT_MISMATCH"
         if incident.status.value not in {"OPEN", "ANALYZING"}:
@@ -88,13 +105,24 @@ class AlertCorrelationService:
     def _topology_related(graph: TopologyGraph, left: str, right: str) -> bool:
         left_id = f"service:{left}"
         right_id = f"service:{right}"
-        return any(
-            edge.source_node_id == left_id
-            and edge.target_node_id == right_id
-            or edge.source_node_id == right_id
-            and edge.target_node_id == left_id
-            for edge in graph.edges
-        )
+        if left_id == right_id:
+            return True
+        frontier = [left_id]
+        visited = {left_id}
+        while frontier:
+            current = frontier.pop()
+            for edge in graph.edges:
+                neighbor = None
+                if edge.source_node_id == current:
+                    neighbor = edge.target_node_id
+                elif edge.target_node_id == current:
+                    neighbor = edge.source_node_id
+                if neighbor == right_id:
+                    return True
+                if neighbor is not None and neighbor not in visited:
+                    visited.add(neighbor)
+                    frontier.append(neighbor)
+        return False
 
 
 def primary_alert_score(alert: Alert, *, root_service: str | None = None) -> float:

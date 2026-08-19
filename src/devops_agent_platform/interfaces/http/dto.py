@@ -69,6 +69,9 @@ class AlertWebhookRequest(BaseModel):
     starts_at: datetime
     fingerprint: str = Field(min_length=1, max_length=256)
     external_event_id: str = Field(min_length=1, max_length=256)
+    environment: str = Field(default="default", min_length=1, max_length=64)
+    alert_type: str = Field(default="generic", min_length=1, max_length=128)
+    labels: dict[str, str] = Field(default_factory=dict, max_length=64)
 
     def to_command(self, trace_id: str) -> ReceiveAlertCommand:
         """将 HTTP DTO 转换为应用层 Command。"""
@@ -82,6 +85,9 @@ class AlertWebhookRequest(BaseModel):
             fingerprint=self.fingerprint,
             external_event_id=self.external_event_id,
             trace_id=trace_id,
+            environment=self.environment,
+            alert_type=self.alert_type,
+            labels=tuple(sorted(self.labels.items())),
         )
 
 

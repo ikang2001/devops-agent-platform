@@ -181,4 +181,10 @@ class IncidentRecord(Base):
         default="PRIMARY_ALERT",
         server_default="PRIMARY_ALERT",
     )
+    environment: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="default", server_default="default"
+    )
+    affected_services_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
     __mapper_args__ = {"version_id_col": version}

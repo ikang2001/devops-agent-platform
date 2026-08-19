@@ -5,6 +5,7 @@ from .dataset_release_store import SQLAlchemyDatasetReleaseStore
 from .evidence_repository import SQLAlchemyEvidenceRepository
 from .incident_lock import PostgreSQLIncidentCorrelationLock
 from .incident_repository import SQLAlchemyIncidentRepository
+from .investigation_checkpoint import SQLAlchemyInvestigationCheckpoint
 from .knowledge_repository import (
     SQLAlchemyKnowledgeRepository,
     SQLAlchemyKnowledgeRetriever,
@@ -44,6 +45,7 @@ __all__ = [
     "SQLAlchemyAuditRetentionStore",
     "SQLAlchemyEvidenceRepository",
     "SQLAlchemyIncidentRepository",
+    "SQLAlchemyInvestigationCheckpoint",
     "SQLAlchemyKnowledgeRepository",
     "SQLAlchemyKnowledgeRetriever",
     "SQLAlchemyMetricsTargetResolver",

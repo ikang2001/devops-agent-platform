@@ -38,6 +38,8 @@ class Incident:
     primary_alert_id: str | None = None
     correlated_alert_count: int = 1
     correlation_reason: str = "PRIMARY_ALERT"
+    environment: str = "default"
+    affected_services: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """校验事故基础字段，阻止内部调用绕过 HTTP 校验写入脏数据。"""
@@ -69,6 +71,17 @@ class Incident:
         ):
             raise AppValidationError("correlated_alert_count must be positive")
         self._validate_text("correlation_reason", self.correlation_reason, 512)
+        self._validate_text("environment", self.environment, 64)
+        if not isinstance(self.affected_services, tuple):
+            raise AppValidationError("affected_services must be a tuple")
+        if not self.affected_services:
+            self.affected_services = (self.service_name,)
+        for service in self.affected_services:
+            self._validate_text("affected_service", service, 256)
+        if self.service_name not in self.affected_services:
+            self.affected_services = (self.service_name, *self.affected_services)
+        if len(set(self.affected_services)) != len(self.affected_services):
+            raise AppValidationError("affected_services must be unique")
 
     @staticmethod
     def _validate_text(field_name: str, value: str, max_length: int) -> None:
@@ -108,7 +121,13 @@ class Incident:
         self.status = IncidentStatus.ANALYZING
         self.updated_at = now
 
-    def attach_alert(self, alert: Alert) -> None:
+    def attach_alert(
+        self,
+        alert: Alert,
+        *,
+        topology_related: bool = False,
+        affected_services: tuple[str, ...] = (),
+    ) -> None:
         """关联同一租户和服务的告警，并推进事故聚合摘要。
 
         该方法只更新聚合自身状态，不负责保存 Alert-Incident 外键。调用方必须在
@@ -116,7 +135,9 @@ class Incident:
         """
         if alert.tenant_id != self.tenant_id:
             raise ConflictError("Alert and incident tenant do not match")
-        if alert.service_name != self.service_name:
+        if alert.environment != self.environment:
+            raise ConflictError("Alert and incident environment do not match")
+        if alert.service_name != self.service_name and not topology_related:
             raise ConflictError("Alert and incident service do not match")
         if self.status not in {IncidentStatus.OPEN, IncidentStatus.ANALYZING}:
             raise ConflictError("Incident is not active")
@@ -128,7 +149,16 @@ class Incident:
         if self.primary_alert_id is None:
             self.primary_alert_id = alert.alert_id
         self.correlated_alert_count += 1
-        self.correlation_reason = "TOPOLOGY_OR_TIME_WINDOW_MATCH"
+        self.correlation_reason = (
+            "TOPOLOGY_OR_TIME_WINDOW_MATCH"
+            if topology_related
+            else "TIME_WINDOW_SERVICE_MATCH"
+        )
+        self.affected_services = tuple(
+            dict.fromkeys(
+                (*self.affected_services, alert.service_name, *affected_services)
+            )
+        )
 
     def mark_resolved(
         self,

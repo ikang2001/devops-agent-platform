@@ -16,9 +16,20 @@ import httpx
 
 def run_acceptance(
     *,
-    compose_file: Path,
+    compose_file: Path | tuple[Path, ...],
     output: Path,
     start_stack: bool,
+    compose_project_name: str | None = None,
+    compose_env_file: Path | None = None,
+    agent_url: str = "http://localhost:28000",
+    oidc_token_url: str = "https://localhost:28443/token",
+    prometheus_url: str = "http://localhost:29090",
+    loki_url: str = "http://localhost:23100",
+    tempo_url: str = "http://localhost:23200",
+    provider_url: str = "http://localhost:28081",
+    mcp_url: str = "http://localhost:28082/mcp",
+    environment: str = "reference-staging",
+    simulation: bool = False,
 ) -> dict[str, Any]:
     if output.exists():
         raise ValueError("acceptance output already exists; choose a new evidence path")
@@ -30,6 +41,8 @@ def run_acceptance(
             "--wait",
             "--wait-timeout",
             "240",
+            project_name=compose_project_name,
+            env_file=compose_env_file,
         )
     checks: list[dict[str, Any]] = []
     with (
@@ -39,23 +52,30 @@ def run_acceptance(
         token = _check(
             checks,
             "oidc-token",
-            lambda: _oidc_token(oidc_client),
+            lambda: _oidc_token(oidc_client, endpoint=oidc_token_url),
         )
         _check(
             checks,
             "agent-readiness",
-            lambda: _expect_status(client, "http://localhost:28000/readyz"),
+            lambda: _expect_status(client, f"{agent_url.rstrip('/')}/readyz"),
         )
         if isinstance(token, str):
             _check(
                 checks,
                 "workspace-oidc-api",
-                lambda: _workspace_round_trip(client, token),
+                lambda: _workspace_round_trip(client, token, agent_url=agent_url),
             )
             _check(
                 checks,
                 "dataset-release-api",
-                lambda: _dataset_release_round_trip(client, oidc_client, token),
+                lambda: _dataset_release_round_trip(
+                    client,
+                    oidc_client,
+                    token,
+                    agent_url=agent_url,
+                    oidc_token_url=oidc_token_url,
+                    synthetic=not simulation,
+                ),
             )
         else:
             checks.append(
@@ -67,17 +87,25 @@ def run_acceptance(
                 }
             )
         for name, url in (
-            ("prometheus", "http://localhost:29090/-/ready"),
-            ("loki", "http://localhost:23100/ready"),
-            ("tempo", "http://localhost:23200/ready"),
-            ("llm-ticketing-provider", "http://localhost:28081/healthz"),
+            ("prometheus", f"{prometheus_url.rstrip('/')}/-/ready"),
+            ("loki", f"{loki_url.rstrip('/')}/ready"),
+            ("tempo", f"{tempo_url.rstrip('/')}/ready"),
+            ("llm-ticketing-provider", f"{provider_url.rstrip('/')}/healthz"),
         ):
             _check(checks, name, lambda url=url: _wait_status(client, url))
-        _check(checks, "mcp-jsonrpc", lambda: _mcp_call(client))
+        _check(checks, "mcp-jsonrpc", lambda: _mcp_call(client, mcp_url=mcp_url))
     _check(
         checks,
         "postgresql",
-        lambda: _compose(compose_file, "exec", "-T", "postgres", "pg_isready"),
+        lambda: _compose(
+            compose_file,
+            "exec",
+            "-T",
+            "postgres",
+            "pg_isready",
+            project_name=compose_project_name,
+            env_file=compose_env_file,
+        ),
     )
     _check(
         checks,
@@ -90,20 +118,31 @@ def run_acceptance(
             "rpk",
             "cluster",
             "health",
+            project_name=compose_project_name,
+            env_file=compose_env_file,
         ),
+    )
+    limitations = (
+        [
+            "LLM 和 Ticketing 使用本地仿真服务；报告不代表外部供应商签字。",
+            "仿真报告只证明协议、装配和恢复流程，不代表生产容量、成本或恢复时间。",
+        ]
+        if simulation
+        else [
+            "OIDC、LLM、Ticketing 和 MCP 是本地 reference provider。",
+            "该报告只能证明协议接线，不能作为生产容量、成本或恢复时间。",
+        ]
     )
     report = {
         "schema_version": "1.0",
-        "environment": "reference-staging",
-        "synthetic": True,
+        "environment": environment,
+        "synthetic": not simulation,
+        "simulation": simulation,
         "production_acceptance": False,
         "generated_at": datetime.now(UTC).isoformat(),
         "passed": all(item["passed"] for item in checks),
         "checks": checks,
-        "limitations": [
-            "OIDC、LLM、Ticketing 和 MCP 是本地 reference provider。",
-            "该报告只能证明协议接线，不能作为生产容量、成本或恢复时间。",
-        ],
+        "limitations": limitations,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
@@ -145,13 +184,14 @@ def _check(
 def _oidc_token(
     client: httpx.Client,
     *,
+    endpoint: str = "https://localhost:28443/token",
     client_id: str = "reference-cli",
     scopes: str = (
         "openid workspaces:read workspaces:write datasets:curate datasets:review"
     ),
 ) -> str:
     response = client.post(
-        "https://localhost:28443/token",
+        endpoint,
         data={
             "client_id": client_id,
             "scope": scopes,
@@ -164,7 +204,12 @@ def _oidc_token(
     return token
 
 
-def _workspace_round_trip(client: httpx.Client, token: str) -> None:
+def _workspace_round_trip(
+    client: httpx.Client,
+    token: str,
+    *,
+    agent_url: str = "http://localhost:28000",
+) -> None:
     headers = {
         "Authorization": f"Bearer {token}",
         "Idempotency-Key": "reference-workspace-v1",
@@ -183,13 +228,13 @@ def _workspace_round_trip(client: httpx.Client, token: str) -> None:
         "retention_days": 7,
     }
     put = client.put(
-        "http://localhost:28000/api/v1/admin/tenants/reference-tenant/workspaces/reference",
+        f"{agent_url.rstrip('/')}/api/v1/admin/tenants/reference-tenant/workspaces/reference",
         headers=headers,
         json=payload,
     )
     put.raise_for_status()
     get = client.get(
-        "http://localhost:28000/api/v1/admin/tenants/reference-tenant/workspaces/reference",
+        f"{agent_url.rstrip('/')}/api/v1/admin/tenants/reference-tenant/workspaces/reference",
         headers={"Authorization": f"Bearer {token}"},
     )
     get.raise_for_status()
@@ -201,26 +246,33 @@ def _dataset_release_round_trip(
     client: httpx.Client,
     oidc_client: httpx.Client,
     curator_token: str,
+    *,
+    agent_url: str = "http://localhost:28000",
+    oidc_token_url: str = "https://localhost:28443/token",
+    synthetic: bool = True,
 ) -> None:
     """验证创建、双审核、发布、幂等和发布后不可变。"""
     privacy_token = _oidc_token(
         oidc_client,
+        endpoint=oidc_token_url,
         client_id="reference-cli-privacy",
         scopes="openid datasets:review datasets:read",
     )
     domain_token = _oidc_token(
         oidc_client,
+        endpoint=oidc_token_url,
         client_id="reference-cli-domain",
         scopes="openid datasets:review datasets:read",
     )
     publish_token = _oidc_token(
         oidc_client,
+        endpoint=oidc_token_url,
         scopes="openid datasets:publish datasets:read",
     )
     release_id = f"reference-release-{uuid4().hex[:12]}"
     dataset_id = f"minishop-v2-reference-{uuid4().hex[:8]}"
     url = (
-        "http://localhost:28000/api/v1/admin/tenants/"
+        f"{agent_url.rstrip('/')}/api/v1/admin/tenants/"
         f"reference-tenant/dataset-releases/{release_id}"
     )
     payload = {
@@ -235,7 +287,7 @@ def _dataset_release_round_trip(
         },
         "candidate_sha256": "a" * 64,
         "curation_review_sha256": "b" * 64,
-        "synthetic": True,
+        "synthetic": synthetic,
     }
     create_headers = {
         "Authorization": f"Bearer {curator_token}",
@@ -306,9 +358,13 @@ def _dataset_release_round_trip(
         raise RuntimeError("published dataset release accepted a mutable review")
 
 
-def _mcp_call(client: httpx.Client) -> None:
+def _mcp_call(
+    client: httpx.Client,
+    *,
+    mcp_url: str = "http://localhost:28082/mcp",
+) -> None:
     response = client.post(
-        "http://localhost:28082/mcp",
+        mcp_url,
         headers={
             "Authorization": "Bearer reference-mcp-token-change-me",
             "MCP-Protocol-Version": "2025-06-18",
@@ -346,9 +402,22 @@ def _wait_status(client: httpx.Client, url: str, attempts: int = 60) -> None:
     raise RuntimeError(f"readiness did not converge: {last_error}")
 
 
-def _compose(compose_file: Path, *arguments: str) -> None:
+def _compose(
+    compose_file: Path | tuple[Path, ...],
+    *arguments: str,
+    project_name: str | None = None,
+    env_file: Path | None = None,
+) -> None:
+    compose_files = (compose_file,) if isinstance(compose_file, Path) else compose_file
+    command = ["docker", "compose"]
+    if project_name:
+        command.extend(("--project-name", project_name))
+    if env_file:
+        command.extend(("--env-file", str(env_file)))
+    for path in compose_files:
+        command.extend(("-f", str(path)))
     completed = subprocess.run(
-        ["docker", "compose", "-f", str(compose_file), *arguments],
+        [*command, *arguments],
         check=False,
         capture_output=True,
         text=True,
@@ -366,14 +435,42 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=Path(__file__).with_name("docker-compose.yml"),
     )
+    parser.add_argument("--compose-override", type=Path, action="append", default=[])
+    parser.add_argument("--compose-project-name")
+    parser.add_argument("--compose-env-file", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--skip-start", action="store_true")
+    parser.add_argument("--agent-url", default="http://localhost:28000")
+    parser.add_argument("--oidc-token-url", default="https://localhost:28443/token")
+    parser.add_argument("--prometheus-url", default="http://localhost:29090")
+    parser.add_argument("--loki-url", default="http://localhost:23100")
+    parser.add_argument("--tempo-url", default="http://localhost:23200")
+    parser.add_argument("--provider-url", default="http://localhost:28081")
+    parser.add_argument("--mcp-url", default="http://localhost:28082/mcp")
+    parser.add_argument("--environment", default="reference-staging")
+    parser.add_argument("--simulation", action="store_true")
     args = parser.parse_args(argv)
     try:
+        compose_files = (
+            (args.compose_file, *args.compose_override)
+            if args.compose_override
+            else args.compose_file
+        )
         report = run_acceptance(
-            compose_file=args.compose_file,
+            compose_file=compose_files,
             output=args.output,
             start_stack=not args.skip_start,
+            compose_project_name=args.compose_project_name,
+            compose_env_file=args.compose_env_file,
+            agent_url=args.agent_url,
+            oidc_token_url=args.oidc_token_url,
+            prometheus_url=args.prometheus_url,
+            loki_url=args.loki_url,
+            tempo_url=args.tempo_url,
+            provider_url=args.provider_url,
+            mcp_url=args.mcp_url,
+            environment=args.environment,
+            simulation=args.simulation,
         )
     except (OSError, RuntimeError, ValueError) as exc:
         print(str(exc), file=sys.stderr)

@@ -71,6 +71,13 @@ class StepDecision:
 class InvestigationState:
     incident_id: str
     tenant_id: str
+    service_name: str | None = None
+    environment: str = "default"
+    alert_summary: str = ""
+    error_fingerprint: str = ""
+    recent_change_type: str = ""
+    log_keywords: list[str] = field(default_factory=list)
+    trace_errors: list[str] = field(default_factory=list)
     completed_steps: list[str] = field(default_factory=list)
     failed_steps: list[str] = field(default_factory=list)
     evidence_ids: list[str] = field(default_factory=list)
@@ -102,6 +109,24 @@ class InvestigationState:
             raise AppValidationError("started_at must include timezone information")
         if self.checkpoint_version < 1:
             raise AppValidationError("checkpoint_version must be positive")
+        if self.service_name is not None:
+            self._validate_text("service_name", self.service_name, 256)
+        self._validate_text("environment", self.environment, 64)
+        for field_name, value, maximum in (
+            ("alert_summary", self.alert_summary, 2048),
+            ("error_fingerprint", self.error_fingerprint, 256),
+            ("recent_change_type", self.recent_change_type, 128),
+        ):
+            if not isinstance(value, str) or len(value) > maximum:
+                raise AppValidationError(f"{field_name} is invalid")
+        for field_name, values in (
+            ("log_keywords", self.log_keywords),
+            ("trace_errors", self.trace_errors),
+        ):
+            if not isinstance(values, list) or len(values) > 32:
+                raise AppValidationError(f"{field_name} is invalid")
+            for value in values:
+                self._validate_text(field_name, value, 256)
 
     @property
     def step_count(self) -> int:
@@ -148,6 +173,16 @@ class InvestigationState:
             raise AppValidationError("invalid stop reason")
         self.stop_reason = reason
         self.checkpoint_version += 1
+
+    @staticmethod
+    def _validate_text(field_name: str, value: str, maximum: int) -> None:
+        if (
+            not isinstance(value, str)
+            or not 1 <= len(value) <= maximum
+            or value != value.strip()
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)
+        ):
+            raise AppValidationError(f"{field_name} is invalid")
 
 
 def _validate_text(name: str, value: str, maximum: int) -> None:

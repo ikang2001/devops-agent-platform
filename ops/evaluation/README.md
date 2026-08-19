@@ -115,3 +115,10 @@ Agent/LLM。当前结果文件只保存评分结果，不复制完整 Ground Tru
 - Offline LLM Gate 的人工评审工作流。
 
 本地 12 场景合同夹具、评分器和四类输出已经可重复运行，但仍不能包装成生产验收。
+
+## 真实 Provider 与消融门禁
+
+真实模型必须使用 [`REAL_PROVIDER.md`](REAL_PROVIDER.md) 中的入口。`run_live_benchmark`
+的 `--require-real` 会拒绝 synthetic/reference Provider，并要求完整 12 场景 × 5 次运行；
+`run_real_ablation` 要求 baseline、change、topology、knowledge、dynamic 五个变体各自提供
+独立的 12×5 `results.json`，缺少真实输入时会 fail-closed，不生成假指标。

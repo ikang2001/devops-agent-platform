@@ -18,6 +18,12 @@ from devops_agent_platform.domain.enums import (
     IncidentCreationAction,
 )
 from devops_agent_platform.domain.exceptions import ConflictError
+from devops_agent_platform.domain.models.topology import (
+    DependencyEdge,
+    ServiceNode,
+    TopologyGraph,
+    TopologySource,
+)
 from devops_agent_platform.domain.policies.incident_creation import (
     IncidentCreationPolicy,
 )
@@ -112,6 +118,7 @@ def build_service(
     incident_ids: list[str],
     event_ids: list[str],
     correlation_lock: RecordingCorrelationLock | None = None,
+    topology_provider=None,
 ) -> AlertApplicationService:
     """使用真实 Unit of Work 和可预测 ID 构造应用服务。"""
     lock = correlation_lock or RecordingCorrelationLock()
@@ -126,6 +133,7 @@ def build_service(
             incident_ids=incident_ids,
             event_ids=event_ids,
         ),
+        topology_provider=topology_provider,
     )
 
 
@@ -373,3 +381,81 @@ async def test_alert_conflict_rolls_back_incident_update(
 
     assert rolled_back_incident is None
     assert rolled_back_event is None
+
+
+async def test_alert_storm_converges_cross_service_alerts_to_one_incident(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    services = ("postgres", "inventory-api", "checkout-api", "order-api")
+    graph = TopologyGraph(
+        tenant_id="tenant_001",
+        nodes=tuple(
+            ServiceNode(
+                node_id=f"service:{service_name}",
+                tenant_id="tenant_001",
+                service_name=service_name,
+                environment="default",
+                source=TopologySource.STATIC,
+            )
+            for service_name in services
+        ),
+        edges=tuple(
+            DependencyEdge(
+                edge_id=f"edge-{index}",
+                tenant_id="tenant_001",
+                source_node_id=f"service:{source}",
+                target_node_id=f"service:{target}",
+            )
+            for index, (source, target) in enumerate(
+                zip(services[:-1], services[1:], strict=True),
+                start=1,
+            )
+        ),
+    )
+
+    async def topology_provider(tenant_id: str, environment: str):
+        assert (tenant_id, environment) == ("tenant_001", "default")
+        return graph
+
+    service = build_service(
+        session_factory,
+        alert_ids=[f"alt_{index:02d}" for index in range(20)],
+        incident_ids=["inc_storm"],
+        event_ids=["evt_storm"],
+        topology_provider=topology_provider,
+    )
+    start = datetime(2026, 6, 27, 10, 0, tzinfo=UTC)
+    alert_services = [services[index % len(services)] for index in range(20)]
+    results = []
+    for index, service_name in enumerate(alert_services):
+        results.append(
+            await service.receive_alert(
+                build_command(
+                    external_event_id=f"storm-{index}",
+                    starts_at=start + timedelta(minutes=index),
+                    service_name=service_name,
+                    summary=f"{service_name} timeout alert",
+                )
+            )
+        )
+
+    assert results[0].incident_action is IncidentCreationAction.CREATE
+    assert all(item.incident_id == "inc_storm" for item in results)
+    assert all(
+        item.incident_action is IncidentCreationAction.ATTACH
+        for item in results[1:]
+    )
+    assert await count_rows(session_factory, IncidentRecord) == 1
+    assert await count_rows(session_factory, AlertRecord) == 20
+    assert await count_rows(session_factory, OutboxEventRecord) == 1
+
+    async with session_factory() as session:
+        incident = await SQLAlchemyIncidentRepository(session).get_by_id(
+            "inc_storm",
+            "tenant_001",
+        )
+    assert incident is not None
+    assert incident.service_name == "postgres"
+    assert incident.primary_alert_id == "alt_00"
+    assert set(incident.affected_services) == set(services)
+    assert incident.correlated_alert_count == 20

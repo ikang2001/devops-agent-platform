@@ -73,6 +73,8 @@ _TOOL_EVIDENCE_DEFAULTS = {
     "changes.query": (EvidenceType.CHANGE, "change_event_store"),
     "logs.query": (EvidenceType.LOG, "loki"),
     "traces.query": (EvidenceType.TRACE, "tempo"),
+    "topology.query": (EvidenceType.TOPOLOGY, "topology"),
+    "knowledge.search": (EvidenceType.KNOWLEDGE, "historical_knowledge"),
 }
 
 
