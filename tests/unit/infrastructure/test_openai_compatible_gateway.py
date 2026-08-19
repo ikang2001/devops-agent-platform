@@ -9,8 +9,13 @@ import pytest
 from pydantic import SecretStr
 
 from devops_agent_platform.application.exceptions import LLMProviderError
-from devops_agent_platform.domain.enums import EvidenceType
+from devops_agent_platform.domain.enums import (
+    EvidenceType,
+    RCAConclusionStatus,
+    RootCauseType,
+)
 from devops_agent_platform.domain.exceptions import AppValidationError
+from devops_agent_platform.domain.models.rca_report import RCAReportCandidate
 from devops_agent_platform.infrastructure.llm import (
     FailoverLLMReportGateway,
     LLMProviderAttempt,
@@ -33,7 +38,7 @@ def build_request() -> LLMReportRequest:
         workflow_run_id="wfr_001",
         execution_attempt=1,
         trace_id="trc_001",
-        prompt_version="rca-report-v1",
+        prompt_version="rca-report-v2-candidate-review",
         evidence=(
             LLMReportEvidence(
                 evidence_id="a" * 64,
@@ -43,12 +48,30 @@ def build_request() -> LLMReportRequest:
                 confidence=0.9,
             ),
         ),
+        candidates=(
+            RCAReportCandidate(
+                candidate_id="cand-db-timeout",
+                service="inventory-service",
+                root_type=RootCauseType.DEPENDENCY_TIMEOUT,
+                resource="postgres",
+                score=0.9,
+                supporting_evidence_ids=("a" * 64,),
+                source_evidence_types=("LOG",),
+            ),
+        ),
+        recommended_status=RCAConclusionStatus.CANDIDATE,
     )
 
 
 def valid_report() -> dict[str, Any]:
     """构造模型 output_text 中的合法报告对象。"""
     return {
+        "selected_candidate_id": "cand-db-timeout",
+        "root_cause": {
+            "service": "inventory-service",
+            "type": "dependency_timeout",
+            "resource": "postgres",
+        },
         "conclusion_status": "CANDIDATE",
         "title": "Database latency candidate",
         "summary": "Logs show increased database timeout rates.",
@@ -297,9 +320,19 @@ async def test_gateway_sends_strict_minimal_responses_request() -> None:
     assert schema["properties"]["conclusion_status"]["enum"] == [
         "UNDETERMINED",
         "CANDIDATE",
+        "NO_ACTIONABLE_ROOT_CAUSE",
     ]
+    assert schema["properties"]["selected_candidate_id"]["anyOf"][0][
+        "enum"
+    ] == ["cand-db-timeout"]
     model_input = json.loads(body["input"])
-    assert set(model_input) == {"prompt_version", "evidence"}
+    assert set(model_input) == {
+        "prompt_version",
+        "recommended_status",
+        "evidence",
+        "candidate_set",
+    }
+    assert model_input["candidate_set"][0]["candidate_id"] == "cand-db-timeout"
     assert "tenant_001" not in body["input"]
     assert "workflow_run_id" not in body["input"]
 

@@ -15,6 +15,7 @@ from devops_agent_platform.application.commands.workflow_execution import (
 from devops_agent_platform.domain.enums import (
     EvidenceType,
     RCAConclusionStatus,
+    RootCauseType,
 )
 from devops_agent_platform.domain.exceptions import AppValidationError
 from devops_agent_platform.domain.models.evidence import (
@@ -89,6 +90,34 @@ def valid_response(*evidence_ids: str) -> dict[str, Any]:
     }
 
 
+def candidate_response(
+    candidate: Any,
+    *evidence_ids: str,
+    root_type: str | None = None,
+    conclusion_status: str = "CANDIDATE",
+    root_cause: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """鏋勯€犱竴涓湁鍊欓€夊尮閰嶆牎楠岀殑 LLM 鍝嶅簲銆?"""
+    selected_root_type = root_type or candidate.root_type.value
+    selected_root_cause = root_cause
+    if selected_root_cause is None and conclusion_status == "CANDIDATE":
+        selected_root_cause = {
+            "service": candidate.service,
+            "type": selected_root_type,
+            "resource": candidate.resource,
+        }
+    return {
+        "selected_candidate_id": candidate.candidate_id,
+        "root_cause": selected_root_cause,
+        "conclusion_status": conclusion_status,
+        "title": "Structured RCA candidate",
+        "summary": "The deterministic candidate review is complete.",
+        "confidence": 0.82,
+        "evidence_ids": list(evidence_ids),
+        "recommendations": ["Review the selected candidate before remediation."],
+    }
+
+
 class RecordingGateway:
     """记录请求并按队列返回结果的测试模型网关。"""
 
@@ -142,13 +171,218 @@ async def test_valid_response_builds_stable_structured_report() -> None:
 
     assert report.conclusion_status is RCAConclusionStatus.CANDIDATE
     assert report.generator_name == "llm-structured-report"
-    assert report.generator_version == "v1/rca-report-v1"
+    assert report.generator_version == "v1/rca-report-v2-candidate-review"
     assert report.evidence_type_counts == (("LOG", 1), ("METRIC", 1))
     assert report.report_id == replay.report_id
     assert [item[0] for item in observer.observations] == [
         LLMReportGenerationOutcome.SUCCESS,
         LLMReportGenerationOutcome.SUCCESS,
     ]
+
+
+async def test_candidate_response_persists_structured_root_cause() -> None:
+    log = build_evidence(
+        "a" * 64,
+        EvidenceType.LOG,
+        summary="inventory-service database timeout DB_TIMEOUT",
+    )
+    trace = build_evidence(
+        "b" * 64,
+        EvidenceType.TRACE,
+        summary="inventory-service database timeout trace",
+    )
+
+    class CandidateSelectingGateway:
+        def __init__(self) -> None:
+            self.requests: list[LLMReportRequest] = []
+
+        async def generate_report(
+            self,
+            request: LLMReportRequest,
+        ) -> Mapping[str, Any]:
+            self.requests.append(request)
+            candidate = request.candidates[0]
+            return {
+                "selected_candidate_id": candidate.candidate_id,
+                "root_cause": {
+                    "service": candidate.service,
+                    "type": candidate.root_type.value,
+                    "resource": candidate.resource,
+                },
+                "conclusion_status": "CANDIDATE",
+                "title": "Inventory database timeout candidate",
+                "summary": "Logs and traces identify the inventory database timeout.",
+                "confidence": 0.99,
+                "evidence_ids": [log.evidence_id, trace.evidence_id],
+                "recommendations": ["Review the database connection health."],
+            }
+
+    gateway = CandidateSelectingGateway()
+    report = await ResilientLLMRCAReportGenerator(
+        gateway,
+        clock=lambda: NOW,
+    ).generate(build_command(), (log, trace))
+
+    assert gateway.requests[0].candidates
+    assert report.suspected_root_node == "inventory-service"
+    assert report.root_cause_type is RootCauseType.DEPENDENCY_TIMEOUT
+    assert report.root_cause_resource == "postgres"
+    assert report.selected_candidate_id == report.root_cause_candidates[0].candidate_id
+    assert report.confidence == 0.9
+
+
+async def test_candidate_type_alias_is_normalized_before_candidate_match() -> None:
+    """LLM 鍙娇鐢ㄥ垯绾﹀畾鍒悕锛岄鍩熷眰蹇呴』鏄犲皠鍚庡啀涓€鑷存€ф牎楠屻€?"""
+    evidence = build_evidence(
+        "a" * 64,
+        EvidenceType.LOG,
+        summary="inventory-service database timeout DB_TIMEOUT",
+    )
+    trace = build_evidence(
+        "b" * 64,
+        EvidenceType.TRACE,
+        summary="inventory-service database timeout trace",
+    )
+
+    class AliasGateway:
+        async def generate_report(
+            self,
+            request: LLMReportRequest,
+        ) -> Mapping[str, Any]:
+            candidate = request.candidates[0]
+            return candidate_response(
+                candidate,
+                evidence.evidence_id,
+                trace.evidence_id,
+                root_type="db_timeout",
+            )
+
+    report = await ResilientLLMRCAReportGenerator(
+        AliasGateway(),
+        clock=lambda: NOW,
+    ).generate(build_command(), (evidence, trace))
+
+    assert report.generator_name == "llm-structured-report"
+    assert report.root_cause_type is RootCauseType.DEPENDENCY_TIMEOUT
+    assert report.root_cause_resource == "postgres"
+
+
+async def test_no_actionable_root_cause_is_persisted_as_structured_status() -> None:
+    """确认无客户影响时，报告保留结论状态但不伪造一个可执行根因。"""
+    log = build_evidence(
+        "a" * 64,
+        EvidenceType.LOG,
+        summary=(
+            "checkout-service alert remains successful; no customer impact "
+            "and no failure counter"
+        ),
+    )
+    metric = build_evidence(
+        "b" * 64,
+        EvidenceType.METRIC,
+        summary=(
+            "checkout-service no customer impact; no failure counter; "
+            "remains successful"
+        ),
+    )
+
+    class NoActionGateway:
+        async def generate_report(
+            self,
+            request: LLMReportRequest,
+        ) -> Mapping[str, Any]:
+            candidate = request.candidates[0]
+            assert candidate.root_type is RootCauseType.NO_ACTIONABLE_ROOT_CAUSE
+            return candidate_response(
+                candidate,
+                log.evidence_id,
+                metric.evidence_id,
+                conclusion_status="NO_ACTIONABLE_ROOT_CAUSE",
+            )
+
+    report = await ResilientLLMRCAReportGenerator(
+        NoActionGateway(),
+        clock=lambda: NOW,
+    ).generate(build_command(), (log, metric))
+
+    assert report.generator_name == "llm-structured-report"
+    assert report.conclusion_status is RCAConclusionStatus.NO_ACTIONABLE_ROOT_CAUSE
+    assert report.root_cause_type is None
+    assert report.suspected_root_node is None
+    assert report.selected_candidate_id == report.root_cause_candidates[0].candidate_id
+
+
+@pytest.mark.parametrize(
+    ("selected_candidate", "root_type"),
+    [
+        ("cand-does-not-exist", "dependency_timeout"),
+        ("candidate", "dependency_latency"),
+    ],
+)
+async def test_inconsistent_candidate_selection_fails_closed(
+    selected_candidate: str,
+    root_type: str,
+) -> None:
+    """未知候选或根因类型不匹配时，不能让模型绕过候选集合写入报告。"""
+    evidence = build_evidence(
+        "a" * 64,
+        EvidenceType.LOG,
+        summary="inventory-service database timeout DB_TIMEOUT",
+    )
+
+    class InconsistentGateway:
+        async def generate_report(
+            self,
+            request: LLMReportRequest,
+        ) -> Mapping[str, Any]:
+            candidate = request.candidates[0]
+            return {
+                **candidate_response(
+                    candidate,
+                    evidence.evidence_id,
+                    root_type=root_type,
+                ),
+                "selected_candidate_id": (
+                    candidate.candidate_id
+                    if selected_candidate == "candidate"
+                    else selected_candidate
+                ),
+            }
+
+    report = await ResilientLLMRCAReportGenerator(
+        InconsistentGateway(),
+        clock=lambda: NOW,
+    ).generate(build_command(), (evidence,))
+
+    assert report.generator_name == "deterministic-evidence-summary"
+    assert report.conclusion_status is RCAConclusionStatus.UNDETERMINED
+
+
+async def test_low_score_selected_candidate_falls_back_to_undetermined() -> None:
+    """低于安全阈值的候选即使被 LLM 选择，也必须降级为未确定。"""
+    evidence = build_evidence(
+        "a" * 64,
+        EvidenceType.KNOWLEDGE,
+        summary="historical only: resembles old incident",
+    )
+
+    class LowScoreGateway:
+        async def generate_report(
+            self,
+            request: LLMReportRequest,
+        ) -> Mapping[str, Any]:
+            candidate = request.candidates[0]
+            assert candidate.score < 0.5
+            return candidate_response(candidate, evidence.evidence_id)
+
+    report = await ResilientLLMRCAReportGenerator(
+        LowScoreGateway(),
+        clock=lambda: NOW,
+    ).generate(build_command(), (evidence,))
+
+    assert report.generator_name == "deterministic-evidence-summary"
+    assert report.conclusion_status is RCAConclusionStatus.UNDETERMINED
+    assert report.confidence == 0.0
 
 
 async def test_request_exposes_only_limited_evidence_projection() -> None:

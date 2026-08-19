@@ -86,6 +86,14 @@ class RCAReportRecord(Base):
     )
     recommendations_json: Mapped[str] = mapped_column(Text, nullable=False)
     suspected_root_node: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    root_cause_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    root_cause_resource: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    selected_candidate_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    root_cause_candidates_json: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="[]",
+    )
     causal_chain_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     affected_services_json: Mapped[str] = mapped_column(
         Text, nullable=False, default="[]"

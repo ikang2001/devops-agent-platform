@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -18,6 +20,7 @@ from devops_agent_platform.evaluation.live_runner import (
     run_live_benchmark,
 )
 from ops.evaluation.build_reference_inputs import build_reference_suite
+from ops.load.run_load import evaluate_end_to_end_gate
 from ops.simulation.llm_config import (
     apply_compose_environment,
     load_simulation_values,
@@ -145,6 +148,49 @@ def _mark_load_simulation(path: Path) -> None:
     )
 
 
+def _attach_completion_probe(load_path: Path, completion_probe_path: Path) -> None:
+    """Attach the post-load RCA completion measurement to every load profile.
+
+    The load runner intentionally cannot know how many RCA workflows should be
+    created for a capacity sample.  The completion probe runs immediately after
+    the sample and is therefore the authoritative end-to-end measurement for
+    this local simulation.  Keeping the value in the load artifact makes the
+    gate auditable without pretending that every alert starts a new workflow.
+    """
+    load_document = json.loads(load_path.read_text(encoding="utf-8"))
+    completion_document = json.loads(
+        completion_probe_path.read_text(encoding="utf-8")
+    )
+    completion_rate = completion_document.get("completion_rate")
+    if not isinstance(completion_rate, int | float):
+        raise ValueError("completion probe did not produce a numeric completion rate")
+
+    for profile in load_document.get("profiles", []):
+        if not isinstance(profile, dict):
+            continue
+        profile["completion_rate"] = float(completion_rate)
+        profile["completion_measurement_source"] = "rca-completion-probe"
+        profile["completion_requested_workflows"] = completion_document.get(
+            "requested_workflows"
+        )
+        profile["completion_completed_workflows"] = completion_document.get(
+            "completed_workflows"
+        )
+        profile["end_to_end_gate"] = evaluate_end_to_end_gate(profile)
+
+    load_document["completion_probe"] = {
+        "artifact": completion_probe_path.name,
+        "completion_rate": float(completion_rate),
+        "requested_workflows": completion_document.get("requested_workflows"),
+        "completed_workflows": completion_document.get("completed_workflows"),
+        "measurement_source": "platform-prometheus-metrics",
+    }
+    load_path.write_text(
+        json.dumps(load_document, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _git_commit() -> str:
     completed = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
@@ -154,6 +200,82 @@ def _git_commit() -> str:
         check=True,
     )
     return completed.stdout.strip()
+
+
+def _run_capacity_load(
+    *,
+    output_root: Path,
+    agent_url: str,
+    duration_seconds: float,
+) -> Path:
+    if shutil.which("k6"):
+        load_directory = output_root / "load"
+        _run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(PROJECT_ROOT / "ops/load/run-load-matrix.ps1"),
+                "-BaseUrl",
+                agent_url,
+                "-OutputDirectory",
+                str(load_directory),
+                "-Duration",
+                f"{duration_seconds}s",
+                "-TargetLabel",
+                "production-like-simulation",
+            ]
+        )
+        return load_directory / "load-report.json"
+
+    load_path = output_root / "load-report.json"
+    _run(
+        [
+            sys.executable,
+            str(PROJECT_ROOT / "ops/load/run_load.py"),
+            "--mode",
+            "http-live",
+            "--target-url",
+            agent_url,
+            "--duration-seconds",
+            str(duration_seconds),
+            "--non-synthetic",
+            "--output",
+            str(load_path),
+        ]
+    )
+    return load_path
+
+
+def _run_completion_probe(
+    *,
+    output_root: Path,
+    agent_url: str,
+    oidc_token_url: str,
+    webhook_secret: str,
+    count: int,
+) -> Path:
+    output = output_root / "rca-completion-probe.json"
+    _run(
+        [
+            sys.executable,
+            str(PROJECT_ROOT / "ops/simulation/run_rca_completion_probe.py"),
+            "--agent-url",
+            agent_url,
+            "--oidc-token-url",
+            oidc_token_url,
+            "--webhook-secret",
+            webhook_secret,
+            "--count",
+            str(count),
+            "--output",
+            str(output),
+        ],
+        timeout=900,
+    )
+    return output
 
 
 async def _run_benchmark(
@@ -194,6 +316,13 @@ def run(args: argparse.Namespace) -> int:
     env_values = load_simulation_values(args.env_file)
     llm = resolve_llm_settings(env_values)
     apply_compose_environment(llm)
+    alert_webhook_secret = _setting(
+        env_values,
+        "REFERENCE_ALERT_WEBHOOK_SECRET",
+        "reference-alert-webhook-secret-change-me-123456",
+    )
+    os.environ["REFERENCE_ALERT_WEBHOOK_SECRET"] = alert_webhook_secret
+    os.environ["DEVOPS_AGENT_LOAD_WEBHOOK_SECRET"] = alert_webhook_secret
     _preflight_llm(llm.host_base_url, llm.model, llm.api_key)
 
     output_root = args.output_root.resolve()
@@ -285,23 +414,21 @@ def run(args: argparse.Namespace) -> int:
             )
         )
 
-        load_path = output_root / "load-report.json"
-        _run(
-            [
-                sys.executable,
-                str(PROJECT_ROOT / "ops/load/run_load.py"),
-                "--mode",
-                "http-live",
-                "--target-url",
-                f"http://localhost:{agent_port}",
-                "--duration-seconds",
-                str(args.load_duration_seconds),
-                "--non-synthetic",
-                "--output",
-                str(load_path),
-            ]
+        load_path = _run_capacity_load(
+            output_root=output_root,
+            agent_url=f"http://localhost:{agent_port}",
+            duration_seconds=args.load_duration_seconds,
         )
         _mark_load_simulation(load_path)
+
+        completion_probe_path = _run_completion_probe(
+            output_root=output_root,
+            agent_url=f"http://localhost:{agent_port}",
+            oidc_token_url=f"https://localhost:{oidc_port}/token",
+            webhook_secret=alert_webhook_secret,
+            count=args.completion_probe_count,
+        )
+        _attach_completion_probe(load_path, completion_probe_path)
 
         _run(
             [
@@ -343,7 +470,10 @@ def run(args: argparse.Namespace) -> int:
                 "protocol": "protocol-acceptance.json",
                 "ticketing": "ticketing-acceptance.json",
                 "benchmark": "benchmark/results.json",
-                "load": "load-report.json",
+                "load": load_path.relative_to(output_root).as_posix(),
+                "rca_completion_probe": completion_probe_path.relative_to(
+                    output_root
+                ).as_posix(),
                 "chaos": "chaos/chaos-report.json",
             },
         }
@@ -370,7 +500,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
     parser.add_argument("--output-root", type=Path, default=_default_output_root())
-    parser.add_argument("--load-duration-seconds", type=float, default=6.0)
+    parser.add_argument(
+        "--load-duration-seconds",
+        type=float,
+        default=300.0,
+        help="每档容量负载持续时间；验收建议保持 300 秒",
+    )
+    parser.add_argument(
+        "--completion-probe-count",
+        type=int,
+        default=3,
+        help="仿真中真实创建并等待终态的 RCA workflow 数量",
+    )
     parser.add_argument("--keep-stack", action="store_true")
     parser.add_argument(
         "--build",

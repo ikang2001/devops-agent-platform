@@ -249,6 +249,16 @@ class TriggerHeartbeatWaiter:
         return True
 
 
+class RecordingRCAObserver:
+    """记录协调器提交终态后的低基数 RCA 观测。"""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def observe_rca(self, **kwargs: object) -> None:
+        self.calls.append(kwargs)
+
+
 def build_coordinator(
     agent: FakeAgentWorkflow,
     control: FakeExecutionControl,
@@ -256,6 +266,7 @@ def build_coordinator(
     heartbeat_interval: timedelta = timedelta(seconds=1),
     execution_timeout: timedelta = timedelta(seconds=10),
     waiter: TriggerHeartbeatWaiter | None = None,
+    observer: RecordingRCAObserver | None = None,
 ) -> RCAExecutionCoordinator:
     """构造使用可控Agent、租约服务和时间配置的协调器。"""
     return RCAExecutionCoordinator(
@@ -266,6 +277,7 @@ def build_coordinator(
             execution_timeout=execution_timeout,
         ),
         wait_for_stop=waiter,
+        observer=observer,
     )
 
 
@@ -295,6 +307,31 @@ async def test_successful_agent_execution_commits_succeeded_status() -> None:
     assert control.completions[0].evidence == workflow_result.evidence
     assert control.completions[0].invocations == workflow_result.invocations
     assert control.completions[0].report == workflow_result.report
+
+
+async def test_successful_completion_records_rca_observation() -> None:
+    """终态提交成功后应暴露 RCA completion 计量，观测不参与业务事务。"""
+    observer = RecordingRCAObserver()
+    agent = FakeAgentWorkflow(
+        result=AgentWorkflowResult(
+            evidence=(build_evidence(),),
+            invocations=(build_invocation(),),
+            report=build_report(),
+        )
+    )
+
+    result = await build_coordinator(
+        agent,
+        FakeExecutionControl(),
+        observer=observer,
+    ).execute(build_event(), build_claim(), "worker_001")
+
+    assert result.status is WorkflowRunStatus.SUCCEEDED
+    assert len(observer.calls) == 1
+    assert observer.calls[0]["outcome"] == "succeeded"
+    assert observer.calls[0]["failed"] is False
+    assert observer.calls[0]["partial"] is False
+    assert isinstance(observer.calls[0]["duration_seconds"], float)
 
 
 async def test_agent_failure_persists_partial_invocation_audit() -> None:

@@ -68,6 +68,30 @@ def prediction_payload() -> dict[str, object]:
             },
         ],
         "affected_services": ["inventory-service", "checkout-service"],
+        "root_cause_candidates": [
+            {
+                "candidate_id": "cand-inventory-timeout",
+                "root_cause": {
+                    "service": "inventory-service",
+                    "type": "dependency_timeout",
+                    "resource": "postgres",
+                },
+                "score": 0.9,
+                "supporting_evidence_ids": ["ev-log", "ev-trace"],
+                "source_evidence_types": ["LOG", "TRACE"],
+            },
+            {
+                "candidate_id": "cand-payment-error",
+                "root_cause": {
+                    "service": "payment-service",
+                    "type": "application_error",
+                    "resource": None,
+                },
+                "score": 0.4,
+                "supporting_evidence_ids": ["ev-metric"],
+                "source_evidence_types": ["METRIC"],
+            },
+        ],
         "tool_calls": [
             {
                 "tool_type": "metrics.query@v1",
@@ -106,12 +130,32 @@ def score(
     return BenchmarkScorer().score(expected, actual)
 
 
+def test_required_evidence_id_recall_distinguishes_same_type_wrong_fact() -> None:
+    """同样的 Evidence 类型不应掩盖引用了错误事实 ID。"""
+    expected_payload = ground_truth_payload()
+    expected_payload["required_evidence_ids"] = ["required-log", "required-trace"]
+    prediction = prediction_payload()
+    prediction["evidence_ids"] = ["wrong-log", "wrong-trace", "wrong-metric"]
+    actual = RCAPrediction.model_validate(prediction)
+    expected = ScenarioGroundTruth.model_validate(expected_payload)
+
+    result = BenchmarkScorer().score(expected, actual)
+
+    assert result.evidence_recall == 1.0
+    assert result.required_evidence_id_recall == 0.0
+
+
 def test_complete_prediction_receives_a_strict_pass() -> None:
     result = score()
 
     assert result.passed is True
     assert result.rca_exact_match is True
     assert result.strict_rca_match is True
+    assert result.ground_truth_candidate_rank == 1
+    assert result.candidate_recall_at_3 is True
+    assert result.candidate_reciprocal_rank == 1.0
+    assert result.candidate_ranking_correct is True
+    assert result.root_cause_failure_type is None
     assert result.evidence_precision == 1.0
     assert result.evidence_recall == 1.0
     assert result.evidence_f1 == 1.0
@@ -137,6 +181,23 @@ def test_wrong_root_service_and_type_fail_rca_metrics() -> None:
     assert result.root_service_correct is False
     assert result.root_type_correct is False
     assert result.rca_exact_match is False
+    assert result.root_cause_failure_type == "FINAL_SELECTION_ERROR"
+    assert result.suspected_failure_layer == "FINAL_SELECTOR"
+
+
+def test_candidate_miss_is_attributed_to_candidate_generator() -> None:
+    actual = prediction_payload()
+    actual["root_cause_candidates"] = [
+        actual["root_cause_candidates"][1],
+    ]
+
+    result = score(prediction=actual)
+
+    assert result.ground_truth_candidate_rank is None
+    assert result.candidate_recall_at_3 is False
+    assert result.candidate_reciprocal_rank == 0.0
+    assert result.candidate_ranking_correct is False
+    assert result.root_cause_failure_type is None
 
 
 def test_partial_evidence_calculates_precision_recall_and_f1() -> None:
@@ -186,6 +247,7 @@ def test_empty_prediction_is_scored_without_division_errors() -> None:
     assert result.evidence_recall == 0.0
     assert result.causal_chain_f1 == 0.0
     assert result.blast_radius_f1 == 0.0
+    assert result.candidate_recall_at_3 is None
 
 
 def test_no_root_cause_scenario_rewards_an_undetermined_result() -> None:
@@ -248,6 +310,26 @@ def test_causal_chain_direction_is_part_of_the_score() -> None:
     assert result.causal_chain_recall == 0.5
     assert result.causal_chain_f1 == 0.5
     assert result.passed is False
+
+
+def test_causal_chain_and_blast_radius_normalize_service_aliases() -> None:
+    actual = prediction_payload()
+    chain = deepcopy(actual["causal_chain"])
+    assert isinstance(chain, list)
+    chain[0]["from_node"] = "resource:postgres"
+    chain[0]["to_node"] = "service:inventory-service"
+    chain[1]["from_node"] = "inventory"
+    chain[1]["to_node"] = "service:checkout-service"
+    actual["causal_chain"] = chain
+    actual["affected_services"] = [
+        "service:inventory-service",
+        "checkout",
+    ]
+
+    result = score(prediction=actual)
+
+    assert result.causal_chain_f1 == 1.0
+    assert result.blast_radius_f1 == 1.0
 
 
 def test_blast_radius_penalizes_an_unrelated_service() -> None:
@@ -340,7 +422,13 @@ def test_summary_aggregates_real_scores() -> None:
     assert summary.total_runs == 2
     assert summary.passed_runs == 1
     assert summary.rca_top1_accuracy == 0.5
+    assert summary.strict_rca_accuracy == 0.5
     assert summary.root_service_accuracy == 0.5
+    assert summary.root_resource_accuracy == 0.5
+    assert summary.candidate_evaluated_runs == 2
+    assert summary.candidate_recall_at_3 == 1.0
+    assert summary.candidate_mrr == 1.0
+    assert summary.candidate_ranking_accuracy == 1.0
     assert summary.evidence_recall == 1.0
     assert summary.false_positive_rate == 0.0
     assert summary.avg_investigation_steps == 3.0
@@ -355,3 +443,17 @@ def test_prediction_requires_a_supported_root_cause_claim() -> None:
 
     with pytest.raises(ValidationError, match="ROOT_CAUSE"):
         RCAPrediction.model_validate(actual)
+
+
+def test_prediction_rejects_duplicate_or_unsorted_candidates() -> None:
+    duplicate = prediction_payload()
+    duplicate["root_cause_candidates"][1]["candidate_id"] = (
+        "cand-inventory-timeout"
+    )
+    with pytest.raises(ValidationError, match="candidate_id"):
+        RCAPrediction.model_validate(duplicate)
+
+    unsorted = prediction_payload()
+    unsorted["root_cause_candidates"][0]["score"] = 0.1
+    with pytest.raises(ValidationError, match="sorted by score"):
+        RCAPrediction.model_validate(unsorted)

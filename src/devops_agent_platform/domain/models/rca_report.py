@@ -1,8 +1,81 @@
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
 
-from devops_agent_platform.domain.enums import RCAConclusionStatus
+from devops_agent_platform.domain.enums import RCAConclusionStatus, RootCauseType
 from devops_agent_platform.domain.exceptions import AppValidationError
+
+
+@dataclass(frozen=True)
+class RCAReportCandidate:
+    """随报告持久化的有限候选审计快照。"""
+
+    candidate_id: str
+    service: str
+    root_type: RootCauseType
+    resource: str | None
+    score: float
+    supporting_evidence_ids: tuple[str, ...]
+    contradicting_evidence_ids: tuple[str, ...] = ()
+    source_evidence_types: tuple[str, ...] = ()
+    missing_evidence: tuple[str, ...] = ()
+
+    def validate(self) -> None:
+        RCAReport._validate_text("candidate_id", self.candidate_id, 64)
+        RCAReport._validate_text("candidate service", self.service, 128)
+        if not isinstance(self.root_type, RootCauseType):
+            raise AppValidationError("candidate root_type is invalid")
+        if self.resource is not None:
+            RCAReport._validate_text("candidate resource", self.resource, 256)
+        if (
+            isinstance(self.score, bool)
+            or not isinstance(self.score, int | float)
+            or not isfinite(float(self.score))
+            or not 0 <= float(self.score) <= 1
+        ):
+            raise AppValidationError("candidate score must be between 0 and 1")
+        self._validate_unique_texts(
+            "supporting_evidence_ids",
+            self.supporting_evidence_ids,
+            100,
+            64,
+        )
+        self._validate_unique_texts(
+            "contradicting_evidence_ids",
+            self.contradicting_evidence_ids,
+            100,
+            64,
+        )
+        if set(self.supporting_evidence_ids) & set(
+            self.contradicting_evidence_ids
+        ):
+            raise AppValidationError("candidate support and contradiction overlap")
+        self._validate_unique_texts(
+            "source_evidence_types",
+            self.source_evidence_types,
+            16,
+            32,
+        )
+        self._validate_unique_texts(
+            "missing_evidence",
+            self.missing_evidence,
+            16,
+            128,
+        )
+
+    @staticmethod
+    def _validate_unique_texts(
+        field_name: str,
+        values: tuple[str, ...],
+        maximum_items: int,
+        item_maximum: int,
+    ) -> None:
+        if not isinstance(values, tuple) or len(values) > maximum_items:
+            raise AppValidationError(f"{field_name} has invalid item count")
+        for value in values:
+            RCAReport._validate_text(field_name, value, item_maximum)
+        if len(values) != len(set(values)):
+            raise AppValidationError(f"{field_name} must be unique")
 
 
 @dataclass(frozen=True)
@@ -33,6 +106,10 @@ class RCAReport:
     causal_chain: tuple[tuple[str, str, tuple[str, ...]], ...] = ()
     affected_services: tuple[str, ...] = ()
     blast_radius: tuple[tuple[str, float], ...] = ()
+    root_cause_type: RootCauseType | None = None
+    root_cause_resource: str | None = None
+    selected_candidate_id: str | None = None
+    root_cause_candidates: tuple[RCAReportCandidate, ...] = ()
 
     def __post_init__(self) -> None:
         """构造时执行完整领域约束。"""
@@ -75,6 +152,7 @@ class RCAReport:
         self._validate_type_counts()
         self._validate_recommendations()
         self._validate_topology_context()
+        self._validate_root_cause_context()
         if (
             not isinstance(self.generated_at, datetime)
             or self.generated_at.tzinfo is None
@@ -181,6 +259,64 @@ class RCAReport:
                 or not 0 <= float(score) <= 1
             ):
                 raise AppValidationError("blast_radius score must be between 0 and 1")
+
+    def _validate_root_cause_context(self) -> None:
+        if (
+            self.conclusion_status
+            in {
+                RCAConclusionStatus.UNDETERMINED,
+                RCAConclusionStatus.NO_ACTIONABLE_ROOT_CAUSE,
+            }
+            and self.root_cause_type is not None
+        ):
+            raise AppValidationError(
+                "non-candidate report cannot contain a structured root cause"
+            )
+        if self.root_cause_type is not None and not isinstance(
+            self.root_cause_type,
+            RootCauseType,
+        ):
+            raise AppValidationError("root_cause_type is invalid")
+        if self.root_cause_resource is not None:
+            self._validate_text("root_cause_resource", self.root_cause_resource, 256)
+        if self.selected_candidate_id is not None:
+            self._validate_text("selected_candidate_id", self.selected_candidate_id, 64)
+        if (
+            not isinstance(self.root_cause_candidates, tuple)
+            or len(self.root_cause_candidates) > 5
+        ):
+            raise AppValidationError("root_cause_candidates has invalid item count")
+        for candidate in self.root_cause_candidates:
+            if not isinstance(candidate, RCAReportCandidate):
+                raise AppValidationError("root_cause_candidate is invalid")
+            candidate.validate()
+        candidate_ids = [item.candidate_id for item in self.root_cause_candidates]
+        if len(candidate_ids) != len(set(candidate_ids)):
+            raise AppValidationError("candidate IDs must be unique")
+        scores = [float(item.score) for item in self.root_cause_candidates]
+        if scores != sorted(scores, reverse=True):
+            raise AppValidationError("root cause candidates must be score ordered")
+        if self.selected_candidate_id is None:
+            return
+        selected = next(
+            (
+                item
+                for item in self.root_cause_candidates
+                if item.candidate_id == self.selected_candidate_id
+            ),
+            None,
+        )
+        if selected is None:
+            raise AppValidationError("selected candidate is not in candidate set")
+        if self.root_cause_type is not None and selected.root_type is not (
+            self.root_cause_type
+        ):
+            raise AppValidationError("selected candidate root type does not match")
+        if self.root_cause_type is not None and (
+            self.suspected_root_node != selected.service
+            or self.root_cause_resource != selected.resource
+        ):
+            raise AppValidationError("selected candidate root cause does not match")
 
     @staticmethod
     def _validate_text(

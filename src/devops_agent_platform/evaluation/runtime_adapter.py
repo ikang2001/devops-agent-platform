@@ -19,6 +19,7 @@ from devops_agent_platform.evaluation.schemas import (
     ConclusionStatus,
     EvidenceType,
     RCAPrediction,
+    RootCauseCandidateRef,
     RootCauseRef,
     ToolCall,
     ToolStatus,
@@ -97,6 +98,7 @@ class RCAReportPredictionAdapter:
                 for source, target, evidence_ids in report.causal_chain
             ),
             affected_services=report.affected_services,
+            root_cause_candidates=self._map_candidates(report),
             tool_calls=tool_calls,
             investigation_steps=len(invocation_items),
             llm_calls=llm_calls,
@@ -179,9 +181,14 @@ class RCAReportPredictionAdapter:
         root_cause_resource: str | None,
     ) -> tuple[RootCauseRef | None, ConclusionStatus, float, tuple[Claim, ...]]:
         status = ConclusionStatus(report.conclusion_status.value)
+        resolved_type = root_cause_type or (
+            report.root_cause_type.value
+            if report.root_cause_type is not None
+            else None
+        )
         if (
             report.suspected_root_node is None
-            or root_cause_type is None
+            or resolved_type is None
             or status not in {ConclusionStatus.CANDIDATE, ConclusionStatus.CONFIRMED}
         ):
             if status in {ConclusionStatus.CANDIDATE, ConclusionStatus.CONFIRMED}:
@@ -190,8 +197,12 @@ class RCAReportPredictionAdapter:
         service = root_cause_service or report.suspected_root_node
         root = RootCauseRef(
             service=service,
-            type=root_cause_type,
-            resource=root_cause_resource,
+            type=resolved_type,
+            resource=(
+                root_cause_resource
+                if root_cause_resource is not None
+                else report.root_cause_resource
+            ),
         )
         statement = report.summary[:2048]
         return (
@@ -205,6 +216,26 @@ class RCAReportPredictionAdapter:
                     evidence_ids=report.evidence_ids,
                 ),
             ),
+        )
+
+    @staticmethod
+    def _map_candidates(report: RCAReport) -> tuple[RootCauseCandidateRef, ...]:
+        return tuple(
+            RootCauseCandidateRef(
+                candidate_id=item.candidate_id,
+                root_cause=RootCauseRef(
+                    service=item.service,
+                    type=item.root_type.value,
+                    resource=item.resource,
+                ),
+                score=item.score,
+                supporting_evidence_ids=item.supporting_evidence_ids,
+                contradicting_evidence_ids=item.contradicting_evidence_ids,
+                source_evidence_types=tuple(
+                    EvidenceType(value) for value in item.source_evidence_types
+                ),
+            )
+            for item in report.root_cause_candidates
         )
 
     @staticmethod

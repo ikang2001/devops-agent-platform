@@ -1,8 +1,8 @@
 import json
 
-from devops_agent_platform.domain.enums import RCAConclusionStatus
+from devops_agent_platform.domain.enums import RCAConclusionStatus, RootCauseType
 from devops_agent_platform.domain.exceptions import AppValidationError
-from devops_agent_platform.domain.models.rca_report import RCAReport
+from devops_agent_platform.domain.models.rca_report import RCAReport, RCAReportCandidate
 from devops_agent_platform.infrastructure.database.models.rca_report import (
     RCAReportRecord,
 )
@@ -31,6 +31,16 @@ class RCAReportMapper:
             evidence_type_counts_json=_encode_json(report.evidence_type_counts),
             recommendations_json=_encode_json(report.recommendations),
             suspected_root_node=report.suspected_root_node,
+            root_cause_type=(
+                report.root_cause_type.value
+                if report.root_cause_type is not None
+                else None
+            ),
+            root_cause_resource=report.root_cause_resource,
+            selected_candidate_id=report.selected_candidate_id,
+            root_cause_candidates_json=_encode_json(
+                [_candidate_to_dict(item) for item in report.root_cause_candidates]
+            ),
             causal_chain_json=_encode_json(report.causal_chain),
             affected_services_json=_encode_json(report.affected_services),
             blast_radius_json=_encode_json(report.blast_radius),
@@ -62,6 +72,9 @@ class RCAReportMapper:
         )
         blast_radius = _decode_json_list(
             record.blast_radius_json or "[]", "blast_radius_json"
+        )
+        candidates = _decode_candidates(
+            getattr(record, "root_cause_candidates_json", "[]") or "[]"
         )
         return RCAReport(
             report_id=record.report_id,
@@ -95,6 +108,14 @@ class RCAReportMapper:
             generator_version=record.generator_version,
             generated_at=record.generated_at,
             suspected_root_node=record.suspected_root_node,
+            root_cause_type=(
+                RootCauseType(record.root_cause_type)
+                if getattr(record, "root_cause_type", None) is not None
+                else None
+            ),
+            root_cause_resource=getattr(record, "root_cause_resource", None),
+            selected_candidate_id=getattr(record, "selected_candidate_id", None),
+            root_cause_candidates=tuple(candidates),
             causal_chain=tuple(
                 (item[0], item[1], tuple(item[2]))
                 for item in causal_chain
@@ -144,6 +165,49 @@ def _encode_json(value: object) -> str:
         separators=(",", ":"),
         allow_nan=False,
     )
+
+
+def _candidate_to_dict(candidate: RCAReportCandidate) -> dict[str, object]:
+    return {
+        "candidate_id": candidate.candidate_id,
+        "service": candidate.service,
+        "root_type": candidate.root_type.value,
+        "resource": candidate.resource,
+        "score": candidate.score,
+        "supporting_evidence_ids": list(candidate.supporting_evidence_ids),
+        "contradicting_evidence_ids": list(candidate.contradicting_evidence_ids),
+        "source_evidence_types": list(candidate.source_evidence_types),
+        "missing_evidence": list(candidate.missing_evidence),
+    }
+
+
+def _decode_candidates(value: str) -> list[RCAReportCandidate]:
+    decoded = _decode_json_list(value, "root_cause_candidates_json")
+    candidates: list[RCAReportCandidate] = []
+    for item in decoded:
+        if not isinstance(item, dict):
+            raise AppValidationError("root_cause_candidates_json item is invalid")
+        try:
+            candidate = RCAReportCandidate(
+                candidate_id=item["candidate_id"],
+                service=item["service"],
+                root_type=RootCauseType(item["root_type"]),
+                resource=item.get("resource"),
+                score=float(item["score"]),
+                supporting_evidence_ids=tuple(item["supporting_evidence_ids"]),
+                contradicting_evidence_ids=tuple(
+                    item.get("contradicting_evidence_ids", [])
+                ),
+                source_evidence_types=tuple(item.get("source_evidence_types", [])),
+                missing_evidence=tuple(item.get("missing_evidence", [])),
+            )
+            candidate.validate()
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AppValidationError(
+                "root_cause_candidates_json item is invalid"
+            ) from exc
+        candidates.append(candidate)
+    return candidates
 
 
 def _decode_json_list(value: str, field_name: str) -> list:

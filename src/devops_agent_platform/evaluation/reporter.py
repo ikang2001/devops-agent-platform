@@ -38,10 +38,31 @@ def render_evaluation_report(
         f"| Runs | {summary.total_runs} |",
         f"| 通过 Runs | {summary.passed_runs} |",
         f"| RCA Top-1 Accuracy | {_percent(summary.rca_top1_accuracy)} |",
+        f"| Strict RCA Top-1 | {_percent(summary.strict_rca_accuracy)} |",
         f"| Root Service Accuracy | {_percent(summary.root_service_accuracy)} |",
         f"| Root Type Accuracy | {_percent(summary.root_type_accuracy)} |",
+        f"| Root Resource Accuracy | {_percent(summary.root_resource_accuracy)} |",
+        f"| Candidate Evaluated Runs | {summary.candidate_evaluated_runs} |",
+        f"| Candidate Recall@3 | {_percent_or_na(summary.candidate_recall_at_3)} |",
+        f"| Candidate MRR | {_decimal_or_na(summary.candidate_mrr)} |",
+        f"| Candidate Ranking Accuracy | "
+        f"{_percent_or_na(summary.candidate_ranking_accuracy)} |",
+        f"| Change Over-attribution Rate | "
+        f"{_percent(summary.change_overattribution_rate)} |",
+        f"| History Over-attribution Rate | "
+        f"{_percent(summary.history_overattribution_rate)} |",
+        f"| Conclusion Status Accuracy | "
+        f"{_percent(summary.conclusion_status_accuracy)} |",
+        f"| Undetermined Precision | "
+        f"{_percent_or_na(summary.undetermined_precision)} |",
+        f"| Undetermined Recall | "
+        f"{_percent_or_na(summary.undetermined_recall)} |",
+        f"| No Actionable Root Cause Accuracy | "
+        f"{_percent_or_na(summary.no_actionable_root_cause_accuracy)} |",
         f"| Evidence Precision | {_percent(summary.evidence_precision)} |",
         f"| Evidence Recall | {_percent(summary.evidence_recall)} |",
+        f"| Required Evidence ID Recall | "
+        f"{_percent_or_na(summary.required_evidence_id_recall)} |",
         f"| Evidence F1 | {_percent(summary.evidence_f1)} |",
         f"| Unsupported Claim Rate | {_percent(summary.unsupported_claim_rate)} |",
         f"| Forbidden Claim Rate | {_percent(summary.forbidden_claim_rate)} |",
@@ -63,18 +84,23 @@ def render_evaluation_report(
         "",
         "## 每次运行",
         "",
-        "| Scenario | Run | 通过 | RCA | Evidence F1 | Causal F1 | Blast F1 |",
-        "|---|---|---:|---:|---:|---:|---:|",
+        (
+            "| Scenario | Run | 通过 | RCA | Strict RCA | Candidate@3 | "
+            "Evidence F1 | Causal F1 | Blast F1 |"
+        ),
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     lines.extend(
         (
-            "| {scenario} | {run} | {passed} | {rca} | {evidence} | "
-            "{causal} | {blast} |"
+            "| {scenario} | {run} | {passed} | {rca} | {strict_rca} | "
+            "{candidate} | {evidence} | {causal} | {blast} |"
         ).format(
             scenario=item.scenario_id,
             run=item.run_id,
             passed="是" if item.passed else "否",
             rca=_percent(item.rca_exact_match),
+            strict_rca=_percent(item.strict_rca_match),
+            candidate=_percent_or_na(item.candidate_recall_at_3),
             evidence=_percent(item.evidence_f1),
             causal=_percent(item.causal_chain_f1),
             blast=_percent(item.blast_radius_f1),
@@ -94,8 +120,17 @@ def _failure_line(score: RunScore) -> str:
     reasons: list[str] = []
     if not score.rca_exact_match:
         reasons.append("根因不匹配")
+    elif not score.strict_rca_match:
+        reasons.append("根因资源不匹配")
+    if score.root_cause_failure_type is not None:
+        reasons.append(f"根因错误类型 {score.root_cause_failure_type}")
     if score.evidence_recall < 1:
         reasons.append("必需 Evidence 不完整")
+    if (
+        score.required_evidence_id_recall is not None
+        and score.required_evidence_id_recall < 1
+    ):
+        reasons.append("必需 Evidence ID 引用不完整")
     if score.unsupported_claim_rate:
         reasons.append("存在无证据 Claim")
     if score.forbidden_claims_found:
@@ -112,3 +147,11 @@ def _failure_line(score: RunScore) -> str:
 
 def _percent(value: float | bool) -> str:
     return f"{float(value) * 100:.2f}%"
+
+
+def _percent_or_na(value: float | bool | None) -> str:
+    return "N/A" if value is None else _percent(value)
+
+
+def _decimal_or_na(value: float | None) -> str:
+    return "N/A" if value is None else f"{value:.4f}"

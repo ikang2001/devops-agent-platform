@@ -8,7 +8,7 @@ from devops_agent_platform.application.queries.rca_results import (
 )
 from devops_agent_platform.domain.exceptions import ResourceNotFound
 from devops_agent_platform.domain.models.evidence import Evidence
-from devops_agent_platform.domain.models.rca_report import RCAReport
+from devops_agent_platform.domain.models.rca_report import RCAReport, RCAReportCandidate
 from devops_agent_platform.domain.models.tool_invocation import ToolInvocation
 from devops_agent_platform.domain.models.workflow_run import WorkflowRun
 from devops_agent_platform.ports.unit_of_work import UnitOfWorkPort
@@ -161,6 +161,9 @@ class RCAReportView:
     generator_name: str
     generator_version: str
     generated_at: datetime
+    root_cause: tuple[str, str, str | None] | None
+    selected_candidate_id: str | None
+    root_cause_candidates: tuple[RCAReportCandidate, ...]
 
     @classmethod
     def from_domain(cls, report: RCAReport) -> "RCAReportView":
@@ -192,6 +195,18 @@ class RCAReportView:
             generator_name=report.generator_name,
             generator_version=report.generator_version,
             generated_at=report.generated_at,
+            root_cause=(
+                (
+                    report.suspected_root_node,
+                    report.root_cause_type.value,
+                    report.root_cause_resource,
+                )
+                if report.suspected_root_node is not None
+                and report.root_cause_type is not None
+                else None
+            ),
+            selected_candidate_id=report.selected_candidate_id,
+            root_cause_candidates=report.root_cause_candidates,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -211,6 +226,36 @@ class RCAReportView:
             "generator_name": self.generator_name,
             "generator_version": self.generator_version,
             "generated_at": self.generated_at.isoformat(),
+            "root_cause": (
+                {
+                    "service": self.root_cause[0],
+                    "type": self.root_cause[1],
+                    "resource": self.root_cause[2],
+                }
+                if self.root_cause is not None
+                else None
+            ),
+            "selected_candidate_id": self.selected_candidate_id,
+            "root_cause_candidates": [
+                {
+                    "candidate_id": item.candidate_id,
+                    "root_cause": {
+                        "service": item.service,
+                        "type": item.root_type.value,
+                        "resource": item.resource,
+                    },
+                    "score": item.score,
+                    "supporting_evidence_ids": list(
+                        item.supporting_evidence_ids
+                    ),
+                    "contradicting_evidence_ids": list(
+                        item.contradicting_evidence_ids
+                    ),
+                    "source_evidence_types": list(item.source_evidence_types),
+                    "missing_evidence": list(item.missing_evidence),
+                }
+                for item in self.root_cause_candidates
+            ],
         }
 
 

@@ -1028,6 +1028,7 @@ def build_runtime(
             settings,
             session_factory,
             report_observer=report_observer,
+            execution_observer=report_observer,
         )
         rca_consumer_worker = rca_bundle.worker
         managed_resources = rca_bundle.resources

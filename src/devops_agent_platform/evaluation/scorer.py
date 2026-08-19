@@ -5,6 +5,11 @@ from dataclasses import asdict, dataclass
 from math import ceil
 from statistics import mean
 
+from devops_agent_platform.causal_context import (
+    normalize_affected_service,
+    normalize_causal_node,
+)
+
 from .schemas import (
     CausalEdge,
     ConclusionStatus,
@@ -23,8 +28,20 @@ class RunScore:
     root_resource_correct: bool
     rca_exact_match: bool
     strict_rca_match: bool
+    ground_truth_candidate_rank: int | None
+    candidate_recall_at_3: bool | None
+    candidate_reciprocal_rank: float | None
+    candidate_ranking_correct: bool | None
+    root_cause_failure_type: str | None
+    suspected_failure_layer: str | None
+    conclusion_status_correct: bool
+    expected_conclusion_status: str
+    predicted_conclusion_status: str
+    change_overattribution: bool
+    history_overattribution: bool
     evidence_precision: float
     evidence_recall: float
+    required_evidence_id_recall: float | None
     evidence_f1: float
     unsupported_claim_count: int
     unsupported_claim_rate: float
@@ -62,10 +79,23 @@ class Summary:
     total_runs: int
     passed_runs: int
     rca_top1_accuracy: float
+    strict_rca_accuracy: float
     root_service_accuracy: float
     root_type_accuracy: float
+    root_resource_accuracy: float
+    candidate_evaluated_runs: int
+    candidate_recall_at_3: float | None
+    candidate_mrr: float | None
+    candidate_ranking_accuracy: float | None
+    change_overattribution_rate: float
+    history_overattribution_rate: float
+    conclusion_status_accuracy: float
+    undetermined_precision: float | None
+    undetermined_recall: float | None
+    no_actionable_root_cause_accuracy: float | None
     evidence_precision: float
     evidence_recall: float
+    required_evidence_id_recall: float | None
     evidence_f1: float
     unsupported_claim_rate: float
     forbidden_claim_rate: float
@@ -101,9 +131,36 @@ class BenchmarkScorer:
         root_service_correct, root_type_correct, root_resource_correct = (
             self._score_root_cause(ground_truth, prediction)
         )
+        conclusion_status_correct = (
+            prediction.conclusion_status.value
+            == ground_truth.expected_conclusion_status.value
+        )
         rca_exact = root_service_correct and root_type_correct
         strict_rca = rca_exact and root_resource_correct
+        candidate_rank = self._candidate_rank(ground_truth, prediction)
+        candidate_recall, reciprocal_rank, ranking_correct = (
+            self._candidate_metrics(ground_truth, prediction, candidate_rank)
+        )
+        failure_type, failure_layer = self._classify_root_cause_failure(
+            ground_truth,
+            prediction,
+            root_service_correct=root_service_correct,
+            root_type_correct=root_type_correct,
+            root_resource_correct=root_resource_correct,
+            candidate_rank=candidate_rank,
+        )
+        change_overattribution, history_overattribution = (
+            self._score_evidence_overattribution(
+                ground_truth,
+                prediction,
+                rca_exact=rca_exact,
+            )
+        )
         evidence_precision, evidence_recall, evidence_f1 = self._score_evidence(
+            ground_truth,
+            prediction,
+        )
+        required_evidence_id_recall = self._score_required_evidence_id_recall(
             ground_truth,
             prediction,
         )
@@ -114,8 +171,14 @@ class BenchmarkScorer:
             (_edge_key(item) for item in prediction.causal_chain),
         )
         blast = _set_metrics(
-            set(ground_truth.affected_services),
-            set(prediction.affected_services),
+            (
+                normalize_affected_service(item)
+                for item in ground_truth.affected_services
+            ),
+            (
+                normalize_affected_service(item)
+                for item in prediction.affected_services
+            ),
         )
         tool_selection = self._score_tool_selection(ground_truth, prediction)
         redundant = self._redundant_tool_call_rate(prediction)
@@ -138,6 +201,7 @@ class BenchmarkScorer:
                 strict_rca,
                 evidence_precision == 1.0,
                 evidence_recall == 1.0,
+                conclusion_status_correct,
                 unsupported_count == 0,
                 not forbidden,
                 not false_positive,
@@ -157,8 +221,20 @@ class BenchmarkScorer:
             root_resource_correct=root_resource_correct,
             rca_exact_match=rca_exact,
             strict_rca_match=strict_rca,
+            ground_truth_candidate_rank=candidate_rank,
+            candidate_recall_at_3=candidate_recall,
+            candidate_reciprocal_rank=reciprocal_rank,
+            candidate_ranking_correct=ranking_correct,
+            root_cause_failure_type=failure_type,
+            suspected_failure_layer=failure_layer,
+            conclusion_status_correct=conclusion_status_correct,
+            expected_conclusion_status=ground_truth.expected_conclusion_status.value,
+            predicted_conclusion_status=prediction.conclusion_status.value,
+            change_overattribution=change_overattribution,
+            history_overattribution=history_overattribution,
             evidence_precision=evidence_precision,
             evidence_recall=evidence_recall,
+            required_evidence_id_recall=required_evidence_id_recall,
             evidence_f1=evidence_f1,
             unsupported_claim_count=unsupported_count,
             unsupported_claim_rate=unsupported_rate,
@@ -202,6 +278,84 @@ class BenchmarkScorer:
         )
 
     @staticmethod
+    def _candidate_rank(
+        ground_truth: ScenarioGroundTruth,
+        prediction: RCAPrediction,
+    ) -> int | None:
+        expected = ground_truth.root_cause
+        if expected is None:
+            return None
+        for rank, candidate in enumerate(
+            prediction.root_cause_candidates,
+            start=1,
+        ):
+            root = candidate.root_cause
+            if root.service == expected.service and root.type == expected.type:
+                return rank
+        return None
+
+    @staticmethod
+    def _candidate_metrics(
+        ground_truth: ScenarioGroundTruth,
+        prediction: RCAPrediction,
+        rank: int | None,
+    ) -> tuple[bool | None, float | None, bool | None]:
+        if ground_truth.root_cause is None or not prediction.root_cause_candidates:
+            return None, None, None
+        return rank is not None and rank <= 3, 1 / rank if rank else 0.0, rank == 1
+
+    @staticmethod
+    def _classify_root_cause_failure(
+        ground_truth: ScenarioGroundTruth,
+        prediction: RCAPrediction,
+        *,
+        root_service_correct: bool,
+        root_type_correct: bool,
+        root_resource_correct: bool,
+        candidate_rank: int | None,
+    ) -> tuple[str | None, str | None]:
+        if root_service_correct and root_type_correct and root_resource_correct:
+            return None, None
+        if ground_truth.root_cause is None and prediction.root_cause is None:
+            return "CONCLUSION_STATUS_MISMATCH", "FINAL_SELECTOR"
+        if ground_truth.root_cause is None:
+            return "FINAL_SELECTION_ERROR", "FINAL_SELECTOR"
+        if prediction.root_cause_candidates:
+            if candidate_rank is None or candidate_rank > 3:
+                return "INSUFFICIENT_DISCRIMINATION", "CANDIDATE_GENERATOR"
+            return "FINAL_SELECTION_ERROR", "FINAL_SELECTOR"
+        if prediction.root_cause is None:
+            return "INSUFFICIENT_DISCRIMINATION", "FINAL_SELECTOR"
+        if not root_service_correct:
+            return "WRONG_ROOT_SERVICE", "FINAL_SELECTOR"
+        if not root_type_correct:
+            return "RIGHT_SERVICE_WRONG_TYPE", "FINAL_SELECTOR"
+        return "RIGHT_SERVICE_RIGHT_TYPE_WRONG_RESOURCE", "RESOURCE_RESOLUTION"
+
+    @staticmethod
+    def _score_evidence_overattribution(
+        ground_truth: ScenarioGroundTruth,
+        prediction: RCAPrediction,
+        *,
+        rca_exact: bool,
+    ) -> tuple[bool, bool]:
+        if rca_exact or prediction.root_cause is None:
+            return False, False
+        selected = next(
+            (
+                item
+                for item in prediction.root_cause_candidates
+                if item.root_cause == prediction.root_cause
+            ),
+            None,
+        )
+        if selected is None:
+            return False, False
+        sources = {item.value for item in selected.source_evidence_types}
+        direct = bool(sources & {"METRIC", "LOG", "TRACE", "HTTP"})
+        return "CHANGE" in sources and not direct, "KNOWLEDGE" in sources and not direct
+
+    @staticmethod
     def _score_evidence(
         ground_truth: ScenarioGroundTruth,
         prediction: RCAPrediction,
@@ -221,6 +375,23 @@ class BenchmarkScorer:
             else 0.0
         )
         return precision, required_recall, f1
+
+    @staticmethod
+    def _score_required_evidence_id_recall(
+        ground_truth: ScenarioGroundTruth,
+        prediction: RCAPrediction,
+    ) -> float | None:
+        """计算 Ground Truth 必需 Evidence ID 的召回率。
+
+        Evidence Type Recall 只回答“每种证据类型是否出现”，无法发现模型
+        引用了同类型但错误的事实。Manifest 提供稳定 required_evidence IDs
+        时，单独按 ID 计算；旧版没有 ID 的内存 Ground Truth 返回 N/A。
+        """
+        expected = set(ground_truth.required_evidence_ids)
+        if not expected:
+            return None
+        actual = set(prediction.evidence_ids)
+        return len(expected & actual) / len(expected)
 
     @staticmethod
     def _score_claim_support(prediction: RCAPrediction) -> tuple[int, float]:
@@ -282,7 +453,10 @@ def _has_supported_evidence(
 
 
 def _edge_key(edge: CausalEdge) -> tuple[str, str]:
-    return edge.from_node, edge.to_node
+    return (
+        normalize_causal_node(edge.from_node),
+        normalize_causal_node(edge.to_node),
+    )
 
 
 def _set_metrics(
@@ -311,6 +485,26 @@ def summarize_scores(scores: tuple[RunScore, ...]) -> Summary:
     def average(field_name: str) -> float:
         return mean(float(getattr(item, field_name)) for item in scores)
 
+    def optional_average(field_name: str) -> float | None:
+        values = [
+            float(value)
+            for item in scores
+            if (value := getattr(item, field_name)) is not None
+        ]
+        return mean(values) if values else None
+
+    def status_metrics(status: str) -> tuple[float | None, float | None]:
+        expected = sum(item.expected_conclusion_status == status for item in scores)
+        predicted = sum(item.predicted_conclusion_status == status for item in scores)
+        true_positive = sum(
+            item.expected_conclusion_status == status
+            and item.predicted_conclusion_status == status
+            for item in scores
+        )
+        precision = true_positive / predicted if predicted else None
+        recall = true_positive / expected if expected else None
+        return precision, recall
+
     latencies = sorted(item.latency_ms for item in scores)
     p50_index = max(ceil(len(latencies) * 0.5) - 1, 0)
     p95_index = ceil(len(latencies) * 0.95) - 1
@@ -318,10 +512,29 @@ def summarize_scores(scores: tuple[RunScore, ...]) -> Summary:
         total_runs=len(scores),
         passed_runs=sum(item.passed for item in scores),
         rca_top1_accuracy=average("rca_exact_match"),
+        strict_rca_accuracy=average("strict_rca_match"),
         root_service_accuracy=average("root_service_correct"),
         root_type_accuracy=average("root_type_correct"),
+        root_resource_accuracy=average("root_resource_correct"),
+        candidate_evaluated_runs=sum(
+            item.candidate_recall_at_3 is not None for item in scores
+        ),
+        candidate_recall_at_3=optional_average("candidate_recall_at_3"),
+        candidate_mrr=optional_average("candidate_reciprocal_rank"),
+        candidate_ranking_accuracy=optional_average("candidate_ranking_correct"),
+        change_overattribution_rate=average("change_overattribution"),
+        history_overattribution_rate=average("history_overattribution"),
+        conclusion_status_accuracy=average("conclusion_status_correct"),
+        undetermined_precision=status_metrics("UNDETERMINED")[0],
+        undetermined_recall=status_metrics("UNDETERMINED")[1],
+        no_actionable_root_cause_accuracy=status_metrics(
+            "NO_ACTIONABLE_ROOT_CAUSE"
+        )[1],
         evidence_precision=average("evidence_precision"),
         evidence_recall=average("evidence_recall"),
+        required_evidence_id_recall=optional_average(
+            "required_evidence_id_recall"
+        ),
         evidence_f1=average("evidence_f1"),
         unsupported_claim_rate=average("unsupported_claim_rate"),
         forbidden_claim_rate=mean(bool(item.forbidden_claims_found) for item in scores),

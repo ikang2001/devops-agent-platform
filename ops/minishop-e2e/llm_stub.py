@@ -110,24 +110,44 @@ def build_report(request: dict[str, Any]) -> dict[str, Any]:
     evidence = evidence_payload["evidence"]
     if not isinstance(evidence, list) or not evidence:
         raise TypeError("evidence must be a non-empty list")
+    candidate_set = evidence_payload.get("candidate_set")
 
     service_name = detect_service(evidence)
     evidence_ids = [item["evidence_id"] for item in evidence]
+    if has_no_actionable_signal(evidence):
+        return finalize_report(
+            {
+                "conclusion_status": "NO_ACTIONABLE_ROOT_CAUSE",
+                "title": "No actionable root cause",
+                "summary": (
+                    "The checkout alert has no customer impact and successful traces."
+                ),
+                "confidence": 0.8,
+                "evidence_ids": evidence_ids,
+                "recommendations": [
+                    "Review the alert rule and keep the incident out of remediation."
+                ],
+            },
+            candidate_set,
+        )
     deployment_change = has_payment_v2_deployment(evidence)
     if deployment_change and not has_deployment_corroboration(evidence):
-        return {
-            "conclusion_status": "UNDETERMINED",
-            "title": "Deployment change requires corroboration",
-            "summary": (
-                "A payment-service deployment was observed, but Change Evidence "
-                "alone is insufficient to attribute the incident."
-            ),
-            "confidence": 0.2,
-            "evidence_ids": evidence_ids,
-            "recommendations": [
-                "Collect metric and log or trace evidence before attribution."
-            ],
-        }
+        return finalize_report(
+            {
+                "conclusion_status": "UNDETERMINED",
+                "title": "Deployment change requires corroboration",
+                "summary": (
+                    "A payment-service deployment was observed, but Change Evidence "
+                    "alone is insufficient to attribute the incident."
+                ),
+                "confidence": 0.2,
+                "evidence_ids": evidence_ids,
+                "recommendations": [
+                    "Collect metric and log or trace evidence before attribution."
+                ],
+            },
+            candidate_set,
+        )
     root_cause = ROOT_CAUSES.get(service_name)
     if deployment_change and has_deployment_corroboration(evidence):
         root_cause = {
@@ -140,28 +160,92 @@ def build_report(request: dict[str, Any]) -> dict[str, Any]:
             ),
         }
     if root_cause is None:
-        return {
-            "conclusion_status": "UNDETERMINED",
-            "title": "Root cause requires human review",
-            "summary": (
-                "The supplied evidence did not identify a supported MiniShop service."
-            ),
-            "confidence": 0.0,
-            "evidence_ids": evidence_ids,
-            "recommendations": ["Review the collected evidence manually."],
-        }
+        return finalize_report(
+            {
+                "conclusion_status": "UNDETERMINED",
+                "title": "Root cause requires human review",
+                "summary": (
+                    "The supplied evidence did not identify a supported "
+                    "MiniShop service."
+                ),
+                "confidence": 0.0,
+                "evidence_ids": evidence_ids,
+                "recommendations": ["Review the collected evidence manually."],
+            },
+            candidate_set,
+        )
     fault_type = root_cause["fault_type"]
+    return finalize_report(
+        {
+            "conclusion_status": "CANDIDATE",
+            "title": f"Candidate: {service_name} {fault_type}",
+            "summary": (
+                f"Evidence supports {service_name} fault_type {fault_type} as the "
+                f"candidate root cause: {root_cause['detail']}."
+            ),
+            "confidence": 0.95,
+            "evidence_ids": evidence_ids,
+            "recommendations": [root_cause["recommendation"]],
+        },
+        candidate_set,
+    )
+
+
+def finalize_report(
+    report: dict[str, Any],
+    candidate_set: Any,
+) -> dict[str, Any]:
+    """在候选评审协议下补齐结构化选择字段；兼容旧版 Stub 请求。"""
+    if not isinstance(candidate_set, list) or not candidate_set:
+        return report
+    if not all(isinstance(item, dict) for item in candidate_set):
+        raise TypeError("candidate_set must contain objects")
+    status = report["conclusion_status"]
+    if status == "UNDETERMINED":
+        return {**report, "selected_candidate_id": None, "root_cause": None}
+    candidates = [item for item in candidate_set if isinstance(item, dict)]
+    if status == "NO_ACTIONABLE_ROOT_CAUSE":
+        selected = next(
+            (
+                item
+                for item in candidates
+                if item.get("root_cause", {}).get("type")
+                == "no_actionable_root_cause"
+            ),
+            None,
+        )
+    else:
+        selected = candidates[0] if candidates else None
+    if selected is None:
+        return {
+            **report,
+            "conclusion_status": "UNDETERMINED",
+            "selected_candidate_id": None,
+            "root_cause": None,
+        }
+    root = selected.get("root_cause")
+    if not isinstance(root, dict):
+        raise TypeError("candidate root_cause must be an object")
     return {
-        "conclusion_status": "CANDIDATE",
-        "title": f"Candidate: {service_name} {fault_type}",
-        "summary": (
-            f"Evidence supports {service_name} fault_type {fault_type} as the "
-            f"candidate root cause: {root_cause['detail']}."
-        ),
-        "confidence": 0.95,
-        "evidence_ids": evidence_ids,
-        "recommendations": [root_cause["recommendation"]],
+        **report,
+        "selected_candidate_id": selected.get("candidate_id"),
+        "root_cause": {
+            "service": root.get("service"),
+            "type": root.get("type"),
+            "resource": root.get("resource"),
+        }
+        if status == "CANDIDATE"
+        else None,
     }
+
+
+def has_no_actionable_signal(evidence: list[dict[str, Any]]) -> bool:
+    """识别演练场景明确给出的“成功但误报”信号。"""
+    text = " ".join(str(item.get("summary", "")) for item in evidence).casefold()
+    return (
+        "no customer impact" in text
+        and ("remains successful" in text or "no failure counter" in text)
+    )
 
 
 def detect_service(evidence: list[dict[str, Any]]) -> str:

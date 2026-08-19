@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import math
+import re
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping
@@ -16,10 +17,10 @@ from devops_agent_platform.agent.report_generator import (
 from devops_agent_platform.application.commands.workflow_execution import (
     ExecuteRCAWorkflowCommand,
 )
-from devops_agent_platform.domain.enums import RCAConclusionStatus
+from devops_agent_platform.domain.enums import RCAConclusionStatus, RootCauseType
 from devops_agent_platform.domain.exceptions import AppValidationError
 from devops_agent_platform.domain.models.evidence import Evidence
-from devops_agent_platform.domain.models.rca_report import RCAReport
+from devops_agent_platform.domain.models.rca_report import RCAReport, RCAReportCandidate
 from devops_agent_platform.ports.llm import (
     LLMReportEvidence,
     LLMReportGatewayPort,
@@ -30,12 +31,19 @@ from devops_agent_platform.ports.rca_report import (
     LLMReportGenerationOutcome,
     RCAReportGeneratorPort,
 )
+from devops_agent_platform.rca_reasoning import (
+    ReasoningEvidence,
+    ReasoningEvidenceType,
+    RootCauseReasoningPipeline,
+    RootCauseReasoningResult,
+)
+from devops_agent_platform.rca_reasoning.taxonomy import RootCauseTaxonomyMapper
 from devops_agent_platform.tools.sanitization import redact_sensitive_text
 
 Clock = Callable[[], datetime]
 MonotonicClock = Callable[[], float]
 
-_RESPONSE_FIELDS = frozenset(
+_LEGACY_RESPONSE_FIELDS = frozenset(
     {
         "conclusion_status",
         "title",
@@ -45,6 +53,12 @@ _RESPONSE_FIELDS = frozenset(
         "recommendations",
     }
 )
+_CANDIDATE_RESPONSE_FIELDS = _LEGACY_RESPONSE_FIELDS | {
+    "selected_candidate_id",
+    "root_cause",
+}
+_SERVICE_PATTERN = re.compile(r"\b([a-z][a-z0-9-]+-service)\b", re.IGNORECASE)
+_ROOT_CAUSE_TAXONOMY = RootCauseTaxonomyMapper()
 
 
 @dataclass(frozen=True)
@@ -57,7 +71,7 @@ class LLMRCAReportGeneratorConfig:
     failure_threshold: int = 3
     recovery_timeout_seconds: float = 60.0
     generator_version: str = "v1"
-    prompt_version: str = "rca-report-v1"
+    prompt_version: str = "rca-report-v2-candidate-review"
 
     def __post_init__(self) -> None:
         """拒绝可能导致无界等待、超大 Prompt 或熔断失效的配置。"""
@@ -99,6 +113,15 @@ class _CircuitPermit:
 
     generation: int
     half_open: bool
+
+
+@dataclass(frozen=True)
+class _CandidateSelection:
+    selected_candidate_id: str | None
+    root_service: str | None
+    root_type: RootCauseType | None
+    root_resource: str | None
+    candidate: RCAReportCandidate | None
 
 
 class ResilientLLMRCAReportGenerator:
@@ -148,7 +171,8 @@ class ResilientLLMRCAReportGenerator:
                 : self._config.max_evidence_items
             ]
         )
-        request = self._build_request(command, selected)
+        reasoning = self._build_reasoning(selected)
+        request = self._build_request(command, selected, reasoning)
         permit = await self._acquire_circuit_permit()
         if permit is None:
             self._observe(
@@ -160,7 +184,7 @@ class ResilientLLMRCAReportGenerator:
         try:
             async with asyncio.timeout(self._config.timeout_seconds):
                 response = await self._gateway.generate_report(request)
-            report = self._build_report(command, selected, response)
+            report = self._build_report(command, selected, response, reasoning)
         except asyncio.CancelledError:
             await self._release_cancelled_permit(permit)
             self._observe(
@@ -198,6 +222,7 @@ class ResilientLLMRCAReportGenerator:
         self,
         command: ExecuteRCAWorkflowCommand,
         evidence: tuple[Evidence, ...],
+        reasoning: RootCauseReasoningResult,
     ) -> LLMReportRequest:
         """只投影已脱敏的有限摘要，原始 Evidence 内容永远不进入模型请求。"""
         projections = tuple(
@@ -220,6 +245,10 @@ class ResilientLLMRCAReportGenerator:
             trace_id=command.trace_id,
             prompt_version=self._config.prompt_version,
             evidence=projections,
+            candidates=_to_report_candidates(reasoning),
+            recommended_status=RCAConclusionStatus(
+                reasoning.recommended_status.value
+            ),
         )
 
     def _build_report(
@@ -227,16 +256,27 @@ class ResilientLLMRCAReportGenerator:
         command: ExecuteRCAWorkflowCommand,
         evidence: tuple[Evidence, ...],
         response: Mapping[str, Any],
+        reasoning: RootCauseReasoningResult,
     ) -> RCAReport:
         """把不可信模型响应转换为受领域约束保护的不可变报告。"""
         if not isinstance(response, Mapping):
             raise AppValidationError("LLM report response must be a mapping")
-        if set(response) != _RESPONSE_FIELDS:
+        response_fields = set(response)
+        if response_fields not in {
+            _LEGACY_RESPONSE_FIELDS,
+            _CANDIDATE_RESPONSE_FIELDS,
+        }:
             raise AppValidationError(
                 "LLM report response fields do not match the contract"
             )
 
         conclusion_status = self._parse_status(response["conclusion_status"])
+        selection = self._parse_candidate_selection(
+            response,
+            conclusion_status=conclusion_status,
+            reasoning=reasoning,
+            candidate_contract=response_fields == _CANDIDATE_RESPONSE_FIELDS,
+        )
         title = _require_redacted_text("title", response["title"], 256)
         summary = _require_redacted_text(
             "summary",
@@ -244,6 +284,8 @@ class ResilientLLMRCAReportGenerator:
             4096,
         )
         confidence = _require_confidence(response["confidence"])
+        if selection.candidate is not None:
+            confidence = _calibrate_confidence(confidence, selection.candidate)
         evidence_ids = _require_string_list(
             "evidence_ids",
             response["evidence_ids"],
@@ -277,7 +319,22 @@ class ResilientLLMRCAReportGenerator:
             "confidence": confidence,
             "evidence_ids": evidence_ids,
             "recommendations": recommendations,
+            "selected_candidate_id": selection.selected_candidate_id,
+            "root_cause": (
+                {
+                    "service": selection.root_service,
+                    "type": (
+                        selection.root_type.value
+                        if selection.root_type is not None
+                        else None
+                    ),
+                    "resource": selection.root_resource,
+                }
+                if selection.root_type is not None
+                else None
+            ),
         }
+        report_candidates = _to_report_candidates(reasoning)
         return RCAReport(
             report_id=self._build_report_id(
                 command,
@@ -301,6 +358,35 @@ class ResilientLLMRCAReportGenerator:
                 f"{self._config.prompt_version}"
             ),
             generated_at=self._now(),
+            suspected_root_node=selection.root_service,
+            root_cause_type=selection.root_type,
+            root_cause_resource=selection.root_resource,
+            selected_candidate_id=selection.selected_candidate_id,
+            root_cause_candidates=report_candidates,
+        )
+
+    @staticmethod
+    def _build_reasoning(
+        evidence: tuple[Evidence, ...],
+    ) -> RootCauseReasoningResult:
+        summaries = " ".join(item.summary for item in evidence)
+        services = _SERVICE_PATTERN.findall(summaries)
+        incident_service = services[-1].casefold() if services else "unknown-service"
+        return RootCauseReasoningPipeline().reason(
+            incident_service=incident_service,
+            incident_summary=summaries[:4096],
+            evidence=tuple(
+                ReasoningEvidence(
+                    evidence_id=item.evidence_id,
+                    evidence_type=ReasoningEvidenceType.from_value(
+                        item.evidence_type.value
+                    ),
+                    source=item.source,
+                    summary=item.summary,
+                    confidence=float(item.confidence),
+                )
+                for item in evidence
+            ),
         )
 
     @staticmethod
@@ -321,6 +407,109 @@ class ResilientLLMRCAReportGenerator:
                 "LLM reports cannot confirm a root cause"
             )
         return status
+
+    @staticmethod
+    def _parse_candidate_selection(
+        response: Mapping[str, Any],
+        *,
+        conclusion_status: RCAConclusionStatus,
+        reasoning: RootCauseReasoningResult,
+        candidate_contract: bool,
+    ) -> _CandidateSelection:
+        if not candidate_contract:
+            if conclusion_status is RCAConclusionStatus.UNDETERMINED:
+                return _CandidateSelection(None, None, None, None, None)
+            candidates = _to_report_candidates(reasoning)
+            selected = candidates[0] if candidates else None
+            if selected is None:
+                raise AppValidationError(
+                    "legacy candidate response has no deterministic candidate"
+                )
+            if conclusion_status is RCAConclusionStatus.NO_ACTIONABLE_ROOT_CAUSE:
+                if selected.root_type is not RootCauseType.NO_ACTIONABLE_ROOT_CAUSE:
+                    raise AppValidationError(
+                        "legacy no-action conclusion is inconsistent"
+                    )
+                return _CandidateSelection(
+                    selected.candidate_id,
+                    None,
+                    None,
+                    None,
+                    selected,
+                )
+            if conclusion_status is not RCAConclusionStatus.CANDIDATE:
+                raise AppValidationError("legacy candidate conclusion is invalid")
+            return _CandidateSelection(
+                selected.candidate_id,
+                selected.service,
+                selected.root_type,
+                selected.resource,
+                selected,
+            )
+        selected_value = response["selected_candidate_id"]
+        root_value = response["root_cause"]
+        if conclusion_status is RCAConclusionStatus.UNDETERMINED:
+            if selected_value is not None or root_value is not None:
+                raise AppValidationError(
+                    "undetermined report cannot select a root cause candidate"
+                )
+            return _CandidateSelection(None, None, None, None, None)
+        selected_id = _require_text(
+            "selected_candidate_id",
+            selected_value,
+            64,
+        )
+        candidates = _to_report_candidates(reasoning)
+        selected = next(
+            (item for item in candidates if item.candidate_id == selected_id),
+            None,
+        )
+        if selected is None:
+            raise AppValidationError("selected candidate is not in candidate set")
+        if conclusion_status is RCAConclusionStatus.NO_ACTIONABLE_ROOT_CAUSE:
+            if (
+                root_value is not None
+                or selected.root_type is not RootCauseType.NO_ACTIONABLE_ROOT_CAUSE
+            ):
+                raise AppValidationError("no-actionable conclusion is inconsistent")
+            return _CandidateSelection(selected_id, None, None, None, selected)
+        if conclusion_status is not RCAConclusionStatus.CANDIDATE:
+            raise AppValidationError("candidate conclusion status is invalid")
+        if not isinstance(root_value, Mapping) or set(root_value) != {
+            "service",
+            "type",
+            "resource",
+        }:
+            raise AppValidationError("root_cause must match the candidate schema")
+        service = _require_text("root_cause.service", root_value["service"], 128)
+        raw_type = _require_text("root_cause.type", root_value["type"], 128)
+        # Models may use a documented alias (for example ``db_timeout``), but
+        # the canonical type must still match the deterministic candidate.
+        root_type = _ROOT_CAUSE_TAXONOMY.map_type(raw_type)
+        if (
+            root_type is RootCauseType.UNKNOWN
+            and raw_type != RootCauseType.UNKNOWN.value
+        ):
+            raise AppValidationError("root_cause.type is not supported")
+        resource_value = root_value["resource"]
+        resource = (
+            _require_text("root_cause.resource", resource_value, 256)
+            if resource_value is not None
+            else None
+        )
+        if (
+            service != selected.service
+            or root_type is not selected.root_type
+            or resource != selected.resource
+        ):
+            raise AppValidationError("root cause does not match selected candidate")
+        return _CandidateSelection(
+            selected_id,
+            service,
+            root_type,
+            resource,
+            selected,
+        )
 
     def _build_report_id(
         self,
@@ -450,6 +639,42 @@ class ResilientLLMRCAReportGenerator:
         except Exception:
             # Metrics 属于非关键路径，不能因采集器故障触发业务降级或失败。
             return
+
+
+def _to_report_candidates(
+    reasoning: RootCauseReasoningResult,
+) -> tuple[RCAReportCandidate, ...]:
+    return tuple(
+        RCAReportCandidate(
+            candidate_id=item.candidate_id,
+            service=item.identity.service,
+            root_type=item.identity.root_type,
+            resource=item.identity.resource,
+            score=item.final_score,
+            supporting_evidence_ids=item.supporting_evidence_ids,
+            contradicting_evidence_ids=item.contradicting_evidence_ids,
+            source_evidence_types=tuple(
+                value.value for value in item.source_evidence_types
+            ),
+            missing_evidence=item.missing_evidence,
+        )
+        for item in reasoning.candidates
+    )
+
+
+def _calibrate_confidence(
+    model_confidence: float,
+    candidate: RCAReportCandidate,
+) -> float:
+    if candidate.score < 0.5:
+        raise AppValidationError("selected candidate score is below the safe threshold")
+    if candidate.score >= 0.8 and not (
+        candidate.contradicting_evidence_ids or candidate.missing_evidence
+    ):
+        cap = 0.9
+    else:
+        cap = 0.7
+    return min(model_confidence, cap)
 
 
 def _validate_bounded_integer(
