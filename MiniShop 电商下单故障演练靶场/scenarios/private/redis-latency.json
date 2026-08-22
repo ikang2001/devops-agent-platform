@@ -1,0 +1,52 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "inventory-service",
+      "checkout-service"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "redis",
+        "to_node": "inventory-service"
+      }
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "traces.query@v1"
+    ],
+    "forbidden_claims": [
+      "Payment service is the root cause."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "LOG",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "ev-redis-metric",
+      "ev-redis-trace"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "TRACE"
+    ],
+    "root_cause": {
+      "category": "redis_latency",
+      "causal_chain": [
+        "Redis latency is injected.",
+        "Inventory reservation slows down."
+      ],
+      "fault_type": "redis_latency",
+      "root_cause_resource": "redis",
+      "root_cause_type": "dependency_latency",
+      "runbook_path": "runbooks/inventory-db-timeout.md",
+      "service_name": "inventory-service",
+      "summary": "Redis latency delays inventory reservation."
+    }
+  },
+  "scenario_id": "redis-latency",
+  "schema_version": "1.0"
+}

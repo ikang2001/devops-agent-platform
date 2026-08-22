@@ -10,7 +10,15 @@ from app.alertmanager import AlertmanagerAlertMapper, AlertmanagerRelay
 from app.config import settings
 from app.logging import configure_logging, log_event, reset_trace_id, set_trace_id
 from app.metrics import metrics_response, observe_http_request
-from app.routers import alertmanager, checkout, faults, inventory, notification, payment
+from app.routers import (
+    alertmanager,
+    checkout,
+    faults,
+    holdout,
+    inventory,
+    notification,
+    payment,
+)
 from app.tracing import service_tracing
 
 configure_logging()
@@ -55,6 +63,8 @@ def service_name_for_path(path: str) -> str:
         return "notification-service"
     if path.startswith("/faults"):
         return "fault-control-service"
+    if path.startswith("/holdout"):
+        return "holdout-fault-control-service"
     return "minishop-service"
 
 
@@ -119,4 +129,5 @@ app.include_router(payment.router)
 app.include_router(inventory.router)
 app.include_router(notification.router)
 app.include_router(faults.router)
+app.include_router(holdout.router)
 app.include_router(alertmanager.router)

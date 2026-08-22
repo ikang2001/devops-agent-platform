@@ -1,0 +1,41 @@
+{
+  "ground_truth": {
+    "affected_services": [],
+    "causal_chain": [],
+    "expected_conclusion_status": "NO_ACTIONABLE_ROOT_CAUSE",
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "logs.query@v1",
+      "traces.query@v1",
+      "topology.query@v1"
+    ],
+    "forbidden_claims": [
+      "The holdout answer is known from the scenario manifest.",
+      "Data corruption is confirmed without direct evidence."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "KNOWLEDGE",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "cross-zone-network-alert-no-impact-evidence-1",
+      "cross-zone-network-alert-no-impact-evidence-2",
+      "cross-zone-network-alert-no-impact-evidence-3",
+      "cross-zone-network-alert-no-impact-evidence-4"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "LOG",
+      "TRACE",
+      "TOPOLOGY"
+    ],
+    "root_cause": null
+  },
+  "scenario_id": "cross-zone-network-alert-no-impact",
+  "schema_version": "1.0"
+}

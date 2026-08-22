@@ -1,0 +1,51 @@
+{
+  "alert_mapping": {
+    "alert_name": "MiniShopCheckoutCascade",
+    "external_event_id_prefix": "minishop-cascade",
+    "fingerprint": "minishop:checkout-service:cascade",
+    "platform_severity": "CRITICAL",
+    "service_name": "checkout-service",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "checkout downstream cascade"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "json_body": {},
+    "method": "POST",
+    "path": "/faults/reset"
+  },
+  "description": "Inject a bounded downstream cascade across checkout dependencies.",
+  "fault_type": "cascading_failure",
+  "injection": {
+    "expected_status": 200,
+    "fault_type": "cascading_failure",
+    "json_body": {
+      "created_by": "scenario-runner",
+      "duration_seconds": 300,
+      "error_rate": 1.0
+    },
+    "method": "POST",
+    "path": "/faults/cascading-failure",
+    "service_name": "checkout-service"
+  },
+  "scenario_id": "cascading-failure",
+  "schema_version": "1.0",
+  "service_name": "checkout-service",
+  "title": "Checkout cascading failure",
+  "trigger": {
+    "expected_status": 200,
+    "json_body": {
+      "idempotency_key": "scenario-cascading-failure",
+      "items": [
+        {
+          "quantity": 1,
+          "sku": "sku-cascade-001"
+        }
+      ],
+      "user_id": "scenario-cascade-user"
+    },
+    "method": "POST",
+    "path": "/checkout"
+  }
+}

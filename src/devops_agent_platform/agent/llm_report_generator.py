@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import re
 import time
@@ -40,6 +41,8 @@ from devops_agent_platform.rca_reasoning import (
 from devops_agent_platform.rca_reasoning.taxonomy import RootCauseTaxonomyMapper
 from devops_agent_platform.tools.sanitization import redact_sensitive_text
 
+logger = logging.getLogger(__name__)
+
 Clock = Callable[[], datetime]
 MonotonicClock = Callable[[], float]
 
@@ -57,7 +60,10 @@ _CANDIDATE_RESPONSE_FIELDS = _LEGACY_RESPONSE_FIELDS | {
     "selected_candidate_id",
     "root_cause",
 }
-_SERVICE_PATTERN = re.compile(r"\b([a-z][a-z0-9-]+-service)\b", re.IGNORECASE)
+_SERVICE_PATTERN = re.compile(
+    r"\b([a-z][a-z0-9-]+(?:-service|-api|-worker|-gateway))\b",
+    re.IGNORECASE,
+)
 _ROOT_CAUSE_TAXONOMY = RootCauseTaxonomyMapper()
 
 
@@ -194,20 +200,35 @@ class ResilientLLMRCAReportGenerator:
             raise
         except TimeoutError:
             await self._record_failure(permit)
+            self._log_fallback(
+                LLMReportGenerationOutcome.FALLBACK_TIMEOUT,
+                command,
+                "timeout",
+            )
             self._observe(
                 LLMReportGenerationOutcome.FALLBACK_TIMEOUT,
                 started_tick,
             )
             return await self._fallback.generate(command, evidence)
-        except AppValidationError:
+        except AppValidationError as exc:
             await self._record_failure(permit)
+            self._log_fallback(
+                LLMReportGenerationOutcome.FALLBACK_INVALID_RESPONSE,
+                command,
+                str(exc),
+            )
             self._observe(
                 LLMReportGenerationOutcome.FALLBACK_INVALID_RESPONSE,
                 started_tick,
             )
             return await self._fallback.generate(command, evidence)
-        except Exception:
+        except Exception as exc:
             await self._record_failure(permit)
+            self._log_fallback(
+                LLMReportGenerationOutcome.FALLBACK_PROVIDER_ERROR,
+                command,
+                type(exc).__name__,
+            )
             self._observe(
                 LLMReportGenerationOutcome.FALLBACK_PROVIDER_ERROR,
                 started_tick,
@@ -454,16 +475,24 @@ class ResilientLLMRCAReportGenerator:
                     "undetermined report cannot select a root cause candidate"
                 )
             return _CandidateSelection(None, None, None, None, None)
-        selected_id = _require_text(
-            "selected_candidate_id",
-            selected_value,
-            64,
-        )
         candidates = _to_report_candidates(reasoning)
+        try:
+            selected_id = _require_text(
+                "selected_candidate_id",
+                selected_value,
+                64,
+            )
+        except AppValidationError:
+            if len(candidates) != 1:
+                raise
+            selected_id = candidates[0].candidate_id
         selected = next(
             (item for item in candidates if item.candidate_id == selected_id),
             None,
         )
+        if selected is None and len(candidates) == 1:
+            selected = candidates[0]
+            selected_id = selected.candidate_id
         if selected is None:
             raise AppValidationError("selected candidate is not in candidate set")
         if conclusion_status is RCAConclusionStatus.NO_ACTIONABLE_ROOT_CAUSE:
@@ -639,6 +668,27 @@ class ResilientLLMRCAReportGenerator:
         except Exception:
             # Metrics 属于非关键路径，不能因采集器故障触发业务降级或失败。
             return
+
+    @staticmethod
+    def _log_fallback(
+        outcome: LLMReportGenerationOutcome,
+        command: ExecuteRCAWorkflowCommand,
+        reason: str,
+    ) -> None:
+        """Log a bounded fallback reason without provider bodies or credentials."""
+
+        logger.warning(
+            "LLM RCA report generation fell back",
+            extra={
+                "event": "llm_rca_report_fallback",
+                "outcome": outcome.value,
+                "tenant_id": command.tenant_id,
+                "incident_id": command.incident_id,
+                "workflow_run_id": command.workflow_run_id,
+                "execution_attempt": command.execution_attempt,
+                "reason": reason[:256],
+            },
+        )
 
 
 def _to_report_candidates(

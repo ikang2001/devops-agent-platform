@@ -1,0 +1,51 @@
+{
+  "alert_mapping": {
+    "alert_name": "MiniShopPayment5xxSpike",
+    "external_event_id_prefix": "minishop-payment-error",
+    "fingerprint": "minishop:payment-service:5xx-spike",
+    "platform_severity": "CRITICAL",
+    "service_name": "payment-service",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "payment-service 5xx errors are increasing"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "json_body": {},
+    "method": "POST",
+    "path": "/faults/reset"
+  },
+  "description": "Inject a deterministic payment gateway failure and trigger it through the checkout flow.",
+  "fault_type": "payment_error",
+  "injection": {
+    "expected_status": 200,
+    "fault_type": "payment_error",
+    "json_body": {
+      "created_by": "scenario-runner",
+      "duration_seconds": 300,
+      "error_rate": 1.0
+    },
+    "method": "POST",
+    "path": "/faults/payment-error",
+    "service_name": "payment-service"
+  },
+  "scenario_id": "payment-error",
+  "schema_version": "1.0",
+  "service_name": "payment-service",
+  "title": "Payment service returns injected 500 errors",
+  "trigger": {
+    "expected_status": 500,
+    "json_body": {
+      "idempotency_key": "scenario-payment-error",
+      "items": [
+        {
+          "quantity": 1,
+          "sku": "sku-payment-001"
+        }
+      ],
+      "user_id": "scenario-payment-user"
+    },
+    "method": "POST",
+    "path": "/checkout"
+  }
+}

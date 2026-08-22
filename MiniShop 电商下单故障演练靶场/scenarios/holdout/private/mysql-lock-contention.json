@@ -1,0 +1,53 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "cart-api",
+      "checkout-gateway"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "mysql-primary",
+        "to_node": "cart-api"
+      },
+      {
+        "from_node": "cart-api",
+        "to_node": "checkout-gateway"
+      }
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "logs.query@v1",
+      "traces.query@v1"
+    ],
+    "forbidden_claims": [
+      "The holdout answer is known from the scenario manifest.",
+      "Data corruption is confirmed without direct evidence."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "KNOWLEDGE",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "mysql-lock-contention-evidence-1",
+      "mysql-lock-contention-evidence-2",
+      "mysql-lock-contention-evidence-3"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "LOG",
+      "TRACE"
+    ],
+    "root_cause": {
+      "root_cause_resource": "mysql-primary",
+      "root_cause_type": "resource_exhaustion",
+      "service_name": "cart-api"
+    }
+  },
+  "scenario_id": "mysql-lock-contention",
+  "schema_version": "1.0"
+}

@@ -313,21 +313,28 @@ async def test_no_actionable_root_cause_is_persisted_as_structured_status() -> N
 
 
 @pytest.mark.parametrize(
-    ("selected_candidate", "root_type"),
+    ("selected_candidate", "root_type", "expected_generator"),
     [
-        ("cand-does-not-exist", "dependency_timeout"),
-        ("candidate", "dependency_latency"),
+        (None, "dependency_timeout", "llm-structured-report"),
+        ("cand-does-not-exist", "dependency_timeout", "llm-structured-report"),
+        ("candidate", "dependency_latency", "deterministic-evidence-summary"),
     ],
 )
 async def test_inconsistent_candidate_selection_fails_closed(
-    selected_candidate: str,
+    selected_candidate: str | None,
     root_type: str,
+    expected_generator: str,
 ) -> None:
-    """未知候选或根因类型不匹配时，不能让模型绕过候选集合写入报告。"""
+    """唯一候选可修复 ID；根因字段不一致时仍必须 fail-closed。"""
     evidence = build_evidence(
         "a" * 64,
         EvidenceType.LOG,
         summary="inventory-service database timeout DB_TIMEOUT",
+    )
+    trace = build_evidence(
+        "b" * 64,
+        EvidenceType.TRACE,
+        summary="inventory-service database timeout trace",
     )
 
     class InconsistentGateway:
@@ -340,6 +347,7 @@ async def test_inconsistent_candidate_selection_fails_closed(
                 **candidate_response(
                     candidate,
                     evidence.evidence_id,
+                    trace.evidence_id,
                     root_type=root_type,
                 ),
                 "selected_candidate_id": (
@@ -352,10 +360,14 @@ async def test_inconsistent_candidate_selection_fails_closed(
     report = await ResilientLLMRCAReportGenerator(
         InconsistentGateway(),
         clock=lambda: NOW,
-    ).generate(build_command(), (evidence,))
+    ).generate(build_command(), (evidence, trace))
 
-    assert report.generator_name == "deterministic-evidence-summary"
-    assert report.conclusion_status is RCAConclusionStatus.UNDETERMINED
+    assert report.generator_name == expected_generator
+    if expected_generator == "llm-structured-report":
+        assert report.conclusion_status is RCAConclusionStatus.CANDIDATE
+        assert report.root_cause_type is RootCauseType.DEPENDENCY_TIMEOUT
+    else:
+        assert report.conclusion_status is RCAConclusionStatus.UNDETERMINED
 
 
 async def test_low_score_selected_candidate_falls_back_to_undetermined() -> None:

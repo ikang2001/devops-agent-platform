@@ -1,0 +1,54 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "receipt-generator-api",
+      "order-gateway"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "blob-receipts-container",
+        "to_node": "receipt-generator-api"
+      },
+      {
+        "from_node": "receipt-generator-api",
+        "to_node": "order-gateway"
+      }
+    ],
+    "expected_conclusion_status": "CANDIDATE",
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "logs.query@v1",
+      "traces.query@v1"
+    ],
+    "forbidden_claims": [
+      "The holdout answer is known from the scenario manifest.",
+      "Data corruption is confirmed without direct evidence."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "KNOWLEDGE",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "blob-store-rate-limit-evidence-1",
+      "blob-store-rate-limit-evidence-2",
+      "blob-store-rate-limit-evidence-3"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "LOG",
+      "TRACE"
+    ],
+    "root_cause": {
+      "root_cause_resource": "blob-receipts-container",
+      "root_cause_type": "resource_exhaustion",
+      "service_name": "receipt-generator-api"
+    }
+  },
+  "scenario_id": "blob-store-rate-limit",
+  "schema_version": "1.0"
+}

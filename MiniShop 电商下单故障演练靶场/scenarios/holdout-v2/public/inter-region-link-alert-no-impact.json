@@ -1,0 +1,43 @@
+{
+  "alert_mapping": {
+    "alert_name": "HoldoutInterRegionLinkAlertNoImpact",
+    "platform_severity": "CRITICAL",
+    "service_name": "fulfillment-router-worker",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "fulfillment-router-worker operational anomaly requires investigation"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "method": "POST",
+    "path": "/holdout/faults/reset"
+  },
+  "description": "Hidden holdout scenario for black-box generalization.",
+  "environment": {
+    "benchmark_split": "hidden_holdout",
+    "composite_fault": false,
+    "no_actionable_root_cause": true,
+    "resource_system": "inter-region-link",
+    "service_name_randomization": true,
+    "topology_variant": "cross-zone"
+  },
+  "fault_type": "network_alert_no_impact",
+  "injection": {
+    "expected_status": 200,
+    "json_body": {
+      "duration_seconds": 60,
+      "executor": "blackbox"
+    },
+    "method": "POST",
+    "path": "/holdout/faults/inter-region-link-alert-no-impact"
+  },
+  "scenario_id": "inter-region-link-alert-no-impact",
+  "schema_version": "1.0",
+  "service_name": "fulfillment-router-worker",
+  "title": "Inter-region link alert without impact",
+  "trigger": {
+    "expected_status": 200,
+    "method": "POST",
+    "path": "/holdout/order-gateway/request"
+  }
+}

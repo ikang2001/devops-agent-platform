@@ -1,0 +1,51 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "checkout-service"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "checkout-db-pool",
+        "to_node": "checkout-service"
+      }
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "traces.query@v1"
+    ],
+    "forbidden_claims": [
+      "Payment or inventory caused the pool exhaustion."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "LOG",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "ev-pool-metric",
+      "ev-pool-trace"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "TRACE"
+    ],
+    "root_cause": {
+      "category": "connection_pool_exhaustion",
+      "causal_chain": [
+        "Pool exhaustion is injected.",
+        "Checkout cannot acquire a connection."
+      ],
+      "fault_type": "connection_pool_exhaustion",
+      "root_cause_resource": "checkout-db-pool",
+      "root_cause_type": "resource_exhaustion",
+      "runbook_path": "runbooks/checkout-high-latency.md",
+      "service_name": "checkout-service",
+      "summary": "Checkout exhausts its database connection pool."
+    }
+  },
+  "scenario_id": "connection-pool-exhaustion",
+  "schema_version": "1.0"
+}

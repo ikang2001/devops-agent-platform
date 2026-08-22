@@ -1,0 +1,52 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "payment-service",
+      "checkout-service"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "payment-provider",
+        "to_node": "payment-service"
+      }
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "traces.query@v1"
+    ],
+    "forbidden_claims": [
+      "The provider is globally unavailable."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "LOG",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "ev-provider-metric",
+      "ev-provider-trace"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "TRACE"
+    ],
+    "root_cause": {
+      "category": "third_party_timeout",
+      "causal_chain": [
+        "Provider timeout is injected.",
+        "Payment waits for the external dependency."
+      ],
+      "fault_type": "third_party_api_timeout",
+      "root_cause_resource": "payment-provider",
+      "root_cause_type": "dependency_timeout",
+      "runbook_path": "runbooks/payment-5xx-spike.md",
+      "service_name": "payment-service",
+      "summary": "The payment provider call exceeds its timeout budget."
+    }
+  },
+  "scenario_id": "third-party-api-timeout",
+  "schema_version": "1.0"
+}

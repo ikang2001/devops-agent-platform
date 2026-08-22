@@ -227,6 +227,41 @@ async def test_limit_and_partial_jobs_mark_result_truncated() -> None:
     assert result.possibly_truncated is True
 
 
+async def test_invalid_historical_tail_keeps_valid_recent_prefix() -> None:
+    """坏的陈旧摘要不能抹掉已验证的最新Trace，但必须标记结果不完整。"""
+    document = success_response()
+    document["traces"].append(
+        {
+            "traceID": "invalid-historical-trace",
+            "rootServiceName": "checkout-api",
+            "rootTraceName": "GET /old",
+            "startTimeUnixNano": "1",
+            "durationMs": 1,
+        }
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=document, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        client = TempoSearchClient(
+            TempoSearchClientConfig(base_url="https://tempo.example.com"),
+            http_client=http_client,
+        )
+        result = await client.search(
+            tenant_id="tenant_001",
+            query="{} with (most_recent=true)",
+            start=NOW - timedelta(minutes=1),
+            end=NOW,
+            limit=10,
+            spans_per_span_set=1,
+            trace_id="trc_001",
+        )
+
+    assert len(result.traces) == 1
+    assert result.possibly_truncated is True
+
+
 async def test_rootless_trace_keeps_bounded_summary() -> None:
     """缺少根Span名称的合法Trace不应拖垮整批搜索。"""
     document = success_response()
@@ -253,6 +288,32 @@ async def test_rootless_trace_keeps_bounded_summary() -> None:
 
     assert result.traces[0].root_service_name == ""
     assert result.traces[0].root_trace_name == ""
+
+
+async def test_just_ingested_trace_accepts_null_duration() -> None:
+    """Tempo刚写入Error Trace时可能暂未投影durationMs，其他摘要仍可使用。"""
+    document = success_response()
+    document["traces"][0]["durationMs"] = None
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=document, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        client = TempoSearchClient(
+            TempoSearchClientConfig(base_url="https://tempo.example.com"),
+            http_client=http_client,
+        )
+        result = await client.search(
+            tenant_id="tenant_001",
+            query="{} with (most_recent=true)",
+            start=NOW - timedelta(minutes=1),
+            end=NOW,
+            limit=10,
+            spans_per_span_set=1,
+            trace_id="trc_001",
+        )
+
+    assert result.traces[0].duration_ms == 0.0
 
 
 async def test_http_failure_is_sanitized_and_keeps_cause() -> None:

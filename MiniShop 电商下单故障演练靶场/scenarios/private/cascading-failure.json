@@ -1,0 +1,53 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "checkout-service",
+      "payment-service"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "checkout-service",
+        "to_node": "payment-service"
+      }
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "traces.query@v1",
+      "topology.query@v1"
+    ],
+    "forbidden_claims": [
+      "Notification service is the root cause."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "LOG",
+      "TOPOLOGY"
+    ],
+    "required_evidence": [
+      "ev-cascade-metric",
+      "ev-cascade-trace"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "TRACE"
+    ],
+    "root_cause": {
+      "category": "cascade",
+      "causal_chain": [
+        "Dependency fault starts.",
+        "Checkout propagates the failure."
+      ],
+      "fault_type": "cascading_failure",
+      "root_cause_resource": "checkout-service",
+      "root_cause_type": "cascading_failure",
+      "runbook_path": "runbooks/checkout-high-latency.md",
+      "service_name": "checkout-service",
+      "summary": "A checkout dependency failure propagates to the checkout boundary."
+    }
+  },
+  "scenario_id": "cascading-failure",
+  "schema_version": "1.0"
+}

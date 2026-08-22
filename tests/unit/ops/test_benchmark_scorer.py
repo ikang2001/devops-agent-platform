@@ -79,6 +79,7 @@ def prediction_payload() -> dict[str, object]:
                 "score": 0.9,
                 "supporting_evidence_ids": ["ev-log", "ev-trace"],
                 "source_evidence_types": ["LOG", "TRACE"],
+                "missing_evidence": [],
             },
             {
                 "candidate_id": "cand-payment-error",

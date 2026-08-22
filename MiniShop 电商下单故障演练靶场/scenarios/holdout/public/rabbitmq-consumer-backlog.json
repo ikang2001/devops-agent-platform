@@ -1,0 +1,43 @@
+{
+  "alert_mapping": {
+    "alert_name": "HoldoutRabbitmqConsumerBacklog",
+    "platform_severity": "CRITICAL",
+    "service_name": "notification-worker",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "notification-worker operational anomaly requires investigation"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "method": "POST",
+    "path": "/holdout/faults/reset"
+  },
+  "description": "Hidden holdout scenario for black-box generalization.",
+  "environment": {
+    "benchmark_split": "hidden_holdout",
+    "composite_fault": false,
+    "no_actionable_root_cause": false,
+    "resource_system": "rabbitmq-events",
+    "service_name_randomization": true,
+    "topology_variant": "cross-zone"
+  },
+  "fault_type": "consumer_backlog",
+  "injection": {
+    "expected_status": 200,
+    "json_body": {
+      "duration_seconds": 60,
+      "executor": "blackbox"
+    },
+    "method": "POST",
+    "path": "/holdout/faults/rabbitmq-consumer-backlog"
+  },
+  "scenario_id": "rabbitmq-consumer-backlog",
+  "schema_version": "1.0",
+  "service_name": "notification-worker",
+  "title": "RabbitMQ consumer backlog",
+  "trigger": {
+    "expected_status": 503,
+    "method": "POST",
+    "path": "/holdout/order-api/request"
+  }
+}

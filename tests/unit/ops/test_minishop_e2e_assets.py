@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -71,6 +73,34 @@ def test_observability_configs_preserve_tenant_and_service_contracts() -> None:
         "MiniShopPaymentDeploymentRegression",
         "MiniShopInventoryDbTimeout",
         "MiniShopPayment5xxSpike",
+        "MiniShopPaymentConfigRegression",
+        "MiniShopInventoryRedisLatency",
+        "MiniShopCheckoutPoolExhaustion",
+        "MiniShopPaymentProviderTimeout",
+        "MiniShopCheckoutCascade",
+        "MiniShopKnownPaymentError",
+        "MiniShopMisleadingPaymentHistory",
+        "MiniShopFalsePositiveCheckout",
+        "HoldoutCrossZoneNetworkAlertNoImpact",
+        "HoldoutDnsResolutionFailure",
+        "HoldoutElasticsearchQueryLatency",
+        "HoldoutMemoryLeakGcPause",
+        "HoldoutMongodbConnectionTimeout",
+        "HoldoutMysqlLockContention",
+        "HoldoutObjectStorageThrottling",
+        "HoldoutRabbitmqConsumerBacklog",
+        "HoldoutServiceMeshRetryStorm",
+        "HoldoutThirdPartySmsTimeout",
+        "HoldoutPostgresqlDeadlockChain",
+        "HoldoutCassandraSessionDeadline",
+        "HoldoutNatsDeliveryLag",
+        "HoldoutServiceDiscoveryLookupDeadline",
+        "HoldoutSidecarRetryAmplification",
+        "HoldoutBlobStoreRateLimit",
+        "HoldoutTaxProviderResponseDeadline",
+        "HoldoutHeapThrashingPause",
+        "HoldoutOpensearchShardLatency",
+        "HoldoutInterRegionLinkAlertNoImpact",
     }
     expressions = promtail["scrape_configs"][0]["pipeline_stages"][0]["json"][
         "expressions"
@@ -107,6 +137,229 @@ def test_model_stub_returns_candidate_bound_to_supplied_evidence_ids() -> None:
     assert "payment-service" in report["summary"]
     assert "payment_error" in report["summary"]
     assert report["evidence_ids"] == ["ev-runbook", "ev-logs"]
+
+
+def test_blackbox_executor_maps_domain_evidence_aliases() -> None:
+    from importlib.util import module_from_spec, spec_from_file_location
+
+    path = E2E_ROOT / "blackbox_executor.py"
+    sys.path.insert(0, str(E2E_ROOT))
+    spec = spec_from_file_location("minishop_blackbox_executor", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(E2E_ROOT))
+
+    assert (
+        module.MiniShopBlackBoxExecutor._map_evidence_type("DEPLOYMENT").value
+        == "CHANGE"
+    )
+    assert (
+        module.MiniShopBlackBoxExecutor._map_evidence_type("INCIDENT_HISTORY").value
+        == "KNOWLEDGE"
+    )
+
+
+def test_blackbox_executor_settles_incident_between_scenarios() -> None:
+    source = (E2E_ROOT / "blackbox_executor.py").read_text(encoding="utf-8")
+
+    assert "self._settle_matching_incidents(" in source
+    settlement = source.split("def _settle_matching_incidents", 1)[1].split(
+        "def _start_rca", 1
+    )[0]
+    assert 'item.get("service_name") == scenario.service_name' in settlement
+    assert 'item.get("title")' not in settlement
+    assert 'f"{base}/resolution"' in source
+    assert 'f"{base}/closure"' in source
+
+
+def test_blackbox_executor_accepts_correlated_same_service_incident() -> None:
+    from importlib.util import module_from_spec, spec_from_file_location
+
+    path = E2E_ROOT / "blackbox_executor.py"
+    sys.path.insert(0, str(E2E_ROOT))
+    spec = spec_from_file_location("minishop_blackbox_incident_executor", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(E2E_ROOT))
+
+    scenario = type("Scenario", (), {"service_name": "checkout-service"})()
+    started_at = datetime(2026, 8, 21, 17, 36, tzinfo=UTC)
+    correlated = {
+        "incident_id": "inc-correlated",
+        "service_name": "checkout-service",
+        "title": "checkout-service p95 latency is higher than 1s",
+        "status": "OPEN",
+        "created_at": "2026-08-21T17:36:54+00:00",
+    }
+
+    selected = module.MiniShopBlackBoxExecutor._select_incident(
+        [correlated],
+        scenario=scenario,
+        expected_title="checkout downstream cascade",
+        started_at=started_at,
+    )
+
+    assert selected == correlated
+
+
+def test_blackbox_executor_maps_platform_candidate_snapshot() -> None:
+    from importlib.util import module_from_spec, spec_from_file_location
+
+    path = E2E_ROOT / "blackbox_executor.py"
+    sys.path.insert(0, str(E2E_ROOT))
+    spec = spec_from_file_location("minishop_blackbox_candidate_executor", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(E2E_ROOT))
+
+    candidate = module.MiniShopBlackBoxExecutor._candidate(
+        {
+            "candidate_id": "cand-checkout",
+            "service": "checkout-service",
+            "root_type": "application_error",
+            "resource": None,
+            "score": 0.9,
+            "supporting_evidence_ids": ["ev-log"],
+            "contradicting_evidence_ids": [],
+            "source_evidence_types": ["LOG"],
+            "missing_evidence": [],
+        }
+    )
+
+    assert candidate.root_cause.service == "checkout-service"
+    assert candidate.root_cause.type == "application_error"
+    assert candidate.missing_evidence == ()
+
+
+def test_blackbox_executor_resolves_holdout_entry_service() -> None:
+    from importlib.util import module_from_spec, spec_from_file_location
+
+    path = E2E_ROOT / "blackbox_executor.py"
+    sys.path.insert(0, str(E2E_ROOT))
+    spec = spec_from_file_location("minishop_blackbox_entry_executor", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(E2E_ROOT))
+
+    scenario = type(
+        "Scenario",
+        (),
+        {"trigger": {"path": "/holdout/checkout-gateway/request"}},
+    )()
+    assert module.MiniShopBlackBoxExecutor._entry_service(scenario) == (
+        "checkout-gateway"
+    )
+
+
+def test_blackbox_executor_does_not_reuse_permission_idempotency_key() -> None:
+    source = (E2E_ROOT / "blackbox_executor.py").read_text(encoding="utf-8")
+
+    assert 'f"blackbox-permissions-{uuid.uuid4().hex}"' in source
+
+
+def test_blackbox_executor_waits_for_alert_to_be_inactive() -> None:
+    source = (E2E_ROOT / "blackbox_executor.py").read_text(encoding="utf-8")
+
+    assert 'rules[0].get("state") != "inactive"' in source
+    assert "now - inactive_since >= 4" in source
+    assert "alert did not clear" in source
+
+
+def test_blackbox_executor_waits_for_complete_terminal_projection() -> None:
+    from importlib.util import module_from_spec, spec_from_file_location
+
+    path = E2E_ROOT / "blackbox_executor.py"
+    sys.path.insert(0, str(E2E_ROOT))
+    spec = spec_from_file_location("minishop_blackbox_projection_executor", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(E2E_ROOT))
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, data: dict[str, object]) -> None:
+            self._data = data
+
+        def json(self) -> dict[str, object]:
+            return {"success": True, "data": self._data}
+
+    class Http:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def request(self, *_args, **_kwargs) -> Response:
+            self.calls += 1
+            if self.calls == 1:
+                return Response(
+                    {"status": "SUCCEEDED", "evidence": [], "report": None}
+                )
+            return Response(
+                {
+                    "status": "SUCCEEDED",
+                    "evidence": [{"evidence_id": "ev-log"}],
+                    "report": {"conclusion_status": "UNDETERMINED"},
+                }
+            )
+
+        def close(self) -> None:
+            pass
+
+    def wait_for_projection(_name, callback, **_kwargs):
+        assert callback() is None
+        return callback()
+
+    executor = module.MiniShopBlackBoxExecutor(
+        module.E2EConfig(agent_url="http://agent")
+    )
+    executor.http.close()
+    executor.http = Http()
+    module.wait_for_value = wait_for_projection
+
+    result = executor._wait_for_workflow("workflow-1")
+
+    assert executor.http.calls == 2
+    assert result["evidence"] == [{"evidence_id": "ev-log"}]
+
+
+def test_v07_host_scripts_support_the_hidden_holdout_catalog() -> None:
+    for name in ("run-v07-blackbox.ps1", "run-v07-blackbox-host.ps1"):
+        source = (E2E_ROOT / name).read_text(encoding="utf-8")
+        assert '[ValidateSet("Known", "Holdout", "HoldoutV2")]' in source
+        assert '"scenarios\\holdout"' in source
+
+
+def test_holdout_alert_summaries_match_public_catalog() -> None:
+    alerts = _load_yaml("alerts.yml")
+    rules = {rule["alert"]: rule for rule in alerts["groups"][0]["rules"]}
+    public_root = (
+        PROJECT_ROOT
+        / "MiniShop 电商下单故障演练靶场"
+        / "scenarios"
+        / "holdout"
+        / "public"
+    )
+    for path in public_root.glob("*.json"):
+        public = json.loads(path.read_text(encoding="utf-8"))
+        mapping = public["alert_mapping"]
+        rule = rules[mapping["alert_name"]]
+        assert rule["annotations"]["summary"] == mapping["summary"]
+        assert rule["labels"]["service_name"] == public["service_name"]
 
 
 def test_e2e_runner_records_signed_change_and_closes_each_incident() -> None:

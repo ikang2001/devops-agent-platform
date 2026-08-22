@@ -1,0 +1,51 @@
+{
+  "alert_mapping": {
+    "alert_name": "MiniShopKnownPaymentError",
+    "external_event_id_prefix": "minishop-known-error",
+    "fingerprint": "minishop:payment-service:known-error",
+    "platform_severity": "CRITICAL",
+    "service_name": "payment-service",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "known payment error repeated"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "json_body": {},
+    "method": "POST",
+    "path": "/faults/reset"
+  },
+  "description": "Repeat a known payment fingerprint to exercise historical retrieval.",
+  "fault_type": "known_error_repeat",
+  "injection": {
+    "expected_status": 200,
+    "fault_type": "known_error_repeat",
+    "json_body": {
+      "created_by": "scenario-runner",
+      "duration_seconds": 300,
+      "error_rate": 1.0
+    },
+    "method": "POST",
+    "path": "/faults/known-error-repeat",
+    "service_name": "payment-service"
+  },
+  "scenario_id": "known-error-repeat",
+  "schema_version": "1.0",
+  "service_name": "payment-service",
+  "title": "Known payment error repeat",
+  "trigger": {
+    "expected_status": 200,
+    "json_body": {
+      "idempotency_key": "scenario-known-error",
+      "items": [
+        {
+          "quantity": 1,
+          "sku": "sku-known-001"
+        }
+      ],
+      "user_id": "scenario-known-user"
+    },
+    "method": "POST",
+    "path": "/checkout"
+  }
+}

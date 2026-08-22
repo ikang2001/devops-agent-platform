@@ -1,0 +1,51 @@
+{
+  "alert_mapping": {
+    "alert_name": "MiniShopPaymentProviderTimeout",
+    "external_event_id_prefix": "minishop-provider-timeout",
+    "fingerprint": "minishop:payment-service:provider-timeout",
+    "platform_severity": "CRITICAL",
+    "service_name": "payment-service",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "payment provider timeout"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "json_body": {},
+    "method": "POST",
+    "path": "/faults/reset"
+  },
+  "description": "Inject a timeout at the payment provider boundary.",
+  "fault_type": "third_party_api_timeout",
+  "injection": {
+    "expected_status": 200,
+    "fault_type": "third_party_api_timeout",
+    "json_body": {
+      "created_by": "scenario-runner",
+      "delay_ms": 500,
+      "duration_seconds": 300
+    },
+    "method": "POST",
+    "path": "/faults/third-party-api-timeout",
+    "service_name": "payment-service"
+  },
+  "scenario_id": "third-party-api-timeout",
+  "schema_version": "1.0",
+  "service_name": "payment-service",
+  "title": "Third-party payment API timeout",
+  "trigger": {
+    "expected_status": 200,
+    "json_body": {
+      "idempotency_key": "scenario-third-party-timeout",
+      "items": [
+        {
+          "quantity": 1,
+          "sku": "sku-provider-001"
+        }
+      ],
+      "user_id": "scenario-provider-user"
+    },
+    "method": "POST",
+    "path": "/checkout"
+  }
+}

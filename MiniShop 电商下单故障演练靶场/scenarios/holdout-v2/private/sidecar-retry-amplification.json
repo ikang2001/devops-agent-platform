@@ -1,0 +1,54 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "personalization-worker",
+      "purchase-gateway"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "service-mesh-gateway",
+        "to_node": "personalization-worker"
+      },
+      {
+        "from_node": "personalization-worker",
+        "to_node": "purchase-gateway"
+      }
+    ],
+    "expected_conclusion_status": "CANDIDATE",
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "logs.query@v1",
+      "topology.query@v1"
+    ],
+    "forbidden_claims": [
+      "The holdout answer is known from the scenario manifest.",
+      "Data corruption is confirmed without direct evidence."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "KNOWLEDGE",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "sidecar-retry-amplification-evidence-1",
+      "sidecar-retry-amplification-evidence-2",
+      "sidecar-retry-amplification-evidence-3"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "LOG",
+      "TOPOLOGY"
+    ],
+    "root_cause": {
+      "root_cause_resource": "service-mesh-gateway",
+      "root_cause_type": "resource_exhaustion",
+      "service_name": "personalization-worker"
+    }
+  },
+  "scenario_id": "sidecar-retry-amplification",
+  "schema_version": "1.0"
+}

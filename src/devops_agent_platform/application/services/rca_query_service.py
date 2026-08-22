@@ -162,6 +162,8 @@ class RCAReportView:
     generator_version: str
     generated_at: datetime
     root_cause: tuple[str, str, str | None] | None
+    causal_chain: tuple[tuple[str, str, tuple[str, ...]], ...]
+    affected_services: tuple[str, ...]
     selected_candidate_id: str | None
     root_cause_candidates: tuple[RCAReportCandidate, ...]
 
@@ -205,6 +207,8 @@ class RCAReportView:
                 and report.root_cause_type is not None
                 else None
             ),
+            causal_chain=report.causal_chain,
+            affected_services=report.affected_services,
             selected_candidate_id=report.selected_candidate_id,
             root_cause_candidates=report.root_cause_candidates,
         )
@@ -235,6 +239,15 @@ class RCAReportView:
                 if self.root_cause is not None
                 else None
             ),
+            "causal_chain": [
+                {
+                    "from_node": source,
+                    "to_node": target,
+                    "evidence_ids": list(evidence_ids),
+                }
+                for source, target, evidence_ids in self.causal_chain
+            ],
+            "affected_services": list(self.affected_services),
             "selected_candidate_id": self.selected_candidate_id,
             "root_cause_candidates": [
                 {

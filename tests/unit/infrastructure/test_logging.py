@@ -93,6 +93,32 @@ def test_json_formatter_redacts_common_credentials() -> None:
     assert serialized.count("[REDACTED]") >= 4
 
 
+def test_json_formatter_keeps_bounded_llm_fallback_diagnostics() -> None:
+    formatter = JsonLogFormatter("service", "test")
+    record = logging.LogRecord(
+        name="test.logger",
+        level=logging.WARNING,
+        pathname=__file__,
+        lineno=100,
+        msg="LLM RCA report generation fell back",
+        args=(),
+        exc_info=None,
+    )
+    record.event = "llm_rca_report_fallback"
+    record.outcome = "FALLBACK_INVALID_RESPONSE"
+    record.tenant_id = "tenant-a"
+    record.incident_id = "inc-a"
+    record.workflow_run_id = "wfr-a"
+    record.execution_attempt = 1
+    record.reason = "LLM report response fields do not match the contract"
+
+    payload = json.loads(formatter.format(record))
+
+    assert payload["event"] == "llm_rca_report_fallback"
+    assert payload["outcome"] == "FALLBACK_INVALID_RESPONSE"
+    assert payload["reason"].startswith("LLM report response fields")
+
+
 def test_nested_trace_context_restores_previous_value() -> None:
     outer_token = set_trace_id("trc_outer")
     inner_token = set_trace_id("trc_inner")

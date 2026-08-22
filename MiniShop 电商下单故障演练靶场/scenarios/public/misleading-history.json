@@ -1,0 +1,51 @@
+{
+  "alert_mapping": {
+    "alert_name": "MiniShopMisleadingPaymentHistory",
+    "external_event_id_prefix": "minishop-misleading-history",
+    "fingerprint": "minishop:payment-service:misleading-history",
+    "platform_severity": "CRITICAL",
+    "service_name": "payment-service",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "payment incident resembles old provider timeout"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "json_body": {},
+    "method": "POST",
+    "path": "/faults/reset"
+  },
+  "description": "Provide a similar but incorrect history while the live signal identifies configuration.",
+  "fault_type": "misleading_history",
+  "injection": {
+    "expected_status": 200,
+    "fault_type": "misleading_history",
+    "json_body": {
+      "created_by": "scenario-runner",
+      "duration_seconds": 300,
+      "error_rate": 1.0
+    },
+    "method": "POST",
+    "path": "/faults/misleading-history",
+    "service_name": "payment-service"
+  },
+  "scenario_id": "misleading-history",
+  "schema_version": "1.0",
+  "service_name": "payment-service",
+  "title": "Misleading historical payment incident",
+  "trigger": {
+    "expected_status": 200,
+    "json_body": {
+      "idempotency_key": "scenario-misleading-history",
+      "items": [
+        {
+          "quantity": 1,
+          "sku": "sku-history-001"
+        }
+      ],
+      "user_id": "scenario-history-user"
+    },
+    "method": "POST",
+    "path": "/checkout"
+  }
+}

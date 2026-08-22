@@ -1,3 +1,5 @@
+import json
+import logging
 import time
 
 from fastapi.testclient import TestClient
@@ -105,6 +107,55 @@ def test_reset_clears_faults():
 
     assert response.status_code == 200
     assert client.get("/faults").json()["faults"] == []
+
+
+def test_generic_fault_emits_structured_control_plane_evidence(caplog):
+    with caplog.at_level(logging.WARNING, logger="minishop"):
+        response = client.post(
+            "/faults/third-party-api-timeout",
+            json={"duration_seconds": 60, "created_by": "test"},
+        )
+
+    assert response.status_code == 200
+    events = [json.loads(record.message) for record in caplog.records]
+    event = next(
+        item
+        for item in events
+        if item.get("fault_type") == "third_party_api_timeout"
+    )
+    assert event["service_name"] == "payment-service"
+    assert event["error.type"] == "provider_timeout"
+    assert event["resource.name"] == "payment-provider"
+
+
+def test_hidden_holdout_fault_control_exposes_only_operational_data():
+    response = client.post(
+        "/holdout/faults/dns-resolution-failure",
+        json={"duration_seconds": 60, "created_by": "blackbox"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()["fault"]
+    assert body["service_name"] == "pricing-api"
+    assert "root_cause" not in body
+    assert "ground_truth" not in body
+
+    trigger = client.post("/holdout/checkout-gateway/request")
+    assert trigger.status_code == 503
+    assert trigger.json()["fault_type"] == "dns_failure"
+    assert "minishop_holdout_fault_enabled" in client.get("/metrics").text
+
+
+def test_hidden_holdout_no_impact_keeps_trigger_successful():
+    client.post(
+        "/holdout/faults/cross-zone-network-alert-no-impact",
+        json={"duration_seconds": 60, "created_by": "blackbox"},
+    )
+
+    response = client.post("/holdout/checkout-gateway/request")
+
+    assert response.status_code == 200
+    assert response.json()["service_name"] == "shipping-quote-api"
 
 
 def test_metrics_exposes_required_names():

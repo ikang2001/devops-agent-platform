@@ -752,10 +752,14 @@ class ControlledAgentWorkflow:
         if isinstance(signals, list):
             signal_count = len(signals)
         truncated = bool(result.get("possibly_truncated", False))
-        return (
+        summary = (
             f"{tool_name} collected evidence from {source}; "
             f"signals={signal_count}; truncated={truncated}"
         )
+        facts = _build_observability_facts(result)
+        if facts:
+            summary = f"{summary}; {'; '.join(facts)}"
+        return summary[:4096].rstrip()
 
     def _now(self) -> datetime:
         """读取带时区时钟，避免 Evidence 采集时间受本地时区影响。"""
@@ -778,6 +782,59 @@ class ControlledAgentWorkflow:
         ):
             raise AppValidationError("monotonic_clock must return a finite number")
         return float(value)
+
+
+def _build_observability_facts(result: Mapping[str, Any]) -> tuple[str, ...]:
+    """从已脱敏工具结果中投影有限诊断事实，不复制原始大响应。"""
+    facts: list[str] = []
+    target = result.get("target")
+    if isinstance(target, Mapping):
+        service = _public_fact_text(target.get("service_name"), 128)
+        if service:
+            facts.append(f"service.name={service}")
+
+    signals = result.get("signals")
+    if not isinstance(signals, list):
+        return tuple(facts)
+    for signal in signals:
+        if not isinstance(signal, Mapping):
+            continue
+        entries = signal.get("entries")
+        if isinstance(entries, list):
+            for entry in entries[:2]:
+                if not isinstance(entry, Mapping):
+                    continue
+                line = _public_fact_text(entry.get("line"), 512)
+                if line:
+                    facts.append(f"log={line}")
+        traces = signal.get("traces")
+        if isinstance(traces, list):
+            for trace in traces[:2]:
+                if not isinstance(trace, Mapping):
+                    continue
+                root_service = _public_fact_text(
+                    trace.get("root_service_name"),
+                    128,
+                )
+                root_trace = _public_fact_text(trace.get("root_trace_name"), 256)
+                if root_service or root_trace:
+                    facts.append(
+                        "trace="
+                        f"{root_service or 'unknown'}:{root_trace or 'unknown'}"
+                    )
+        if len(facts) >= 8:
+            break
+    return tuple(facts[:8])
+
+
+def _public_fact_text(value: object, maximum: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    redacted = redact_sensitive_text(value)[0]
+    compact = " ".join(redacted.split())[:maximum].strip()
+    if not compact or not _is_public_evidence_text(compact, maximum):
+        return None
+    return compact
 
 
 def _is_public_evidence_text(value: str, maximum: int) -> bool:

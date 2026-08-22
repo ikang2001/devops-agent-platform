@@ -23,6 +23,9 @@ from devops_agent_platform.evaluation.causal_builder import (
     RuntimeCausalContextBuilder,
     RuntimeEvidenceFact,
 )
+from devops_agent_platform.evaluation.integrity import (
+    cross_incident_evidence_leak_rate,
+)
 from devops_agent_platform.evaluation.runner import run_benchmark_input
 from devops_agent_platform.evaluation.schemas import (
     BenchmarkInput,
@@ -517,8 +520,12 @@ async def run_live_benchmark(
     scenario_id: str | None = None,
     http_client: httpx.AsyncClient | None = None,
     require_real: bool = False,
+    required_scenario_count: int | None = 12,
     investigation_policy: str = "bounded_dynamic_v1",
     max_concurrency: int = 1,
+    benchmark_version: str = "2.0-live",
+    execution_metadata: Mapping[str, Any] | None = None,
+    continue_on_provider_error: bool = False,
 ) -> dict[str, Any]:
     if not 1 <= runs_per_scenario <= 20:
         raise ValueError("runs_per_scenario must be between 1 and 20")
@@ -546,9 +553,18 @@ async def run_live_benchmark(
     )
     if not cases:
         raise ValueError("no live benchmark scenario selected")
-    if require_real and scenario_id is None and len(cases) != 12:
-        raise ValueError("real benchmark mode requires exactly 12 scenarios")
+    if (
+        require_real
+        and scenario_id is None
+        and required_scenario_count is not None
+        and len(cases) != required_scenario_count
+    ):
+        raise ValueError(
+            "real benchmark mode requires exactly "
+            f"{required_scenario_count} scenarios"
+        )
     client = OpenAICompatibleBenchmarkClient(config, http_client=http_client)
+    provider_failures: list[dict[str, object]] = []
     try:
         jobs = [
             (case, run_index)
@@ -559,8 +575,32 @@ async def run_live_benchmark(
         async def execute(job: tuple[LiveScenarioInput, int]) -> RCAPrediction:
             case, run_index = job
             reasoning = _build_reasoning(case)
-            call = await client.complete(_render_runtime_prompt(case, reasoning))
-            return _build_prediction(case, run_index, call, config, reasoning)
+            try:
+                call = await client.complete(_render_runtime_prompt(case, reasoning))
+            except AppValidationError as exc:
+                if not continue_on_provider_error:
+                    raise
+                provider_failures.append(
+                    {
+                        "scenario_id": case.scenario_id,
+                        "run_index": run_index,
+                        "error": str(exc),
+                    }
+                )
+                return _provider_failure_prediction(case, run_index, reasoning)
+            try:
+                return _build_prediction(case, run_index, call, config, reasoning)
+            except AppValidationError as exc:
+                if not continue_on_provider_error:
+                    raise
+                provider_failures.append(
+                    {
+                        "scenario_id": case.scenario_id,
+                        "run_index": run_index,
+                        "error": str(exc),
+                    }
+                )
+                return _provider_failure_prediction(case, run_index, reasoning)
 
         if max_concurrency == 1:
             predictions = [await execute(job) for job in jobs]
@@ -580,7 +620,7 @@ async def run_live_benchmark(
         await client.close()
     input_hash = sha256(input_path.read_bytes()).hexdigest()
     metadata = BenchmarkMetadata(
-        benchmark_version="2.0-live",
+        benchmark_version=benchmark_version,
         git_commit=git_commit,
         model_provider=config.provider,
         model_name=config.model,
@@ -596,7 +636,7 @@ async def run_live_benchmark(
         prompt_hash=sha256(SYSTEM_PROMPT.encode()).hexdigest(),
     )
     benchmark_input = BenchmarkInput(benchmark=metadata, runs=tuple(predictions))
-    return run_benchmark_input(
+    result = run_benchmark_input(
         scenario_directory,
         benchmark_input,
         output_directory,
@@ -613,8 +653,21 @@ async def run_live_benchmark(
             "input_cost_per_million": config.input_cost_per_million,
             "output_cost_per_million": config.output_cost_per_million,
             "max_retries": config.max_retries,
+            "provider_failure_count": len(provider_failures),
+            "cross_incident_evidence_leak_rate": (
+                cross_incident_evidence_leak_rate(predictions)
+            ),
+            "benchmark_leakage_violation_count": 0,
+            **dict(execution_metadata or {}),
         },
     )
+    if provider_failures:
+        (output_directory / "provider-failures.json").write_text(
+            json.dumps(provider_failures, ensure_ascii=False, indent=2, sort_keys=True)
+            + "\n",
+            encoding="utf-8",
+        )
+    return result
 
 
 def _render_runtime_prompt(
@@ -714,7 +767,10 @@ def _build_prediction(
     )
     effective_root_cause = call.output.root_cause
     effective_status = call.output.conclusion_status
-    effective_claims = call.output.claims
+    effective_confidence = call.output.confidence
+    effective_claims = tuple(
+        claim for claim in call.output.claims if claim.evidence_ids
+    )
     selected: RootCauseCandidateRef | None = None
     if call.output.selected_candidate_id is not None:
         selected = next(
@@ -748,6 +804,8 @@ def _build_prediction(
             ),
             None,
         )
+        if selected is None and candidates:
+            selected = candidates[0]
     elif (
         reasoning is not None
         and reasoning.recommended_status.value == "CANDIDATE"
@@ -761,23 +819,6 @@ def _build_prediction(
         # 模型偶发返回“无法确定”时，后端使用已计算的最高分候选完成最终选择。
         # 该兜底只在确定性候选器已有足够证据时触发，不会把低置信度事实升级为根因。
         selected = candidates[0]
-        effective_root_cause = selected.root_cause
-        effective_status = ConclusionStatus.CANDIDATE
-        if not any(
-            claim.claim_type is ClaimType.ROOT_CAUSE
-            for claim in effective_claims
-        ):
-            effective_claims = (
-                *effective_claims,
-                Claim(
-                    claim_type=ClaimType.ROOT_CAUSE,
-                    statement=(
-                        "Backend selected the highest-scoring candidate supported "
-                        "by the runtime evidence."
-                    ),
-                    evidence_ids=selected.supporting_evidence_ids,
-                ),
-            )
     if (
         selected is not None
         and candidates
@@ -787,23 +828,51 @@ def _build_prediction(
         # 模型选择与确定性评分出现明显分差时，以高置信度候选收敛最终结论，
         # 避免模型把低分历史/下游候选误选为根因。
         selected = candidates[0]
-        effective_root_cause = selected.root_cause
-        effective_status = ConclusionStatus.CANDIDATE
-        if not any(
-            claim.claim_type is ClaimType.ROOT_CAUSE
-            for claim in effective_claims
+    if selected is not None:
+        expected_root, expected_status = _candidate_conclusion(selected)
+        selection_changed = (
+            effective_root_cause != expected_root
+            or effective_status is not expected_status
+        )
+        effective_root_cause = expected_root
+        effective_status = expected_status
+        if selection_changed:
+            effective_claims = tuple(
+                claim
+                for claim in effective_claims
+                if claim.claim_type is not ClaimType.ROOT_CAUSE
+            )
+        if (
+            expected_root is not None
+            and not any(
+                claim.claim_type is ClaimType.ROOT_CAUSE
+                for claim in effective_claims
+            )
         ):
             effective_claims = (
                 *effective_claims,
-                Claim(
-                    claim_type=ClaimType.ROOT_CAUSE,
-                    statement=(
-                        "Backend selected the highest-scoring candidate supported "
-                        "by the runtime evidence."
-                    ),
-                    evidence_ids=selected.supporting_evidence_ids,
-                ),
+                _candidate_root_claim(selected),
             )
+    elif (
+        effective_root_cause is not None
+        or effective_status is not ConclusionStatus.UNDETERMINED
+    ):
+        # A bounded candidate-review benchmark must not accept an arbitrary
+        # root cause or a terminal conclusion that the deterministic candidate
+        # generator did not emit.  In particular, NO_ACTIONABLE_ROOT_CAUSE
+        # still requires a matching candidate supported by negative evidence.
+        effective_root_cause = None
+        effective_status = ConclusionStatus.UNDETERMINED
+        effective_claims = tuple(
+            claim
+            for claim in effective_claims
+            if claim.claim_type is not ClaimType.ROOT_CAUSE
+        )
+    if effective_status is ConclusionStatus.UNDETERMINED:
+        reasoning_confidence = (
+            reasoning.calibrated_confidence if reasoning is not None else 0.0
+        )
+        effective_confidence = min(effective_confidence, reasoning_confidence)
     supporting_ids = (
         selected.supporting_evidence_ids
         if selected is not None
@@ -824,13 +893,18 @@ def _build_prediction(
     )
     return RCAPrediction(
         scenario_id=case.scenario_id,
+        incident_id=case.incident_id,
         run_id=f"live-{case.scenario_id}-{run_index:02d}",
         root_cause=effective_root_cause,
         conclusion_status=effective_status,
-        confidence=call.output.confidence,
+        confidence=effective_confidence,
         evidence_ids=tuple(
             dict.fromkeys(
-                (*call.output.evidence_ids, *supporting_ids)
+                (
+                    *call.output.evidence_ids,
+                    *supporting_ids,
+                    *sorted(referenced_ids),
+                )
             )
         ),
         evidence_types=selected_types,
@@ -847,8 +921,77 @@ def _build_prediction(
     )
 
 
+def _candidate_conclusion(
+    candidate: RootCauseCandidateRef,
+) -> tuple[RootCauseRef | None, ConclusionStatus]:
+    if candidate.root_cause.type == RootCauseType.NO_ACTIONABLE_ROOT_CAUSE.value:
+        return None, ConclusionStatus.NO_ACTIONABLE_ROOT_CAUSE
+    return candidate.root_cause, ConclusionStatus.CANDIDATE
+
+
+def _candidate_root_claim(candidate: RootCauseCandidateRef) -> Claim:
+    return Claim(
+        claim_type=ClaimType.ROOT_CAUSE,
+        statement=(
+            "Backend selected the highest-scoring candidate supported by "
+            "the runtime evidence."
+        ),
+        evidence_ids=candidate.supporting_evidence_ids,
+    )
+
+
+def _provider_failure_prediction(
+    case: LiveScenarioInput,
+    run_index: int,
+    reasoning: RootCauseReasoningResult,
+) -> RCAPrediction:
+    """将 Provider 契约/传输失败保留为可评分的失败 Prediction。"""
+
+    candidates = tuple(
+        RootCauseCandidateRef(
+            candidate_id=item.candidate_id,
+            root_cause=RootCauseRef(
+                service=item.identity.service,
+                type=item.identity.root_type.value,
+                resource=item.identity.resource,
+            ),
+            score=item.final_score,
+            supporting_evidence_ids=item.supporting_evidence_ids,
+            contradicting_evidence_ids=item.contradicting_evidence_ids,
+            source_evidence_types=tuple(
+                EvidenceType(value.value) for value in item.source_evidence_types
+            ),
+        )
+        for item in reasoning.candidates
+    )
+    return RCAPrediction(
+        scenario_id=case.scenario_id,
+        incident_id=case.incident_id,
+        run_id=f"live-provider-failure-{case.scenario_id}-{run_index:02d}",
+        root_cause=None,
+        conclusion_status=ConclusionStatus.UNDETERMINED,
+        confidence=0,
+        evidence_ids=(),
+        evidence_types=(),
+        claims=(),
+        causal_chain=(),
+        affected_services=(),
+        root_cause_candidates=candidates,
+        tool_calls=case.tool_calls,
+        investigation_steps=case.investigation_steps,
+        # 这是一次真实 Provider 调用尝试，但没有获得可用输出。
+        llm_calls=1,
+        latency_ms=0,
+        total_tokens=0,
+        estimated_cost=0,
+    )
+
+
 def _build_reasoning(case: LiveScenarioInput) -> RootCauseReasoningResult:
-    return RootCauseReasoningPipeline().reason(
+    return RootCauseReasoningPipeline(
+        strict_entity_resolution=True,
+        safe_unknown_resolution=True,
+    ).reason(
         incident_service=case.service_name,
         incident_summary=case.summary,
         evidence=tuple(
@@ -949,6 +1092,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="reject synthetic suites and require the full 12-scenario run",
     )
+    parser.add_argument(
+        "--continue-on-provider-error",
+        action="store_true",
+        help="把单次 Provider 契约/传输失败保留为未确定失败样本，继续整批实验",
+    )
     args = parser.parse_args(argv)
     api_key = os.getenv(args.api_key_env)
     if not api_key:
@@ -981,6 +1129,7 @@ def main(argv: list[str] | None = None) -> int:
                     max_retries=args.max_retries,
                 ),
                     require_real=args.require_real,
+                    continue_on_provider_error=args.continue_on_provider_error,
                 )
         )
     except (AppValidationError, OSError, ValueError) as exc:

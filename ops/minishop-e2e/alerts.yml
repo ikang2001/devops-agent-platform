@@ -43,3 +43,283 @@ groups:
           service_name: inventory-service
         annotations:
           summary: inventory-service database timeout detected
+
+      - alert: MiniShopPaymentConfigRegression
+        expr: minishop_fault_enabled{service_name="payment-service",fault_type="config_regression"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: payment-service
+        annotations:
+          summary: payment-service configuration regression
+
+      - alert: MiniShopInventoryRedisLatency
+        expr: minishop_fault_enabled{service_name="inventory-service",fault_type="redis_latency"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: inventory-service
+        annotations:
+          summary: inventory Redis latency is high
+
+      - alert: MiniShopCheckoutPoolExhaustion
+        expr: minishop_fault_enabled{service_name="checkout-service",fault_type="connection_pool_exhaustion"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: checkout-service
+        annotations:
+          summary: checkout connection pool exhausted
+
+      - alert: MiniShopPaymentProviderTimeout
+        expr: minishop_fault_enabled{service_name="payment-service",fault_type="third_party_api_timeout"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: payment-service
+        annotations:
+          summary: payment provider timeout
+
+      - alert: MiniShopCheckoutCascade
+        expr: minishop_fault_enabled{service_name="checkout-service",fault_type="cascading_failure"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: checkout-service
+        annotations:
+          summary: checkout downstream cascade
+
+      - alert: MiniShopKnownPaymentError
+        expr: minishop_fault_enabled{service_name="payment-service",fault_type="known_error_repeat"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: payment-service
+        annotations:
+          summary: known payment error repeated
+
+      - alert: MiniShopMisleadingPaymentHistory
+        expr: minishop_fault_enabled{service_name="payment-service",fault_type="misleading_history"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: payment-service
+        annotations:
+          summary: payment incident resembles old provider timeout
+
+      - alert: MiniShopFalsePositiveCheckout
+        expr: minishop_fault_enabled{service_name="checkout-service",fault_type="false_positive_alert"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: checkout-service
+        annotations:
+          summary: checkout alert with no customer impact
+
+      - alert: HoldoutCrossZoneNetworkAlertNoImpact
+        expr: minishop_holdout_fault_enabled{service_name="shipping-quote-api",fault_type="network_alert_no_impact"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: shipping-quote-api
+        annotations:
+          summary: shipping-quote-api operational anomaly requires investigation
+
+      - alert: HoldoutDnsResolutionFailure
+        expr: minishop_holdout_fault_enabled{service_name="pricing-api",fault_type="dns_failure"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: pricing-api
+        annotations:
+          summary: pricing-api operational anomaly requires investigation
+
+      - alert: HoldoutElasticsearchQueryLatency
+        expr: minishop_holdout_fault_enabled{service_name="catalog-search-api",fault_type="query_latency"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: catalog-search-api
+        annotations:
+          summary: catalog-search-api operational anomaly requires investigation
+
+      - alert: HoldoutMemoryLeakGcPause
+        expr: minishop_holdout_fault_enabled{service_name="search-api",fault_type="gc_pause"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: search-api
+        annotations:
+          summary: search-api operational anomaly requires investigation
+
+      - alert: HoldoutMongodbConnectionTimeout
+        expr: minishop_holdout_fault_enabled{service_name="profile-api",fault_type="connection_timeout"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: profile-api
+        annotations:
+          summary: profile-api operational anomaly requires investigation
+
+      - alert: HoldoutMysqlLockContention
+        expr: minishop_holdout_fault_enabled{service_name="cart-api",fault_type="lock_contention"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: cart-api
+        annotations:
+          summary: cart-api operational anomaly requires investigation
+
+      - alert: HoldoutObjectStorageThrottling
+        expr: minishop_holdout_fault_enabled{service_name="invoice-api",fault_type="storage_throttling"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: invoice-api
+        annotations:
+          summary: invoice-api operational anomaly requires investigation
+
+      - alert: HoldoutRabbitmqConsumerBacklog
+        expr: minishop_holdout_fault_enabled{service_name="notification-worker",fault_type="consumer_backlog"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: notification-worker
+        annotations:
+          summary: notification-worker operational anomaly requires investigation
+
+      - alert: HoldoutServiceMeshRetryStorm
+        expr: minishop_holdout_fault_enabled{service_name="recommendation-api",fault_type="retry_storm"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: recommendation-api
+        annotations:
+          summary: recommendation-api operational anomaly requires investigation
+
+      - alert: HoldoutThirdPartySmsTimeout
+        expr: minishop_holdout_fault_enabled{service_name="notification-api",fault_type="vendor_timeout"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: notification-api
+        annotations:
+          summary: notification-api operational anomaly requires investigation
+
+      - alert: HoldoutPostgresqlDeadlockChain
+        expr: minishop_holdout_fault_enabled{service_name="basket-worker",fault_type="lock_contention"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: basket-worker
+        annotations:
+          summary: basket-worker operational anomaly requires investigation
+
+      - alert: HoldoutCassandraSessionDeadline
+        expr: minishop_holdout_fault_enabled{service_name="account-profile-worker",fault_type="connection_timeout"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: account-profile-worker
+        annotations:
+          summary: account-profile-worker operational anomaly requires investigation
+
+      - alert: HoldoutNatsDeliveryLag
+        expr: minishop_holdout_fault_enabled{service_name="email-dispatch-worker",fault_type="consumer_backlog"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: email-dispatch-worker
+        annotations:
+          summary: email-dispatch-worker operational anomaly requires investigation
+
+      - alert: HoldoutServiceDiscoveryLookupDeadline
+        expr: minishop_holdout_fault_enabled{service_name="promotion-engine-api",fault_type="dns_failure"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: promotion-engine-api
+        annotations:
+          summary: promotion-engine-api operational anomaly requires investigation
+
+      - alert: HoldoutSidecarRetryAmplification
+        expr: minishop_holdout_fault_enabled{service_name="personalization-worker",fault_type="retry_storm"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: personalization-worker
+        annotations:
+          summary: personalization-worker operational anomaly requires investigation
+
+      - alert: HoldoutBlobStoreRateLimit
+        expr: minishop_holdout_fault_enabled{service_name="receipt-generator-api",fault_type="storage_throttling"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: receipt-generator-api
+        annotations:
+          summary: receipt-generator-api operational anomaly requires investigation
+
+      - alert: HoldoutTaxProviderResponseDeadline
+        expr: minishop_holdout_fault_enabled{service_name="tax-calculator-worker",fault_type="vendor_timeout"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: tax-calculator-worker
+        annotations:
+          summary: tax-calculator-worker operational anomaly requires investigation
+
+      - alert: HoldoutHeapThrashingPause
+        expr: minishop_holdout_fault_enabled{service_name="product-indexer-worker",fault_type="gc_pause"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: product-indexer-worker
+        annotations:
+          summary: product-indexer-worker operational anomaly requires investigation
+
+      - alert: HoldoutOpensearchShardLatency
+        expr: minishop_holdout_fault_enabled{service_name="product-discovery-worker",fault_type="query_latency"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: product-discovery-worker
+        annotations:
+          summary: product-discovery-worker operational anomaly requires investigation
+
+      - alert: HoldoutInterRegionLinkAlertNoImpact
+        expr: minishop_holdout_fault_enabled{service_name="fulfillment-router-worker",fault_type="network_alert_no_impact"} > 0
+        for: 2s
+        labels:
+          severity: P1
+          tenant_id: demo
+          service_name: fulfillment-router-worker
+        annotations:
+          summary: fulfillment-router-worker operational anomaly requires investigation

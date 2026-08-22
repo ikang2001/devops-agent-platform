@@ -1,0 +1,51 @@
+{
+  "alert_mapping": {
+    "alert_name": "MiniShopCheckoutHighLatency",
+    "external_event_id_prefix": "minishop-checkout-latency",
+    "fingerprint": "minishop:checkout-service:high-latency",
+    "platform_severity": "CRITICAL",
+    "service_name": "checkout-service",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "checkout-service p95 latency is higher than 1s"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "json_body": {},
+    "method": "POST",
+    "path": "/faults/reset"
+  },
+  "description": "Inject deterministic latency inside checkout-service while downstream services continue to succeed.",
+  "fault_type": "latency",
+  "injection": {
+    "expected_status": 200,
+    "fault_type": "latency",
+    "json_body": {
+      "created_by": "scenario-runner",
+      "delay_ms": 1200,
+      "duration_seconds": 300
+    },
+    "method": "POST",
+    "path": "/faults/checkout-latency",
+    "service_name": "checkout-service"
+  },
+  "scenario_id": "checkout-latency",
+  "schema_version": "1.0",
+  "service_name": "checkout-service",
+  "title": "Checkout self latency exceeds the alert threshold",
+  "trigger": {
+    "expected_status": 200,
+    "json_body": {
+      "idempotency_key": "scenario-checkout-latency",
+      "items": [
+        {
+          "quantity": 1,
+          "sku": "sku-checkout-001"
+        }
+      ],
+      "user_id": "scenario-checkout-user"
+    },
+    "method": "POST",
+    "path": "/checkout"
+  }
+}

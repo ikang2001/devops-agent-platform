@@ -1,0 +1,57 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "product-discovery-worker",
+      "catalog-gateway"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "opensearch-warm-tier",
+        "to_node": "product-discovery-worker"
+      },
+      {
+        "from_node": "product-discovery-worker",
+        "to_node": "catalog-gateway"
+      }
+    ],
+    "expected_conclusion_status": "CANDIDATE",
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "logs.query@v1",
+      "traces.query@v1",
+      "topology.query@v1"
+    ],
+    "forbidden_claims": [
+      "The holdout answer is known from the scenario manifest.",
+      "Data corruption is confirmed without direct evidence."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "KNOWLEDGE",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "opensearch-shard-latency-evidence-1",
+      "opensearch-shard-latency-evidence-2",
+      "opensearch-shard-latency-evidence-3",
+      "opensearch-shard-latency-evidence-4"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "LOG",
+      "TRACE",
+      "TOPOLOGY"
+    ],
+    "root_cause": {
+      "root_cause_resource": "opensearch-warm-tier",
+      "root_cause_type": "dependency_latency",
+      "service_name": "product-discovery-worker"
+    }
+  },
+  "scenario_id": "opensearch-shard-latency",
+  "schema_version": "1.0"
+}

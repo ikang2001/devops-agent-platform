@@ -23,6 +23,9 @@ class RunScore:
     scenario_id: str
     run_id: str
     passed: bool
+    ground_truth_root_type: str | None
+    ground_truth_root_resource: str | None
+    prediction_confidence: float
     root_service_correct: bool
     root_type_correct: bool
     root_resource_correct: bool
@@ -93,6 +96,8 @@ class Summary:
     undetermined_precision: float | None
     undetermined_recall: float | None
     no_actionable_root_cause_accuracy: float | None
+    calibration_ece: float
+    brier_score: float
     evidence_precision: float
     evidence_recall: float
     required_evidence_id_recall: float | None
@@ -216,6 +221,17 @@ class BenchmarkScorer:
             scenario_id=prediction.scenario_id,
             run_id=prediction.run_id,
             passed=passed,
+            ground_truth_root_type=(
+                ground_truth.root_cause.type
+                if ground_truth.root_cause is not None
+                else None
+            ),
+            ground_truth_root_resource=(
+                ground_truth.root_cause.resource
+                if ground_truth.root_cause is not None
+                else None
+            ),
+            prediction_confidence=prediction.confidence,
             root_service_correct=root_service_correct,
             root_type_correct=root_type_correct,
             root_resource_correct=root_resource_correct,
@@ -506,6 +522,7 @@ def summarize_scores(scores: tuple[RunScore, ...]) -> Summary:
         return precision, recall
 
     latencies = sorted(item.latency_ms for item in scores)
+    calibration_ece, brier_score = _calibration_metrics(scores)
     p50_index = max(ceil(len(latencies) * 0.5) - 1, 0)
     p95_index = ceil(len(latencies) * 0.95) - 1
     return Summary(
@@ -530,6 +547,8 @@ def summarize_scores(scores: tuple[RunScore, ...]) -> Summary:
         no_actionable_root_cause_accuracy=status_metrics(
             "NO_ACTIONABLE_ROOT_CAUSE"
         )[1],
+        calibration_ece=calibration_ece,
+        brier_score=brier_score,
         evidence_precision=average("evidence_precision"),
         evidence_recall=average("evidence_recall"),
         required_evidence_id_recall=optional_average(
@@ -553,3 +572,25 @@ def summarize_scores(scores: tuple[RunScore, ...]) -> Summary:
         p50_latency_ms=latencies[p50_index],
         p95_latency_ms=latencies[p95_index],
     )
+
+
+def _calibration_metrics(scores: tuple[RunScore, ...]) -> tuple[float, float]:
+    """计算 10-bin ECE 与 Top-1 正确性的 Brier Score。"""
+
+    bin_count = 10
+    bins: list[list[RunScore]] = [[] for _ in range(bin_count)]
+    for score in scores:
+        index = min(int(score.prediction_confidence * bin_count), bin_count - 1)
+        bins[index].append(score)
+    ece = 0.0
+    for bucket in bins:
+        if not bucket:
+            continue
+        confidence = mean(item.prediction_confidence for item in bucket)
+        accuracy = mean(float(item.rca_exact_match) for item in bucket)
+        ece += len(bucket) / len(scores) * abs(confidence - accuracy)
+    brier = mean(
+        (item.prediction_confidence - float(item.rca_exact_match)) ** 2
+        for item in scores
+    )
+    return ece, brier

@@ -1,0 +1,51 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "promotion-engine-api",
+      "purchase-gateway"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "discovery.internal",
+        "to_node": "promotion-engine-api"
+      },
+      {
+        "from_node": "promotion-engine-api",
+        "to_node": "purchase-gateway"
+      }
+    ],
+    "expected_conclusion_status": "CANDIDATE",
+    "expected_tool_types": [
+      "logs.query@v1",
+      "traces.query@v1"
+    ],
+    "forbidden_claims": [
+      "The holdout answer is known from the scenario manifest.",
+      "Data corruption is confirmed without direct evidence."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "KNOWLEDGE",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "service-discovery-lookup-deadline-evidence-1",
+      "service-discovery-lookup-deadline-evidence-2"
+    ],
+    "required_evidence_types": [
+      "LOG",
+      "TRACE"
+    ],
+    "root_cause": {
+      "root_cause_resource": "discovery.internal",
+      "root_cause_type": "dependency_timeout",
+      "service_name": "promotion-engine-api"
+    }
+  },
+  "scenario_id": "service-discovery-lookup-deadline",
+  "schema_version": "1.0"
+}

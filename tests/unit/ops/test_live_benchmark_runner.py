@@ -360,6 +360,91 @@ async def test_live_runner_retries_transient_provider_transport_error(
     assert result["summary"]["total_runs"] == 1
 
 
+@pytest.mark.asyncio
+async def test_live_runner_keeps_provider_schema_failure_as_failed_sample(
+    tmp_path: Path,
+) -> None:
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"content": "not valid json"}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                },
+            )
+        )
+    )
+    try:
+        result = await run_live_benchmark(
+            scenario_directory=SCENARIO_ROOT,
+            input_path=write_input(tmp_path, live_input()),
+            output_directory=tmp_path / "artifacts",
+            git_commit="42665bd",
+            runs_per_scenario=1,
+            scenario_id="payment-error",
+            config=LiveLLMConfig(
+                base_url="http://llm.test/v1",
+                api_key=SecretStr("test-key"),
+                provider="reference",
+                model="synthetic-test",
+                allow_insecure_http=True,
+            ),
+            http_client=client,
+            continue_on_provider_error=True,
+        )
+    finally:
+        await client.aclose()
+
+    assert result["summary"]["total_runs"] == 1
+    assert result["summary"]["rca_top1_accuracy"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_live_runner_keeps_unknown_evidence_reference_as_failed_sample(
+    tmp_path: Path,
+) -> None:
+    output = llm_output()
+    output["evidence_ids"] = ["provider-invented-evidence"]
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    "choices":[{"message":{"content": json.dumps(output)}}],
+                    "usage":{"prompt_tokens": 1, "completion_tokens": 1},
+                },
+            )
+        )
+    )
+    try:
+        result = await run_live_benchmark(
+            scenario_directory=SCENARIO_ROOT,
+            input_path=write_input(tmp_path, live_input()),
+            output_directory=tmp_path / "artifacts",
+            git_commit="42665bd",
+            runs_per_scenario=1,
+            scenario_id="payment-error",
+            config=LiveLLMConfig(
+                base_url="http://llm.test/v1",
+                api_key=SecretStr("test-key"),
+                provider="reference",
+                model="synthetic-test",
+                allow_insecure_http=True,
+            ),
+            http_client=client,
+            continue_on_provider_error=True,
+        )
+    finally:
+        await client.aclose()
+
+    assert result["summary"]["total_runs"] == 1
+    assert result["summary"]["rca_top1_accuracy"] == 0.0
+    assert (tmp_path / "artifacts" / "provider-failures.json").is_file()
+    assert result["execution"]["provider_failure_count"] == 1
+    assert (tmp_path / "artifacts" / "provider-failures.json").is_file()
+
+
 def test_live_input_rejects_ground_truth_at_any_depth(tmp_path: Path) -> None:
     document = live_input()
     cases = document["cases"]
@@ -510,3 +595,252 @@ async def test_live_runner_rejects_unknown_selected_candidate(tmp_path: Path) ->
             )
     finally:
         await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_live_runner_bounds_arbitrary_root_to_top_candidate(
+    tmp_path: Path,
+) -> None:
+    output = llm_output()
+    output["root_cause"] = {
+        "service": "checkout-service",
+        "type": "latency",
+        "resource": "invented-resource",
+    }
+    output["claims"] = [
+        {
+            "claim_type": "ROOT_CAUSE",
+            "statement": "An arbitrary unsupported root cause.",
+            "evidence_ids": [],
+        }
+    ]
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"content": json.dumps(output)}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                },
+            )
+        )
+    )
+    try:
+        result = await run_live_benchmark(
+            scenario_directory=SCENARIO_ROOT,
+            input_path=write_input(tmp_path, live_input()),
+            output_directory=tmp_path / "artifacts",
+            git_commit="42665bd",
+            runs_per_scenario=1,
+            scenario_id="payment-error",
+            config=LiveLLMConfig(
+                base_url="http://llm.test/v1",
+                api_key=SecretStr("test-key"),
+                provider="reference",
+                model="synthetic-test",
+                allow_insecure_http=True,
+            ),
+            http_client=client,
+        )
+    finally:
+        await client.aclose()
+
+    assert result["summary"]["rca_top1_accuracy"] == 1.0
+    assert result["summary"]["unsupported_claim_rate"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_live_runner_closes_evidence_ids_over_claim_references(
+    tmp_path: Path,
+) -> None:
+    output = llm_output()
+    output["evidence_ids"] = ["ev-log"]
+    output["claims"] = [
+        {
+            "claim_type": "ROOT_CAUSE",
+            "statement": "The trace supports the selected root cause.",
+            "evidence_ids": ["ev-trace"],
+        }
+    ]
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"content": json.dumps(output)}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                },
+            )
+        )
+    )
+    try:
+        result = await run_live_benchmark(
+            scenario_directory=SCENARIO_ROOT,
+            input_path=write_input(tmp_path, live_input()),
+            output_directory=tmp_path / "artifacts",
+            git_commit="42665bd",
+            runs_per_scenario=1,
+            scenario_id="payment-error",
+            config=LiveLLMConfig(
+                base_url="http://llm.test/v1",
+                api_key=SecretStr("test-key"),
+                provider="reference",
+                model="synthetic-test",
+                allow_insecure_http=True,
+            ),
+            http_client=client,
+        )
+    finally:
+        await client.aclose()
+
+    assert result["summary"]["unsupported_claim_rate"] == 0.0
+    predictions = json.loads(
+        (tmp_path / "artifacts" / "predictions.json").read_text(encoding="utf-8")
+    )
+    assert "ev-trace" in predictions["runs"][0]["evidence_ids"]
+
+
+@pytest.mark.asyncio
+async def test_live_runner_downgrades_arbitrary_root_without_candidates(
+    tmp_path: Path,
+) -> None:
+    document = live_input()
+    case = document["cases"][0]  # type: ignore[index]
+    case["summary"] = "operational anomaly requires investigation"
+    case["evidence"] = [
+        {
+            "evidence_id": "ev-log",
+            "evidence_type": "LOG",
+            "source": "loki",
+            "summary": "logs collected; service.name=payment-service",
+        },
+        {
+            "evidence_id": "ev-metric",
+            "evidence_type": "METRIC",
+            "source": "prometheus",
+            "summary": "metrics collected; service.name=payment-service",
+        },
+        {
+            "evidence_id": "ev-trace",
+            "evidence_type": "TRACE",
+            "source": "tempo",
+            "summary": "traces collected; service.name=payment-service",
+        },
+    ]
+    output = llm_output()
+    output["confidence"] = 0.9
+    output["evidence_ids"] = ["ev-metric", "ev-trace"]
+    output["claims"] = []
+    output["causal_chain"] = []
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"content": json.dumps(output)}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                },
+            )
+        )
+    )
+    try:
+        await run_live_benchmark(
+            scenario_directory=SCENARIO_ROOT,
+            input_path=write_input(tmp_path, document),
+            output_directory=tmp_path / "artifacts",
+            git_commit="42665bd",
+            runs_per_scenario=1,
+            scenario_id="payment-error",
+            config=LiveLLMConfig(
+                base_url="http://llm.test/v1",
+                api_key=SecretStr("test-key"),
+                provider="reference",
+                model="synthetic-test",
+                allow_insecure_http=True,
+            ),
+            http_client=client,
+        )
+    finally:
+        await client.aclose()
+
+    predictions = json.loads(
+        (tmp_path / "artifacts" / "predictions.json").read_text(encoding="utf-8")
+    )
+    prediction = predictions["runs"][0]
+    assert prediction["root_cause"] is None
+    assert prediction["conclusion_status"] == "UNDETERMINED"
+    assert prediction["confidence"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_live_runner_requires_candidate_for_no_actionable_conclusion(
+    tmp_path: Path,
+) -> None:
+    document = live_input()
+    case = document["cases"][0]  # type: ignore[index]
+    case["summary"] = "operational anomaly requires investigation"
+    case["evidence"] = [
+        {
+            "evidence_id": "ev-log",
+            "evidence_type": "LOG",
+            "source": "loki",
+            "summary": "logs collected; service.name=payment-service",
+        },
+        {
+            "evidence_id": "ev-metric",
+            "evidence_type": "METRIC",
+            "source": "prometheus",
+            "summary": "metrics collected; service.name=payment-service",
+        },
+        {
+            "evidence_id": "ev-trace",
+            "evidence_type": "TRACE",
+            "source": "tempo",
+            "summary": "traces collected; service.name=payment-service",
+        },
+    ]
+    output = llm_output()
+    output["root_cause"] = None
+    output["conclusion_status"] = "NO_ACTIONABLE_ROOT_CAUSE"
+    output["confidence"] = 0.9
+    output["evidence_ids"] = ["ev-log", "ev-metric", "ev-trace"]
+    output["claims"] = []
+    output["causal_chain"] = []
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"content": json.dumps(output)}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                },
+            )
+        )
+    )
+    try:
+        await run_live_benchmark(
+            scenario_directory=SCENARIO_ROOT,
+            input_path=write_input(tmp_path, document),
+            output_directory=tmp_path / "artifacts",
+            git_commit="42665bd",
+            runs_per_scenario=1,
+            scenario_id="payment-error",
+            config=LiveLLMConfig(
+                base_url="http://llm.test/v1",
+                api_key=SecretStr("test-key"),
+                provider="reference",
+                model="synthetic-test",
+                allow_insecure_http=True,
+            ),
+            http_client=client,
+        )
+    finally:
+        await client.aclose()
+
+    predictions = json.loads(
+        (tmp_path / "artifacts" / "predictions.json").read_text(encoding="utf-8")
+    )
+    prediction = predictions["runs"][0]
+    assert prediction["root_cause"] is None
+    assert prediction["conclusion_status"] == "UNDETERMINED"
+    assert prediction["confidence"] == 0.0

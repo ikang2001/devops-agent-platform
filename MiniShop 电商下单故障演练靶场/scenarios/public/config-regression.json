@@ -1,0 +1,50 @@
+{
+  "alert_mapping": {
+    "alert_name": "MiniShopPaymentConfigRegression",
+    "external_event_id_prefix": "minishop-config-regression",
+    "fingerprint": "minishop:payment-service:config-regression",
+    "platform_severity": "CRITICAL",
+    "service_name": "payment-service",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "payment-service configuration regression"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "json_body": {},
+    "method": "POST",
+    "path": "/faults/reset"
+  },
+  "description": "Inject an invalid payment configuration and exercise checkout.",
+  "fault_type": "config_regression",
+  "injection": {
+    "expected_status": 200,
+    "fault_type": "config_regression",
+    "json_body": {
+      "created_by": "scenario-runner",
+      "duration_seconds": 300
+    },
+    "method": "POST",
+    "path": "/faults/config-regression",
+    "service_name": "payment-service"
+  },
+  "scenario_id": "config-regression",
+  "schema_version": "1.0",
+  "service_name": "payment-service",
+  "title": "Payment configuration regression",
+  "trigger": {
+    "expected_status": 200,
+    "json_body": {
+      "idempotency_key": "scenario-config-regression",
+      "items": [
+        {
+          "quantity": 1,
+          "sku": "sku-config-001"
+        }
+      ],
+      "user_id": "scenario-config-user"
+    },
+    "method": "POST",
+    "path": "/checkout"
+  }
+}

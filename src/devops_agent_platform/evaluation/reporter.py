@@ -59,6 +59,8 @@ def render_evaluation_report(
         f"{_percent_or_na(summary.undetermined_recall)} |",
         f"| No Actionable Root Cause Accuracy | "
         f"{_percent_or_na(summary.no_actionable_root_cause_accuracy)} |",
+        f"| Calibration ECE | {_decimal_or_na(summary.calibration_ece)} |",
+        f"| Brier Score | {_decimal_or_na(summary.brier_score)} |",
         f"| Evidence Precision | {_percent(summary.evidence_precision)} |",
         f"| Evidence Recall | {_percent(summary.evidence_recall)} |",
         f"| Required Evidence ID Recall | "

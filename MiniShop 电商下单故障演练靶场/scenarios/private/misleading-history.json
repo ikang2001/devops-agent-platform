@@ -1,0 +1,53 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "payment-service",
+      "checkout-service"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "payment-service",
+        "to_node": "checkout-service"
+      }
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "traces.query@v1",
+      "knowledge.search@v1"
+    ],
+    "forbidden_claims": [
+      "The old provider timeout is confirmed as the current root cause."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "KNOWLEDGE",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "ev-history-metric",
+      "ev-history-trace"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "TRACE"
+    ],
+    "root_cause": {
+      "category": "misleading_history",
+      "causal_chain": [
+        "A similar history is retrieved.",
+        "Current payment evidence identifies the live fault."
+      ],
+      "fault_type": "misleading_history",
+      "root_cause_resource": "payment-service",
+      "root_cause_type": "application_error",
+      "runbook_path": "runbooks/payment-5xx-spike.md",
+      "service_name": "payment-service",
+      "summary": "Current payment evidence outweighs a similar but unrelated historical incident."
+    }
+  },
+  "scenario_id": "misleading-history",
+  "schema_version": "1.0"
+}
