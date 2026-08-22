@@ -230,7 +230,7 @@ git diff --check
 ```powershell
 uv build --out-dir dist
 uv run python scripts/check-release-version.py `
-  --tag v0.6.0 --dist-dir dist
+  --tag v0.7.0 --dist-dir dist
 ```
 
 CI 发布流程会生成 wheel、sdist、SBOM 和 SHA256 校验和，并使用 Annotated Tag 关联版本说明。
