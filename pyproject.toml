@@ -1,6 +1,6 @@
 [project]
 name = "devops-agent-platform"
-version = "0.6.0"
+version = "0.7.0"
 description = "Production-oriented DevOps troubleshooting Agent platform."
 requires-python = ">=3.11"
 dependencies = [
