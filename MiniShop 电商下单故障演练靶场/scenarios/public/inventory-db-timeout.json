@@ -1,0 +1,51 @@
+{
+  "alert_mapping": {
+    "alert_name": "MiniShopInventoryDbTimeout",
+    "external_event_id_prefix": "minishop-inventory-db-timeout",
+    "fingerprint": "minishop:inventory-service:db-timeout",
+    "platform_severity": "CRITICAL",
+    "service_name": "inventory-service",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "inventory-service database timeout detected"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "json_body": {},
+    "method": "POST",
+    "path": "/faults/reset"
+  },
+  "description": "Inject inventory database latency that deterministically raises DB_TIMEOUT and propagates to checkout.",
+  "fault_type": "db_timeout",
+  "injection": {
+    "expected_status": 200,
+    "fault_type": "db_timeout",
+    "json_body": {
+      "created_by": "scenario-runner",
+      "delay_ms": 1200,
+      "duration_seconds": 300
+    },
+    "method": "POST",
+    "path": "/faults/inventory-db-timeout",
+    "service_name": "inventory-service"
+  },
+  "scenario_id": "inventory-db-timeout",
+  "schema_version": "1.0",
+  "service_name": "inventory-service",
+  "title": "Inventory database timeout breaks checkout",
+  "trigger": {
+    "expected_status": 503,
+    "json_body": {
+      "idempotency_key": "scenario-inventory-db-timeout",
+      "items": [
+        {
+          "quantity": 1,
+          "sku": "sku-inventory-001"
+        }
+      ],
+      "user_id": "scenario-inventory-user"
+    },
+    "method": "POST",
+    "path": "/checkout"
+  }
+}

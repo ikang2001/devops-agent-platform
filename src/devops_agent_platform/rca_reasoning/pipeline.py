@@ -36,8 +36,18 @@ _DIRECT_TYPES = {
 class RootCauseReasoningPipeline:
     """在调用 LLM 前生成有限、可解释且确定性排序的候选。"""
 
-    def __init__(self, normalizer: EvidenceNormalizer | None = None) -> None:
-        self._normalizer = normalizer or EvidenceNormalizer()
+    def __init__(
+        self,
+        normalizer: EvidenceNormalizer | None = None,
+        *,
+        strict_entity_resolution: bool = False,
+        safe_unknown_resolution: bool = False,
+    ) -> None:
+        self._normalizer = normalizer or EvidenceNormalizer(
+            legacy_resource_fallback=not strict_entity_resolution,
+            safe_unknown_resolution=safe_unknown_resolution,
+        )
+        self._safe_unknown_resolution = safe_unknown_resolution
 
     def reason(
         self,
@@ -69,6 +79,11 @@ class RootCauseReasoningPipeline:
     ) -> tuple[RootCauseCandidate, ...]:
         grouped: dict[RootCauseIdentity, list[NormalizedEvidence]] = defaultdict(list)
         for item in evidence:
+            if (
+                self._safe_unknown_resolution
+                and item.inferred_type is RootCauseType.UNKNOWN
+            ):
+                continue
             identity = RootCauseIdentity(
                 service=item.service,
                 root_type=item.inferred_type,

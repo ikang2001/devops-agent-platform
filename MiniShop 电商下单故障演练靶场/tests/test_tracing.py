@@ -126,6 +126,20 @@ def test_inventory_timeout_marks_inventory_span_error(
     assert span.attributes["error.type"] == "DB_TIMEOUT"
 
 
+def test_unknown_holdout_service_gets_its_own_trace_resource(
+    in_memory_tracing: TracingFixture,
+) -> None:
+    tracing, exporters, _ = in_memory_tracing
+
+    with tracing.tracer("pricing-api").start_as_current_span("holdout.request"):
+        pass
+
+    span = next(
+        span for span in finished_spans(exporters) if span.name == "holdout.request"
+    )
+    assert span.resource.attributes["service.name"] == "pricing-api"
+
+
 def test_payment_error_marks_payment_span_error(
     in_memory_tracing: TracingFixture,
 ) -> None:

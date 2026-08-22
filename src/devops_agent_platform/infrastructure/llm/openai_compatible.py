@@ -20,7 +20,11 @@ _SYSTEM_INSTRUCTIONS = (
     "candidate set, select only a supplied candidate, and explain its support "
     "and contradictions. Current evidence outweighs history; a recent change "
     "is correlation unless a post-change signal shift supports causality. Never "
-    "claim that a root cause is confirmed."
+    "claim that a root cause is confirmed. Keep status and selection consistent: "
+    "UNDETERMINED requires selected_candidate_id and root_cause to both be null; "
+    "CANDIDATE requires both to identify the same supplied actionable candidate; "
+    "NO_ACTIONABLE_ROOT_CAUSE requires the supplied no-action candidate and a null "
+    "root_cause. Prefer recommended_status when it satisfies these invariants."
 )
 
 

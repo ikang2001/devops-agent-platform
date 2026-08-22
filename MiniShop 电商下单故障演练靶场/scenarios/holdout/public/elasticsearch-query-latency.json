@@ -1,0 +1,43 @@
+{
+  "alert_mapping": {
+    "alert_name": "HoldoutElasticsearchQueryLatency",
+    "platform_severity": "CRITICAL",
+    "service_name": "catalog-search-api",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "catalog-search-api operational anomaly requires investigation"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "method": "POST",
+    "path": "/holdout/faults/reset"
+  },
+  "description": "Hidden holdout scenario for black-box generalization.",
+  "environment": {
+    "benchmark_split": "hidden_holdout",
+    "composite_fault": true,
+    "no_actionable_root_cause": false,
+    "resource_system": "elasticsearch-hot-tier",
+    "service_name_randomization": true,
+    "topology_variant": "fan-out"
+  },
+  "fault_type": "query_latency",
+  "injection": {
+    "expected_status": 200,
+    "json_body": {
+      "duration_seconds": 60,
+      "executor": "blackbox"
+    },
+    "method": "POST",
+    "path": "/holdout/faults/elasticsearch-query-latency"
+  },
+  "scenario_id": "elasticsearch-query-latency",
+  "schema_version": "1.0",
+  "service_name": "catalog-search-api",
+  "title": "Elasticsearch query latency with distractors",
+  "trigger": {
+    "expected_status": 503,
+    "method": "POST",
+    "path": "/holdout/checkout-gateway/request"
+  }
+}

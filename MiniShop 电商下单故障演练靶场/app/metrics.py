@@ -27,6 +27,16 @@ FAULT_ENABLED = Gauge(
     "Whether a MiniShop fault is currently enabled",
     ["service_name", "fault_type"],
 )
+HOLDOUT_FAULT_ENABLED = Gauge(
+    "minishop_holdout_fault_enabled",
+    "Whether a hidden-holdout fault is currently enabled",
+    ["service_name", "fault_type"],
+)
+HOLDOUT_REQUEST_TOTAL = Counter(
+    "minishop_holdout_request_total",
+    "Hidden-holdout requests handled by the fault lab",
+    ["service_name", "fault_type"],
+)
 PAYMENT_ERROR_TOTAL = Counter(
     "minishop_payment_error_total",
     "Payment service injected errors",
@@ -67,6 +77,10 @@ for _service_name in (
     "notification-service",
 ):
     SERVICE_UP.labels(settings.tenant_id, _service_name).set(1)
+
+
+def ensure_service_up(service_name: str) -> None:
+    SERVICE_UP.labels(settings.tenant_id, service_name).set(1)
 
 
 def observe_http_request(

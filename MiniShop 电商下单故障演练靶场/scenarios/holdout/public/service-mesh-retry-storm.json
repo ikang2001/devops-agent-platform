@@ -1,0 +1,43 @@
+{
+  "alert_mapping": {
+    "alert_name": "HoldoutServiceMeshRetryStorm",
+    "platform_severity": "CRITICAL",
+    "service_name": "recommendation-api",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "recommendation-api operational anomaly requires investigation"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "method": "POST",
+    "path": "/holdout/faults/reset"
+  },
+  "description": "Hidden holdout scenario for black-box generalization.",
+  "environment": {
+    "benchmark_split": "hidden_holdout",
+    "composite_fault": false,
+    "no_actionable_root_cause": false,
+    "resource_system": "mesh-egress",
+    "service_name_randomization": true,
+    "topology_variant": "mesh-egress"
+  },
+  "fault_type": "retry_storm",
+  "injection": {
+    "expected_status": 200,
+    "json_body": {
+      "duration_seconds": 60,
+      "executor": "blackbox"
+    },
+    "method": "POST",
+    "path": "/holdout/faults/service-mesh-retry-storm"
+  },
+  "scenario_id": "service-mesh-retry-storm",
+  "schema_version": "1.0",
+  "service_name": "recommendation-api",
+  "title": "Service mesh retry storm",
+  "trigger": {
+    "expected_status": 503,
+    "method": "POST",
+    "path": "/holdout/checkout-gateway/request"
+  }
+}

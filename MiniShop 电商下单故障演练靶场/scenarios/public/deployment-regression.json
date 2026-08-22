@@ -1,0 +1,51 @@
+{
+  "alert_mapping": {
+    "alert_name": "MiniShopPaymentDeploymentRegression",
+    "external_event_id_prefix": "minishop-deployment-regression",
+    "fingerprint": "minishop:payment-service:deployment-regression",
+    "platform_severity": "CRITICAL",
+    "service_name": "payment-service",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "payment-service errors increased after the v2 deployment"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "json_body": {},
+    "method": "POST",
+    "path": "/faults/reset"
+  },
+  "description": "Record a payment-service v1 to v2 deployment, inject a deterministic v2 regression, and require corroborated Change, Metric, Log, and Trace evidence.",
+  "fault_type": "deployment_regression",
+  "injection": {
+    "expected_status": 200,
+    "fault_type": "deployment_regression",
+    "json_body": {
+      "created_by": "scenario-runner",
+      "duration_seconds": 300,
+      "error_rate": 1.0
+    },
+    "method": "POST",
+    "path": "/faults/deployment-regression",
+    "service_name": "payment-service"
+  },
+  "scenario_id": "deployment-regression",
+  "schema_version": "1.0",
+  "service_name": "payment-service",
+  "title": "Payment v2 deployment regression",
+  "trigger": {
+    "expected_status": 500,
+    "json_body": {
+      "idempotency_key": "scenario-deployment-regression",
+      "items": [
+        {
+          "quantity": 1,
+          "sku": "sku-deployment-001"
+        }
+      ],
+      "user_id": "scenario-deployment-user"
+    },
+    "method": "POST",
+    "path": "/checkout"
+  }
+}

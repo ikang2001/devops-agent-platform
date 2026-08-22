@@ -17,6 +17,12 @@ _OPTIONAL_FIELDS = (
     "duration_ms",
     "worker_id",
     "consecutive_failures",
+    "outcome",
+    "tenant_id",
+    "incident_id",
+    "workflow_run_id",
+    "execution_attempt",
+    "reason",
 )
 _MESSAGE_LIMIT = 4096
 _EXCEPTION_MESSAGE_LIMIT = 2048

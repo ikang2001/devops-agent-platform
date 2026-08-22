@@ -1,0 +1,53 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "payment-service",
+      "checkout-service"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "payment-service/config",
+        "to_node": "payment-service"
+      }
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "traces.query@v1"
+    ],
+    "forbidden_claims": [
+      "Inventory database is the root cause."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "LOG",
+      "CHANGE",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "ev-config-metric",
+      "ev-config-trace"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "TRACE"
+    ],
+    "root_cause": {
+      "category": "configuration_regression",
+      "causal_chain": [
+        "Configuration is changed.",
+        "Payment observes the invalid value."
+      ],
+      "fault_type": "config_regression",
+      "root_cause_resource": "payment-service/config",
+      "root_cause_type": "configuration_error",
+      "runbook_path": "runbooks/payment-5xx-spike.md",
+      "service_name": "payment-service",
+      "summary": "Payment configuration is inconsistent with the running checkout contract."
+    }
+  },
+  "scenario_id": "config-regression",
+  "schema_version": "1.0"
+}

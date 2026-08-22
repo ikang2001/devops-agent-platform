@@ -1,0 +1,53 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "recommendation-api",
+      "checkout-gateway"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "mesh-egress",
+        "to_node": "recommendation-api"
+      },
+      {
+        "from_node": "recommendation-api",
+        "to_node": "checkout-gateway"
+      }
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "logs.query@v1",
+      "topology.query@v1"
+    ],
+    "forbidden_claims": [
+      "The holdout answer is known from the scenario manifest.",
+      "Data corruption is confirmed without direct evidence."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "KNOWLEDGE",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "service-mesh-retry-storm-evidence-1",
+      "service-mesh-retry-storm-evidence-2",
+      "service-mesh-retry-storm-evidence-3"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "LOG",
+      "TOPOLOGY"
+    ],
+    "root_cause": {
+      "root_cause_resource": "mesh-egress",
+      "root_cause_type": "resource_exhaustion",
+      "service_name": "recommendation-api"
+    }
+  },
+  "scenario_id": "service-mesh-retry-storm",
+  "schema_version": "1.0"
+}

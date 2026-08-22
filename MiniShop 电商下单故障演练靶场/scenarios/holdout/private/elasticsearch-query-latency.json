@@ -1,0 +1,57 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "catalog-search-api",
+      "checkout-gateway"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "elasticsearch-hot-tier",
+        "to_node": "catalog-search-api"
+      },
+      {
+        "from_node": "catalog-search-api",
+        "to_node": "checkout-gateway"
+      }
+    ],
+    "expected_conclusion_status": "CANDIDATE",
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "logs.query@v1",
+      "traces.query@v1",
+      "topology.query@v1"
+    ],
+    "forbidden_claims": [
+      "The holdout answer is known from the scenario manifest.",
+      "Data corruption is confirmed without direct evidence."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "KNOWLEDGE",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "elasticsearch-query-latency-evidence-1",
+      "elasticsearch-query-latency-evidence-2",
+      "elasticsearch-query-latency-evidence-3",
+      "elasticsearch-query-latency-evidence-4"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "LOG",
+      "TRACE",
+      "TOPOLOGY"
+    ],
+    "root_cause": {
+      "root_cause_resource": "elasticsearch-hot-tier",
+      "root_cause_type": "dependency_latency",
+      "service_name": "catalog-search-api"
+    }
+  },
+  "scenario_id": "elasticsearch-query-latency",
+  "schema_version": "1.0"
+}

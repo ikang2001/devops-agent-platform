@@ -1,0 +1,53 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "search-api",
+      "checkout-gateway"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "search-api-memory",
+        "to_node": "search-api"
+      },
+      {
+        "from_node": "search-api",
+        "to_node": "checkout-gateway"
+      }
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "logs.query@v1",
+      "traces.query@v1"
+    ],
+    "forbidden_claims": [
+      "The holdout answer is known from the scenario manifest.",
+      "Data corruption is confirmed without direct evidence."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "KNOWLEDGE",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "memory-leak-gc-pause-evidence-1",
+      "memory-leak-gc-pause-evidence-2",
+      "memory-leak-gc-pause-evidence-3"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "LOG",
+      "TRACE"
+    ],
+    "root_cause": {
+      "root_cause_resource": "search-api-memory",
+      "root_cause_type": "resource_exhaustion",
+      "service_name": "search-api"
+    }
+  },
+  "scenario_id": "memory-leak-gc-pause",
+  "schema_version": "1.0"
+}

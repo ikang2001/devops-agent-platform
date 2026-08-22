@@ -1,0 +1,51 @@
+{
+  "alert_mapping": {
+    "alert_name": "MiniShopFalsePositiveCheckout",
+    "external_event_id_prefix": "minishop-false-positive",
+    "fingerprint": "minishop:checkout-service:false-positive",
+    "platform_severity": "WARNING",
+    "service_name": "checkout-service",
+    "source": "alertmanager",
+    "source_severity": "P2",
+    "summary": "checkout alert with no customer impact"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "json_body": {},
+    "method": "POST",
+    "path": "/faults/reset"
+  },
+  "description": "Inject alert metadata without a real checkout fault; RCA must avoid inventing a root cause.",
+  "fault_type": "false_positive_alert",
+  "injection": {
+    "expected_status": 200,
+    "fault_type": "false_positive_alert",
+    "json_body": {
+      "created_by": "scenario-runner",
+      "duration_seconds": 300,
+      "error_rate": 0.0
+    },
+    "method": "POST",
+    "path": "/faults/false-positive-alert",
+    "service_name": "checkout-service"
+  },
+  "scenario_id": "false-positive-alert",
+  "schema_version": "1.0",
+  "service_name": "checkout-service",
+  "title": "False positive checkout alert",
+  "trigger": {
+    "expected_status": 200,
+    "json_body": {
+      "idempotency_key": "scenario-false-positive",
+      "items": [
+        {
+          "quantity": 1,
+          "sku": "sku-false-positive-001"
+        }
+      ],
+      "user_id": "scenario-false-positive-user"
+    },
+    "method": "POST",
+    "path": "/checkout"
+  }
+}

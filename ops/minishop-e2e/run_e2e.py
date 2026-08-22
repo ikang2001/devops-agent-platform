@@ -24,6 +24,28 @@ from app.scenario_manifest import (
 
 TERMINAL_WORKFLOW_STATES = {"SUCCEEDED", "FAILED", "CANCELED"}
 REQUIRED_PLATFORM_EVIDENCE = {"CHANGE", "METRIC", "LOG", "TRACE", "RUNBOOK"}
+BASE_RUNBOOKS = {
+    "deployment_regression": (
+        "change-regression",
+        "Investigate recent deployment or configuration changes and require "
+        "corroborating live evidence before attribution.",
+    ),
+    "config_regression": (
+        "change-regression",
+        "Investigate recent deployment or configuration changes and require "
+        "corroborating live evidence before attribution.",
+    ),
+    "db_timeout": (
+        "dependency-timeout",
+        "Compare dependency latency, errors, logs, traces and topology using "
+        "read-only tools.",
+    ),
+    "third_party_api_timeout": (
+        "dependency-timeout",
+        "Compare dependency latency, errors, logs, traces and topology using "
+        "read-only tools.",
+    ),
+}
 EXPECTED_SCENARIOS = {
     "checkout-latency",
     "deployment-regression",
@@ -120,6 +142,12 @@ class SignalEvaluator:
             "loki": lambda: self._loki(signal.locator, started_at),
             "tempo": lambda: self._tempo(signal.locator, started_at),
             "change": lambda: self._change(platform_evidence),
+            "topology": lambda: any(
+                item.get("evidence_type") == "TOPOLOGY" for item in platform_evidence
+            ),
+            "knowledge": lambda: any(
+                item.get("evidence_type") == "KNOWLEDGE" for item in platform_evidence
+            ),
         }
         passed = wait_for(
             f"signal {signal.evidence_id}",
@@ -282,10 +310,16 @@ class MiniShopE2ERunner:
 
     def _publish_runbooks(self, scenarios: list[ScenarioManifest]) -> None:
         for scenario in scenarios:
-            if scenario.ground_truth.root_cause is None:
-                continue
             runbook_key = f"minishop-{scenario.scenario_id}"
             base = self._admin_url(f"runbooks/{runbook_key}/versions/v1")
+            _, base_summary = BASE_RUNBOOKS.get(
+                scenario.fault_type,
+                (
+                    "resource-saturation",
+                    "Establish the affected service and resource from structured "
+                    "telemetry before selecting a candidate.",
+                ),
+            )
             draft = self.http.request(
                 "PUT",
                 f"{base}/draft",
@@ -294,11 +328,15 @@ class MiniShopE2ERunner:
                 ),
                 json={
                     "service_name": scenario.service_name,
-                    "title": scenario.title,
-                    "summary": scenario.ground_truth.root_cause.summary,
+                    "title": f"{scenario.fault_type} investigation baseline",
+                    "summary": base_summary,
                     "priority": 100,
-                    "steps": scenario.ground_truth.root_cause.causal_chain,
-                    "tags": ["minishop", scenario.fault_type, "e2e"],
+                    "steps": [
+                        "Check live metrics for the incident time window.",
+                        "Correlate logs and traces using request identifiers.",
+                        "Query topology and stop when evidence is insufficient.",
+                    ],
+                    "tags": ["base-runbook", scenario.fault_type, "e2e"],
                 },
             )
             draft_data = self._require_platform_success(draft, "save runbook draft")

@@ -91,7 +91,15 @@ def _safe_project_path(value: str) -> str:
 ApiPath = Annotated[str, AfterValidator(_safe_api_path)]
 RunbookPath = Annotated[str, AfterValidator(_safe_project_path)]
 FaultService = Literal["checkout-service", "inventory-service", "payment-service"]
-EvidenceSource = Literal["change", "http", "loki", "prometheus", "tempo"]
+EvidenceSource = Literal[
+    "change",
+    "http",
+    "knowledge",
+    "loki",
+    "prometheus",
+    "tempo",
+    "topology",
+]
 BenchmarkEvidenceType = Literal[
     "METRIC",
     "LOG",
@@ -108,6 +116,8 @@ EVIDENCE_TYPE_BY_SOURCE: Dict[str, str] = {
     "loki": "LOG",
     "prometheus": "METRIC",
     "tempo": "TRACE",
+    "topology": "TOPOLOGY",
+    "knowledge": "KNOWLEDGE",
 }
 
 

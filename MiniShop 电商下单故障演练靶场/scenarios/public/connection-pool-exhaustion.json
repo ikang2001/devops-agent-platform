@@ -1,0 +1,51 @@
+{
+  "alert_mapping": {
+    "alert_name": "MiniShopCheckoutPoolExhaustion",
+    "external_event_id_prefix": "minishop-pool-exhaustion",
+    "fingerprint": "minishop:checkout-service:pool-exhaustion",
+    "platform_severity": "CRITICAL",
+    "service_name": "checkout-service",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "checkout connection pool exhausted"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "json_body": {},
+    "method": "POST",
+    "path": "/faults/reset"
+  },
+  "description": "Exercise the bounded checkout connection pool fault.",
+  "fault_type": "connection_pool_exhaustion",
+  "injection": {
+    "expected_status": 200,
+    "fault_type": "connection_pool_exhaustion",
+    "json_body": {
+      "created_by": "scenario-runner",
+      "duration_seconds": 300,
+      "error_rate": 1.0
+    },
+    "method": "POST",
+    "path": "/faults/connection-pool-exhaustion",
+    "service_name": "checkout-service"
+  },
+  "scenario_id": "connection-pool-exhaustion",
+  "schema_version": "1.0",
+  "service_name": "checkout-service",
+  "title": "Checkout connection pool exhaustion",
+  "trigger": {
+    "expected_status": 200,
+    "json_body": {
+      "idempotency_key": "scenario-connection-pool",
+      "items": [
+        {
+          "quantity": 1,
+          "sku": "sku-pool-001"
+        }
+      ],
+      "user_id": "scenario-pool-user"
+    },
+    "method": "POST",
+    "path": "/checkout"
+  }
+}

@@ -347,6 +347,36 @@ async def test_public_evidence_fields_fall_back_when_control_chars_appear() -> N
     assert result.invocations[0].output_summary == evidence.summary
 
 
+def test_observability_summary_keeps_bounded_diagnostic_facts() -> None:
+    summary = ControlledAgentWorkflow._build_evidence_summary(
+        "logs.query",
+        "loki",
+        {
+            "target": {"service_name": "pricing-api"},
+            "signals": [
+                {
+                    "entries": [
+                        {
+                            "line": (
+                                'service_name="pricing-api" '
+                                'fault_type="dns_failure" '
+                                "request to pricing.internal failed "
+                                "api_key=private-key"
+                            )
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+
+    assert "service.name=pricing-api" in summary
+    assert 'fault_type="dns_failure"' in summary
+    assert "request to pricing.internal failed" in summary
+    assert "private-key" not in summary
+    assert "api_key=[REDACTED]" in summary
+
+
 async def test_unsafe_evidence_structure_fails_current_tool() -> None:
     """违反结构策略的结果应形成失败审计并停止后续步骤。"""
     events: list[str] = []

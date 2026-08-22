@@ -1,0 +1,50 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "pricing-api",
+      "checkout-gateway"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "pricing.internal",
+        "to_node": "pricing-api"
+      },
+      {
+        "from_node": "pricing-api",
+        "to_node": "checkout-gateway"
+      }
+    ],
+    "expected_tool_types": [
+      "logs.query@v1",
+      "traces.query@v1"
+    ],
+    "forbidden_claims": [
+      "The holdout answer is known from the scenario manifest.",
+      "Data corruption is confirmed without direct evidence."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "KNOWLEDGE",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "dns-resolution-failure-evidence-1",
+      "dns-resolution-failure-evidence-2"
+    ],
+    "required_evidence_types": [
+      "LOG",
+      "TRACE"
+    ],
+    "root_cause": {
+      "root_cause_resource": "pricing.internal",
+      "root_cause_type": "dependency_timeout",
+      "service_name": "pricing-api"
+    }
+  },
+  "scenario_id": "dns-resolution-failure",
+  "schema_version": "1.0"
+}

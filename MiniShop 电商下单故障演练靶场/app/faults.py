@@ -1,10 +1,54 @@
 import random
 import threading
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 from app.models import FaultRecord
+
+
+@dataclass(frozen=True)
+class FaultEvidenceMetadata:
+    error_type: str
+    resource_name: str | None
+
+
+_FAULT_EVIDENCE_METADATA = {
+    "payment_error": FaultEvidenceMetadata("payment_error", None),
+    "deployment_regression": FaultEvidenceMetadata(
+        "deployment_regression", "payment-service:v2"
+    ),
+    "db_timeout": FaultEvidenceMetadata("db_timeout", "postgres"),
+    "latency": FaultEvidenceMetadata("latency", "checkout-service:latency-fault"),
+    "config_regression": FaultEvidenceMetadata(
+        "config_regression", "payment-service/config"
+    ),
+    "redis_latency": FaultEvidenceMetadata("redis_latency", "redis"),
+    "connection_pool_exhaustion": FaultEvidenceMetadata(
+        "connection_pool_exhaustion", "checkout-db-pool"
+    ),
+    "third_party_api_timeout": FaultEvidenceMetadata(
+        "provider_timeout", "payment-provider"
+    ),
+    "cascading_failure": FaultEvidenceMetadata(
+        "cascading_failure", "checkout-service"
+    ),
+    "known_error_repeat": FaultEvidenceMetadata("known_error", "payment-service"),
+    "misleading_history": FaultEvidenceMetadata(
+        "application_error", "payment-service"
+    ),
+    "false_positive_alert": FaultEvidenceMetadata("false_positive", "alert-rule"),
+    "cpu_saturation": FaultEvidenceMetadata("resource_exhaustion", "checkout-cpu"),
+    "memory_pressure": FaultEvidenceMetadata("memory_pressure", "checkout-memory"),
+}
+
+
+def fault_evidence_metadata(fault_type: str) -> FaultEvidenceMetadata:
+    return _FAULT_EVIDENCE_METADATA.get(
+        fault_type,
+        FaultEvidenceMetadata(fault_type, None),
+    )
 
 
 def utcnow() -> datetime:

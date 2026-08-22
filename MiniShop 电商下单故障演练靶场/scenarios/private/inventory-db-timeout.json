@@ -1,0 +1,67 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "inventory-service",
+      "checkout-service"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "postgres",
+        "to_node": "inventory-service"
+      },
+      {
+        "from_node": "inventory-service",
+        "to_node": "checkout-service"
+      }
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "logs.query@v1",
+      "traces.query@v1",
+      "runbooks.retrieve@v1"
+    ],
+    "forbidden_claims": [
+      "Database corruption is confirmed.",
+      "Database connection pool exhaustion is confirmed.",
+      "payment-service caused the checkout failure."
+    ],
+    "forbidden_tool_types": [
+      "remediation.execute@v1",
+      "shell"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "HTTP",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "ev-inventory-fault-enabled",
+      "ev-inventory-timeout-counter",
+      "ev-inventory-timeout-log",
+      "ev-inventory-checkout-log",
+      "ev-inventory-timeout-trace"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "LOG",
+      "TRACE"
+    ],
+    "root_cause": {
+      "category": "injected_inventory_database_timeout",
+      "causal_chain": [
+        "The scenario runner enables db_timeout with a 1200 ms delay.",
+        "Checkout asks inventory-service to reserve the requested item.",
+        "inventory-service waits for the injected delay and raises DB_TIMEOUT.",
+        "checkout-service reports CHECKOUT_DOWNSTREAM_FAILURE for inventory-service and returns HTTP 503."
+      ],
+      "fault_type": "db_timeout",
+      "root_cause_resource": "postgres",
+      "root_cause_type": "dependency_timeout",
+      "runbook_path": "runbooks/inventory-db-timeout.md",
+      "service_name": "inventory-service",
+      "summary": "The db_timeout fault delays inventory-service and raises DB_TIMEOUT, causing checkout to fail downstream."
+    }
+  },
+  "scenario_id": "inventory-db-timeout",
+  "schema_version": "1.0"
+}

@@ -2,11 +2,29 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
-from app.faults import fault_state
+from app.faults import fault_evidence_metadata, fault_state
+from app.holdout import holdout_fault_state
+from app.logging import log_event
 from app.metrics import clear_fault_gauges, set_fault_enabled
-from app.models import FaultControlRequest
+from app.models import FaultControlRequest, FaultRecord
 
 router = APIRouter()
+
+
+def _publish_fault_observation(record: FaultRecord, endpoint: str) -> None:
+    metadata = fault_evidence_metadata(record.fault_type)
+    set_fault_enabled(record.service_name, record.fault_type, True)
+    log_event(
+        level="WARNING",
+        service_name=record.service_name,
+        endpoint=endpoint,
+        method="POST",
+        status_code=200,
+        fault_type=record.fault_type,
+        error_type=metadata.error_type,
+        resource_name=metadata.resource_name,
+        message="fault injection control-plane event is active",
+    )
 
 
 @router.get("/faults")
@@ -25,7 +43,7 @@ async def enable_payment_error(request: Optional[FaultControlRequest] = None):
         duration_seconds=payload.duration_seconds,
         created_by=payload.created_by,
     )
-    set_fault_enabled(record.service_name, record.fault_type, True)
+    _publish_fault_observation(record, "/faults/payment-error")
     return {"fault": record}
 
 
@@ -42,7 +60,7 @@ async def enable_deployment_regression(
         duration_seconds=payload.duration_seconds,
         created_by=payload.created_by,
     )
-    set_fault_enabled(record.service_name, record.fault_type, True)
+    _publish_fault_observation(record, "/faults/deployment-regression")
     return {"fault": record}
 
 
@@ -57,7 +75,7 @@ async def enable_inventory_db_timeout(request: Optional[FaultControlRequest] = N
         duration_seconds=payload.duration_seconds,
         created_by=payload.created_by,
     )
-    set_fault_enabled(record.service_name, record.fault_type, True)
+    _publish_fault_observation(record, "/faults/inventory-db-timeout")
     return {"fault": record}
 
 
@@ -72,7 +90,7 @@ async def enable_checkout_latency(request: Optional[FaultControlRequest] = None)
         duration_seconds=payload.duration_seconds,
         created_by=payload.created_by,
     )
-    set_fault_enabled(record.service_name, record.fault_type, True)
+    _publish_fault_observation(record, "/faults/checkout-latency")
     return {"fault": record}
 
 
@@ -80,7 +98,11 @@ async def enable_checkout_latency(request: Optional[FaultControlRequest] = None)
 async def reset_faults():
     records = fault_state.reset()
     clear_fault_gauges(records)
-    return {"reset": True, "cleared": len(records)}
+    return {
+        "reset": True,
+        "cleared": len(records),
+        "holdout_cleared": holdout_fault_state.reset(),
+    }
 
 
 _GENERIC_FAULTS = {
@@ -115,5 +137,5 @@ async def enable_generic_fault(
         duration_seconds=payload.duration_seconds,
         created_by=payload.created_by,
     )
-    set_fault_enabled(record.service_name, record.fault_type, True)
+    _publish_fault_observation(record, f"/faults/{fault_name}")
     return {"fault": record}

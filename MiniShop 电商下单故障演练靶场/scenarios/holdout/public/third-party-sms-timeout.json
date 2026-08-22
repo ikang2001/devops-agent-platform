@@ -1,0 +1,43 @@
+{
+  "alert_mapping": {
+    "alert_name": "HoldoutThirdPartySmsTimeout",
+    "platform_severity": "CRITICAL",
+    "service_name": "notification-api",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "notification-api operational anomaly requires investigation"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "method": "POST",
+    "path": "/holdout/faults/reset"
+  },
+  "description": "Hidden holdout scenario for black-box generalization.",
+  "environment": {
+    "benchmark_split": "hidden_holdout",
+    "composite_fault": false,
+    "no_actionable_root_cause": false,
+    "resource_system": "sms-provider",
+    "service_name_randomization": true,
+    "topology_variant": "single-zone"
+  },
+  "fault_type": "vendor_timeout",
+  "injection": {
+    "expected_status": 200,
+    "json_body": {
+      "duration_seconds": 60,
+      "executor": "blackbox"
+    },
+    "method": "POST",
+    "path": "/holdout/faults/third-party-sms-timeout"
+  },
+  "scenario_id": "third-party-sms-timeout",
+  "schema_version": "1.0",
+  "service_name": "notification-api",
+  "title": "Third-party SMS timeout",
+  "trigger": {
+    "expected_status": 503,
+    "method": "POST",
+    "path": "/holdout/order-api/request"
+  }
+}

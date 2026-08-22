@@ -71,6 +71,7 @@ class RootCauseCandidateRef(_Model):
     supporting_evidence_ids: tuple[str, ...] = ()
     contradicting_evidence_ids: tuple[str, ...] = ()
     source_evidence_types: tuple[EvidenceType, ...] = ()
+    missing_evidence: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def validate_candidate(self) -> RootCauseCandidateRef:
@@ -84,6 +85,8 @@ class RootCauseCandidateRef(_Model):
             raise ValueError("support and contradiction evidence must be disjoint")
         if len(self.source_evidence_types) != len(set(self.source_evidence_types)):
             raise ValueError("source_evidence_types must be unique")
+        if len(self.missing_evidence) != len(set(self.missing_evidence)):
+            raise ValueError("missing_evidence must be unique")
         return self
 
 
@@ -134,6 +137,7 @@ class RCAPrediction(_Model):
     """
 
     scenario_id: str = Field(min_length=1, max_length=64)
+    incident_id: str | None = Field(default=None, min_length=1, max_length=128)
     run_id: str = Field(min_length=1, max_length=128)
     root_cause: RootCauseRef | None
     conclusion_status: ConclusionStatus

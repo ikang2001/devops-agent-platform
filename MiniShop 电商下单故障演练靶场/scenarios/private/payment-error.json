@@ -1,0 +1,62 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "payment-service",
+      "checkout-service"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "payment-service",
+        "to_node": "checkout-service"
+      }
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "logs.query@v1",
+      "traces.query@v1",
+      "runbooks.retrieve@v1"
+    ],
+    "forbidden_claims": [
+      "A named third-party payment provider is confirmed globally unavailable.",
+      "Inventory or database failure caused the payment error.",
+      "The customer was charged despite the failed payment."
+    ],
+    "forbidden_tool_types": [
+      "remediation.execute@v1",
+      "shell"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "HTTP",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "ev-payment-fault-enabled",
+      "ev-payment-error-counter",
+      "ev-payment-error-log",
+      "ev-payment-error-trace"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "LOG",
+      "TRACE"
+    ],
+    "root_cause": {
+      "category": "injected_payment_gateway_error",
+      "causal_chain": [
+        "The scenario runner enables payment_error with an error rate of 1.0.",
+        "Checkout reaches payment-service after inventory reservation succeeds.",
+        "payment-service emits PAYMENT_GATEWAY_ERROR and returns HTTP 500.",
+        "The checkout request propagates the payment failure to the caller."
+      ],
+      "fault_type": "payment_error",
+      "root_cause_resource": null,
+      "root_cause_type": "application_error",
+      "runbook_path": "runbooks/payment-5xx-spike.md",
+      "service_name": "payment-service",
+      "summary": "The payment_error fault forces payment-service to return PAYMENT_GATEWAY_ERROR during checkout."
+    }
+  },
+  "scenario_id": "payment-error",
+  "schema_version": "1.0"
+}

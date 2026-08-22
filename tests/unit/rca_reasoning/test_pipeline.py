@@ -92,6 +92,34 @@ def test_recent_change_without_signal_shift_remains_undetermined() -> None:
     assert result.recommended_status is ReasoningDecisionStatus.UNDETERMINED
 
 
+def test_safe_unknown_resolution_does_not_create_candidate() -> None:
+    result = RootCauseReasoningPipeline(
+        strict_entity_resolution=True,
+        safe_unknown_resolution=True,
+    ).reason(
+        incident_service="checkout-service",
+        incident_summary="operational anomaly requires investigation",
+        evidence=(
+            ReasoningEvidence(
+                evidence_id="ev-metric",
+                evidence_type=ReasoningEvidenceType.METRIC,
+                source="prometheus",
+                summary="metrics collected; service.name=checkout-service",
+            ),
+            ReasoningEvidence(
+                evidence_id="ev-trace",
+                evidence_type=ReasoningEvidenceType.TRACE,
+                source="tempo",
+                summary="traces collected; service.name=checkout-service",
+            ),
+        ),
+    )
+
+    assert result.candidates == ()
+    assert result.recommended_status is ReasoningDecisionStatus.UNDETERMINED
+    assert result.calibrated_confidence == 0.0
+
+
 def test_change_plus_post_change_error_produces_deployment_candidate() -> None:
     result = RootCauseReasoningPipeline().reason(
         incident_service="payment-service",

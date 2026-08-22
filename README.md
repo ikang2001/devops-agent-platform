@@ -15,7 +15,7 @@
 - 工作流可靠性：Transactional Outbox、Kafka/Redpanda、Claim、Lease、Heartbeat、Owner/Attempt Fence 和 Checkpoint/Resume；
 - 处置治理：工单草稿、人工反馈、双人审批、动作白名单、租约和回滚边界；
 - 平台接口：Workspace 管理、Dataset Release、HTTP MCP Adapter 和组织级评测资产；
-- 评测与演练：MiniShop 故障靶场、12 个 Scenario Manifest、Ground Truth、真实 Provider Benchmark、五变体消融和容量/Chaos Harness；
+- 评测与演练：MiniShop 故障靶场、Known Black-box E2E、Public/Private Scenario Split、Hidden Holdout 泛化、Benchmark Integrity 和容量/Chaos Harness；
 - 可观测性：RCA 完成率、工具调用、LLM 成本、Lease 回收、Partial Report、Outbox 和 Consumer Lag 指标。
 
 ## 系统架构
@@ -124,6 +124,22 @@ uv run pytest -q
 
 ## RCA Benchmark
 
+v0.7 将评测分为 Contract、Known Black-box E2E、Hidden Generalization 三层。Contract
+夹具只验证协议和评分器；Known/Hidden 的正式指标必须来自真实 Fault Injection、平台
+Workflow terminal、Runtime Evidence、ToolInvocation 和真实 Provider。当前工作区提供
+Public/Private 目录、10 个 Hidden Holdout、真实 Holdout Fault Router、扰动 Runner、
+Leakage Guard、黑盒 Runtime Snapshot 和报告生成器。任何准确率、成本或延迟数字都必须
+从对应正式输出目录的 `results.json`/`benchmark-provenance.json` 读取后再发布。
+
+2026-08-22 本地正式批次已完成并由 `resume-metrics.json` 自动汇总：Known Clean
+60 次 RCA Top-1 为 96.67%，Hidden Holdout 50 次为 86.00%，Generalization Gap
+为 10.67pp；同源 Clean 为 90.00%，30% Noise 为 86.00%（下降 4.00pp）。
+Unsupported Claim 与 Cross-Incident Evidence Leak 均为 0。Missing Logs 的 50 次
+输出全部安全降级为 `UNDETERMINED`、0 置信度且未产生 `application_error` 硬猜；
+Multi-Incident 5/5 Pair、10/10 Workflow 成功且 RCA Top-1/Strict 100%。正式报告位于
+本机 D 盘 `v07-generalization-report-final-20260822T1230-r9` 输出目录，指标不可脱离该目录的
+`benchmark-provenance.json` 与原始 Prediction 单独引用。
+
 ### 本地结构化评测
 
 ```powershell
@@ -154,7 +170,11 @@ uv run python -m ops.evaluation.run_live_benchmark `
   --max-retries 2
 ```
 
-评测输出包括 `results.json`、`predictions.json`、`evaluation-report.md`、`bad_cases.jsonl` 和 `root-cause-error-breakdown.json`。核心指标包括 RCA Top-1、Strict RCA、Candidate Recall@3、MRR、Evidence Recall、Causal Chain F1、Blast Radius F1、Unsupported Claim、Tool Selection、Token、Cost 和 P50/P95 延迟。
+评测输出包括 `results.json`、`predictions.json`、`evaluation-report.md`、`bad_cases.jsonl`、
+`root-cause-error-breakdown.json` 和（正式 v0.7 运行）`benchmark-provenance.json`。核心指标包括
+RCA Top-1、Strict RCA、Root Service/Type/Resource、Candidate Recall@3、MRR、Evidence Recall、
+Causal Chain F1、Blast Radius F1、Unsupported/Forbidden Claim、False Confirmation、Undetermined
+Precision/Recall、Calibration ECE/Brier、Tool Selection、Token、Cost 和 P50/P95 延迟。
 
 ## 生产级本地仿真
 
@@ -179,7 +199,7 @@ uv run python -m ops.simulation.run_simulation `
 | Evidence / 因果链 / 影响面 | 100% / 100% / 100% |
 | RCA completion rate | 100%（1/1） |
 | 100/500/1000 alerts/min | 99.976 / 499.993 / 999.979 |
-| 全量测试 | 1910 passed, 9 skipped |
+| 全量测试 | 1930 passed, 9 skipped（本轮门禁） |
 
 完整实施过程、数据构建和测评说明见 [生产级本地仿真环境实施与测评报告.md](生产级本地仿真环境实施与测评报告.md)。五变体消融入口：
 
@@ -200,6 +220,8 @@ git diff --check
 ```
 
 本项目使用 `pytest`、`ruff`、Alembic 迁移检查、Compose 配置检查、供应链扫描、SBOM 和 Release 版本门禁。
+正式 Known 黑盒运行已完成 12 个场景 × 5 次 Fault Injection/Workflow terminal；由于本轮
+受限会话无法读取 D 盘结果目录，未把该批次的准确率或 LLM/fallback 比例写入项目指标。
 
 ## 发布
 

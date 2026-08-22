@@ -1,0 +1,61 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "checkout-service"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "checkout-service:latency-fault",
+        "to_node": "checkout-service"
+      }
+    ],
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "logs.query@v1",
+      "traces.query@v1",
+      "runbooks.retrieve@v1"
+    ],
+    "forbidden_claims": [
+      "inventory-service is the source of the latency.",
+      "payment-service is the source of the latency.",
+      "Checkout requests are failing during this scenario."
+    ],
+    "forbidden_tool_types": [
+      "remediation.execute@v1",
+      "shell"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "HTTP",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "ev-checkout-fault-enabled",
+      "ev-checkout-latency-histogram",
+      "ev-checkout-latency-log",
+      "ev-checkout-slow-trace"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "LOG",
+      "TRACE"
+    ],
+    "root_cause": {
+      "category": "injected_checkout_processing_latency",
+      "causal_chain": [
+        "The scenario runner enables checkout-service latency with a 1200 ms delay.",
+        "checkout-service waits before invoking inventory-service.",
+        "Inventory reservation, payment, and notification complete successfully.",
+        "The caller receives a successful response whose checkout self time exceeds one second."
+      ],
+      "fault_type": "latency",
+      "root_cause_resource": "checkout-service:latency-fault",
+      "root_cause_type": "latency",
+      "runbook_path": "runbooks/checkout-high-latency.md",
+      "service_name": "checkout-service",
+      "summary": "The latency fault adds 1200 ms inside checkout-service before downstream calls; inventory and payment still succeed."
+    }
+  },
+  "scenario_id": "checkout-latency",
+  "schema_version": "1.0"
+}

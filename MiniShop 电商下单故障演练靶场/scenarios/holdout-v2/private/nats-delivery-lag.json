@@ -1,0 +1,51 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "email-dispatch-worker",
+      "message-gateway"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "nats-notifications",
+        "to_node": "email-dispatch-worker"
+      },
+      {
+        "from_node": "email-dispatch-worker",
+        "to_node": "message-gateway"
+      }
+    ],
+    "expected_conclusion_status": "CANDIDATE",
+    "expected_tool_types": [
+      "metrics.query@v1",
+      "logs.query@v1"
+    ],
+    "forbidden_claims": [
+      "The holdout answer is known from the scenario manifest.",
+      "Data corruption is confirmed without direct evidence."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "KNOWLEDGE",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "nats-delivery-lag-evidence-1",
+      "nats-delivery-lag-evidence-2"
+    ],
+    "required_evidence_types": [
+      "METRIC",
+      "LOG"
+    ],
+    "root_cause": {
+      "root_cause_resource": "nats-notifications",
+      "root_cause_type": "resource_exhaustion",
+      "service_name": "email-dispatch-worker"
+    }
+  },
+  "scenario_id": "nats-delivery-lag",
+  "schema_version": "1.0"
+}

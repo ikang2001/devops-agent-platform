@@ -242,8 +242,9 @@ class TempoSearchClient:
             raise TracesSourceError("Tempo search structure is invalid")
         if len(raw_traces) > limit:
             raise TracesSourceError("Tempo returned too many traces")
-        traces = tuple(
-            self._parse_trace(item, spans_per_span_set) for item in raw_traces
+        traces, invalid_tail = self._parse_recent_trace_prefix(
+            raw_traces,
+            spans_per_span_set,
         )
         inspected_traces = self._optional_nonnegative_int(
             raw_metrics.get("inspectedTraces"),
@@ -276,8 +277,26 @@ class TempoSearchClient:
             traces=traces,
             inspected_traces=inspected_traces,
             inspected_bytes=inspected_bytes,
-            possibly_truncated=(len(traces) == limit or partial_search),
+            possibly_truncated=(
+                len(traces) == limit or partial_search or invalid_tail
+            ),
         )
+
+    def _parse_recent_trace_prefix(
+        self,
+        raw_traces: list[object],
+        spans_per_span_set: int,
+    ) -> tuple[tuple[TraceSummary, ...], bool]:
+        """保留按时间倒序的合法前缀，拒绝非法最新结果。"""
+        traces: list[TraceSummary] = []
+        for raw_trace in raw_traces:
+            try:
+                traces.append(self._parse_trace(raw_trace, spans_per_span_set))
+            except TracesSourceError:
+                if not traces:
+                    raise
+                return tuple(traces), True
+        return tuple(traces), False
 
     def _parse_trace(
         self,
@@ -293,6 +312,7 @@ class TempoSearchClient:
         start_time = raw_trace.get("startTimeUnixNano")
         duration_ms = raw_trace.get("durationMs")
         normalized_trace_id = self._normalize_trace_id(trace_id)
+        normalized_duration = 0.0 if duration_ms is None else duration_ms
         if (
             normalized_trace_id is None
             or not self._valid_name(root_service_name)
@@ -300,10 +320,10 @@ class TempoSearchClient:
             or not isinstance(start_time, str)
             or not start_time.isdigit()
             or not 1 <= len(start_time) <= 20
-            or isinstance(duration_ms, bool)
-            or not isinstance(duration_ms, int | float)
-            or not math.isfinite(float(duration_ms))
-            or float(duration_ms) < 0
+            or isinstance(normalized_duration, bool)
+            or not isinstance(normalized_duration, int | float)
+            or not math.isfinite(float(normalized_duration))
+            or float(normalized_duration) < 0
         ):
             raise TracesSourceError("Tempo trace summary is invalid")
         span_sets = raw_trace.get("spanSets", [])
@@ -329,7 +349,7 @@ class TempoSearchClient:
             root_service_name=root_service_name,
             root_trace_name=root_trace_name,
             start_time_unix_nano=start_time,
-            duration_ms=float(duration_ms),
+            duration_ms=float(normalized_duration),
             matched_spans=matched_spans,
         )
 

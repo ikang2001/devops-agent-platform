@@ -1,0 +1,51 @@
+{
+  "alert_mapping": {
+    "alert_name": "MiniShopInventoryRedisLatency",
+    "external_event_id_prefix": "minishop-redis-latency",
+    "fingerprint": "minishop:inventory-service:redis-latency",
+    "platform_severity": "CRITICAL",
+    "service_name": "inventory-service",
+    "source": "alertmanager",
+    "source_severity": "P1",
+    "summary": "inventory Redis latency is high"
+  },
+  "cleanup": {
+    "expected_status": 200,
+    "json_body": {},
+    "method": "POST",
+    "path": "/faults/reset"
+  },
+  "description": "Inject latency in the inventory cache dependency.",
+  "fault_type": "redis_latency",
+  "injection": {
+    "expected_status": 200,
+    "fault_type": "redis_latency",
+    "json_body": {
+      "created_by": "scenario-runner",
+      "delay_ms": 250,
+      "duration_seconds": 300
+    },
+    "method": "POST",
+    "path": "/faults/redis-latency",
+    "service_name": "inventory-service"
+  },
+  "scenario_id": "redis-latency",
+  "schema_version": "1.0",
+  "service_name": "inventory-service",
+  "title": "Inventory Redis latency",
+  "trigger": {
+    "expected_status": 200,
+    "json_body": {
+      "idempotency_key": "scenario-redis-latency",
+      "items": [
+        {
+          "quantity": 1,
+          "sku": "sku-redis-001"
+        }
+      ],
+      "user_id": "scenario-redis-user"
+    },
+    "method": "POST",
+    "path": "/checkout"
+  }
+}

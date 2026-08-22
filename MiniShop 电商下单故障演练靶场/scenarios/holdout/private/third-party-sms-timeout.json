@@ -1,0 +1,50 @@
+{
+  "ground_truth": {
+    "affected_services": [
+      "notification-api",
+      "order-api"
+    ],
+    "causal_chain": [
+      {
+        "from_node": "sms-provider",
+        "to_node": "notification-api"
+      },
+      {
+        "from_node": "notification-api",
+        "to_node": "order-api"
+      }
+    ],
+    "expected_tool_types": [
+      "logs.query@v1",
+      "traces.query@v1"
+    ],
+    "forbidden_claims": [
+      "The holdout answer is known from the scenario manifest.",
+      "Data corruption is confirmed without direct evidence."
+    ],
+    "forbidden_tool_types": [
+      "shell",
+      "remediation.execute@v1"
+    ],
+    "optional_evidence_types": [
+      "CHANGE",
+      "KNOWLEDGE",
+      "RUNBOOK"
+    ],
+    "required_evidence": [
+      "third-party-sms-timeout-evidence-1",
+      "third-party-sms-timeout-evidence-2"
+    ],
+    "required_evidence_types": [
+      "LOG",
+      "TRACE"
+    ],
+    "root_cause": {
+      "root_cause_resource": "sms-provider",
+      "root_cause_type": "dependency_timeout",
+      "service_name": "notification-api"
+    }
+  },
+  "scenario_id": "third-party-sms-timeout",
+  "schema_version": "1.0"
+}
